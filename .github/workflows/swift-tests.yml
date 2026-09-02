@@ -1,0 +1,34 @@
+name: AssemblageModel Tests
+
+# Baut und testet nur das portable Datenmodell (Sources/AssemblageModel,
+# siehe Package.swift-Kommentar) — läuft deshalb auf ubuntu-latest, weil
+# dieser Teil bewusst ohne AppKit/Core Image/Vision auskommt.
+#
+# Ein zusätzlicher macOS-Job (für die eigentliche AppKit-/Rendering-/
+# Vision-Pipeline) kommt dazu, sobald die Platzhalter-Tests in
+# Tests/AssemblageModelTests/PipelineIntegrationTests.swift durch echte
+# Implementierungen ersetzt sind — vorher würde er absichtlich rot sein.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test-model:
+    name: swift test (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0"
+
+      - name: swift build
+        run: swift build
+
+      - name: swift test
+        run: swift test
