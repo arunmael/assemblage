@@ -1,0 +1,93 @@
+<svg viewBox="0 0 320 760" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Helvetica, Arial, sans-serif">
+  <style>
+    .panel { fill: #ffffff; stroke: #d6d6d9; stroke-width: 1; }
+    .field { fill: #ffffff; stroke: #d6d6d9; stroke-width: 1; }
+    .label { fill: #333336; font-size: 12px; }
+    .label-muted { fill: #8a8a8e; font-size: 11px; }
+    .section-title { fill: #6a6a6e; font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; }
+    .track { fill: #d6d6d9; }
+    .knob { fill: #ffffff; stroke: #6ea8fe; stroke-width: 1.5; }
+    .pill { fill: #eef3ff; stroke: #6ea8fe; stroke-width: 1; }
+  </style>
+
+  <rect width="320" height="760" fill="#f4f4f5"/>
+  <rect x="20" y="20" width="280" height="720" class="panel" rx="8"/>
+
+  <text x="36" y="46" class="section-title">Eigenschaften — Bildebene</text>
+  <text x="36" y="64" class="label">„Hintergrund-Foto"</text>
+
+  <!-- Deckkraft + Blend-Modus -->
+  <line x1="36" y1="78" x2="284" y2="78" stroke="#e2e2e5"/>
+  <text x="36" y="98" class="label-muted">Deckkraft</text>
+  <rect x="36" y="106" width="184" height="4" rx="2" class="track"/>
+  <circle cx="180" cy="108" r="7" class="knob"/>
+  <text x="228" y="112" class="label">78%</text>
+
+  <text x="36" y="140" class="label-muted">Blend-Modus</text>
+  <rect class="field" x="36" y="148" width="248" height="26" rx="4"/>
+  <text x="44" y="165" class="label">Multiplizieren ▾</text>
+
+  <!-- Anpassungen (5.5) -->
+  <line x1="36" y1="192" x2="284" y2="192" stroke="#e2e2e5"/>
+  <text x="36" y="212" class="section-title">Anpassungen</text>
+
+  <text x="36" y="234" class="label-muted">Helligkeit</text>
+  <rect x="36" y="242" width="184" height="4" rx="2" class="track"/>
+  <circle cx="118" cy="244" r="7" class="knob"/>
+  <text x="228" y="248" class="label">+20%</text>
+
+  <text x="36" y="270" class="label-muted">Kontrast</text>
+  <rect x="36" y="278" width="184" height="4" rx="2" class="track"/>
+  <circle cx="100" cy="280" r="7" class="knob"/>
+  <text x="228" y="284" class="label">-10%</text>
+
+  <text x="36" y="306" class="label-muted">Sättigung</text>
+  <rect x="36" y="314" width="184" height="4" rx="2" class="track"/>
+  <circle cx="128" cy="316" r="7" class="knob"/>
+  <text x="228" y="320" class="label">0%</text>
+
+  <text x="36" y="342" class="label-muted">Wärme</text>
+  <rect x="36" y="350" width="184" height="4" rx="2" class="track"/>
+  <circle cx="148" cy="352" r="7" class="knob"/>
+  <text x="228" y="356" class="label">+30%</text>
+
+  <text x="36" y="378" class="label-muted">Weichzeichnen</text>
+  <rect x="36" y="386" width="184" height="4" rx="2" class="track"/>
+  <circle cx="90" cy="388" r="7" class="knob"/>
+  <text x="228" y="392" class="label">50%</text>
+
+  <text x="36" y="414" class="label-muted">Schärfen</text>
+  <rect x="36" y="422" width="184" height="4" rx="2" class="track"/>
+  <circle cx="60" cy="424" r="7" class="knob"/>
+  <text x="228" y="428" class="label">0%</text>
+
+  <!-- Maskierung (5.4) -->
+  <line x1="36" y1="448" x2="284" y2="448" stroke="#e2e2e5"/>
+  <text x="36" y="468" class="section-title">Maske</text>
+
+  <rect class="pill" x="36" y="478" width="120" height="26" rx="13"/>
+  <text x="96" y="495" text-anchor="middle" class="label">✂ Freistellen</text>
+  <rect class="field" x="164" y="478" width="120" height="26" rx="13"/>
+  <text x="224" y="495" text-anchor="middle" class="label">🖌 Pinsel</text>
+
+  <text x="36" y="524" class="label-muted">Quelle: Automatisch (Vision) — von Hand nachbearbeitet</text>
+
+  <text x="36" y="550" class="label-muted">☑ Aktiv</text>
+  <text x="150" y="550" class="label-muted">☐ Invertiert</text>
+
+  <text x="36" y="576" class="label-muted">Pinselgrösse</text>
+  <rect x="36" y="584" width="184" height="4" rx="2" class="track"/>
+  <circle cx="70" cy="586" r="7" class="knob"/>
+  <text x="228" y="590" class="label">24 px</text>
+
+  <text x="36" y="612" class="label-muted">Härte</text>
+  <rect x="36" y="620" width="184" height="4" rx="2" class="track"/>
+  <circle cx="160" cy="622" r="7" class="knob"/>
+  <text x="228" y="626" class="label">70%</text>
+
+  <!-- Position & Grösse -->
+  <line x1="36" y1="650" x2="284" y2="650" stroke="#e2e2e5"/>
+  <text x="36" y="670" class="section-title">Position &amp; Grösse</text>
+  <text x="36" y="694" class="label-muted">X: 0   Y: 0   B: 1080   H: 1080</text>
+  <text x="36" y="714" class="label-muted">Rotation: 0°</text>
+</svg>
