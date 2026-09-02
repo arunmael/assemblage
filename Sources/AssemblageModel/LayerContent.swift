@@ -53,12 +53,23 @@ public enum ShapeKind: String, Codable, Sendable {
 
 public struct ShapeLayerContent: Codable, Equatable, Sendable {
     public var kind: ShapeKind
+    /// Grösse der Form in Punkten, vor der Skalierung aus `Transform2D`.
+    /// Bild- und Textebenen leiten ihre Grösse aus dem Inhalt ab (Pixelmasse
+    /// bzw. Textsatz) — eine Form hat keine solche natürliche Grösse und
+    /// führt sie deshalb selbst.
+    public var size: Size
     /// Nur relevant für `.roundedRectangle`.
     public var cornerRadius: Double
     public var fillColorHex: String
 
-    public init(kind: ShapeKind, cornerRadius: Double = 0, fillColorHex: String = "#FFFFFF") {
+    public init(
+        kind: ShapeKind,
+        size: Size,
+        cornerRadius: Double = 0,
+        fillColorHex: String = "#FFFFFF"
+    ) {
         self.kind = kind
+        self.size = size
         self.cornerRadius = cornerRadius
         self.fillColorHex = fillColorHex
     }

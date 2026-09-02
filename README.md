@@ -6,7 +6,37 @@ Jedes Feature muss sich rechtfertigen. Lieber fünf Werkzeuge, die exzellent fun
 
 ## Status
 
-Frühe Konzeptphase. Der vollständige Entwicklungsplan (Vision, Feature-Set, technische Architektur, Roadmap) liegt in [`docs/entwicklungsplan.md`](docs/entwicklungsplan.md).
+**Phase 0 (Grundgerüst) steht.** Die App lässt sich bauen und starten, öffnet und sichert Dokumente und zeigt den Ebenenbaum auf einer zoombaren Leinwand. Bearbeiten kommt ab Phase 1.
+
+Der vollständige Entwicklungsplan (Vision, Feature-Set, technische Architektur, Roadmap) liegt in [`docs/entwicklungsplan.md`](docs/entwicklungsplan.md), die Regeln für die Mitarbeit in [`agent-rules.md`](agent-rules.md).
+
+## Bauen & starten
+
+```bash
+Scripts/make-app.sh          # baut .build/Assemblage.app
+open .build/Assemblage.app
+```
+
+`swift build` allein erzeugt nur die nackte ausführbare Datei. Erst das Bundle bringt App-Symbol, Dokumenttyp `.assemblage` und die `NSDocument`-Anbindung mit — Details im Kopf von [`Scripts/make-app.sh`](Scripts/make-app.sh).
+
+```bash
+swift test                   # Modell + Rendering-Pipeline
+```
+
+## Aufbau
+
+| Ziel | Inhalt |
+| --- | --- |
+| `Sources/AssemblageModel` | Reines Datenmodell — Codable-Strukturen, kein AppKit/Core Image/Vision. Läuft und testet auch unter Linux; die CI hält diese Trennung ehrlich. |
+| `Sources/AssemblageKit` | Die Mac-App: AppKit-Canvas (Core Animation), Dokumentpakete, SwiftUI-Paletten. |
+| `Sources/Assemblage` | Nur der Einstiegspunkt — damit der App-Code selbst testbar bleibt. |
+
+### Festlegungen, die überall gelten
+
+- **Koordinatensystem:** Ursprung oben links, y wächst nach unten. `Transform2D.x/y` ist der **Mittelpunkt** einer Ebene, nicht ihre obere linke Ecke.
+- **Ebenenreihenfolge:** `Document.layers[0]` liegt zuunterst; die Ebenenliste zeigt sie umgekehrt.
+- **Änderungen** laufen ausschliesslich über `AssemblageDocument.modify(_:_:)` — nur so landen sie im Undo-Stack.
+- **Dokumentformat:** Paket aus `document.json` plus `originals/` und `masks/`. Fehlende Felder mit neutralem Vorgabewert sind erlaubt, damit das Format erweiterbar bleibt.
 
 ## Lizenz
 

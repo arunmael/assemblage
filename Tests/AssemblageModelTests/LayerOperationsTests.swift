@@ -6,7 +6,7 @@ import XCTest
 /// einen Fehler werfen statt abzustürzen.
 final class LayerOperationsTests: XCTestCase {
     private func makeShapeLayer(_ name: String) -> Layer {
-        Layer(name: name, content: .shape(ShapeLayerContent(kind: .rectangle)))
+        Layer(name: name, content: .shape(ShapeLayerContent(kind: .rectangle, size: Size(width: 100, height: 100))))
     }
 
     func testAddLayerDefaultsToTop() throws {
@@ -90,8 +90,8 @@ final class LayerOperationsTests: XCTestCase {
     }
 
     func testOpacityIsClampedToValidRange() {
-        let tooHigh = Layer(name: "x", opacity: 1.5, content: .shape(ShapeLayerContent(kind: .rectangle)))
-        let tooLow = Layer(name: "y", opacity: -0.3, content: .shape(ShapeLayerContent(kind: .rectangle)))
+        let tooHigh = Layer(name: "x", opacity: 1.5, content: .shape(ShapeLayerContent(kind: .rectangle, size: Size(width: 100, height: 100))))
+        let tooLow = Layer(name: "y", opacity: -0.3, content: .shape(ShapeLayerContent(kind: .rectangle, size: Size(width: 100, height: 100))))
 
         XCTAssertEqual(tooHigh.withClampedOpacity().opacity, 1)
         XCTAssertEqual(tooLow.withClampedOpacity().opacity, 0)

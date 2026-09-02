@@ -1,13 +1,15 @@
-name: AssemblageModel Tests
+name: Tests
 
-# Baut und testet nur das portable Datenmodell (Sources/AssemblageModel,
-# siehe Package.swift-Kommentar) — läuft deshalb auf ubuntu-latest, weil
-# dieser Teil bewusst ohne AppKit/Core Image/Vision auskommt.
+# Zwei Jobs, entsprechend der Zweiteilung in Package.swift:
 #
-# Ein zusätzlicher macOS-Job (für die eigentliche AppKit-/Rendering-/
-# Vision-Pipeline) kommt dazu, sobald die Platzhalter-Tests in
-# Tests/AssemblageModelTests/PipelineIntegrationTests.swift durch echte
-# Implementierungen ersetzt sind — vorher würde er absichtlich rot sein.
+# • ubuntu — baut und testet nur das portable Datenmodell
+#   (Sources/AssemblageModel), das bewusst ohne AppKit/Core Image/Vision
+#   auskommt. Hält ehrlich, dass diese Trennung tatsächlich eingehalten wird:
+#   Schleicht sich ein Apple-Import ins Modell, wird dieser Job rot.
+#
+# • macOS — baut zusätzlich die App (AssemblageKit) und führt die Tests der
+#   Rendering-Pipeline aus (Kompositing, Dokumentpakete, später Maskierung
+#   und Export), wie Plan 2.1 sie verlangt.
 
 on:
   push:
@@ -18,7 +20,7 @@ on:
 
 jobs:
   test-model:
-    name: swift test (ubuntu)
+    name: swift test (ubuntu, nur Modell)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,3 +34,25 @@ jobs:
 
       - name: swift test
         run: swift test
+
+  test-app:
+    name: swift test (macOS, App + Pipeline)
+    # Braucht ein Abbild mit dem macOS-26-SDK, weil Package.swift genau das
+    # als Mindestversion setzt. Schlägt der Job mit „unknown deployment
+    # target" fehl, muss hier ein neueres Abbild fest eingetragen werden
+    # (z. B. macos-26) — `latest` hinkt bei GitHub oft eine Version hinterher.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: swift build
+        run: swift build
+
+      - name: swift test
+        run: swift test
+
+      # Prüft, dass das Bundle tatsächlich zusammengebaut werden kann —
+      # ein Fehler in Info.plist oder Symbolerzeugung fällt sonst erst beim
+      # Ausliefern auf.
+      - name: App-Bundle bauen
+        run: Scripts/make-app.sh release

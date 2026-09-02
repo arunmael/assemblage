@@ -50,7 +50,9 @@ public struct ImageAdjustments: Codable, Equatable, Sendable {
 }
 
 extension Comparable {
-    func clamped(to range: ClosedRange<Self>) -> Self {
+    /// Auf einen gültigen Bereich begrenzen. Wird an vielen Stellen gebraucht,
+    /// an denen ein Regler kurzzeitig ausserhalb landen kann.
+    public func clamped(to range: ClosedRange<Self>) -> Self {
         min(max(self, range.lowerBound), range.upperBound)
     }
 }

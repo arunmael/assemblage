@@ -1,0 +1,118 @@
+import AppKit
+
+/// Baut das Menü von Hand auf.
+///
+/// Eine SwiftPM-App hat kein MainMenu.nib — ohne dieses Menü gäbe es weder
+/// „Ablage › Öffnen" noch „Bearbeiten › Widerrufen", und beides ist für eine
+/// dokumentbasierte App nicht optional.
+public final class AppDelegate: NSObject, NSApplicationDelegate {
+
+    public override init() { super.init() }
+
+    public func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.mainMenu = makeMainMenu()
+    }
+
+    /// Beim Klick aufs Dock-Symbol ohne offenes Fenster: leeres Dokument
+    /// anlegen, statt gar nichts zu tun.
+    public func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool { true }
+
+    public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    // MARK: - Menüaufbau
+
+    private func makeMainMenu() -> NSMenu {
+        let mainMenu = NSMenu()
+        for menu in [appMenu(), fileMenu(), editMenu(), viewMenu(), windowMenu()] {
+            let item = NSMenuItem()
+            item.submenu = menu
+            mainMenu.addItem(item)
+        }
+        return mainMenu
+    }
+
+    private func appMenu() -> NSMenu {
+        let menu = NSMenu(title: "Assemblage")
+        menu.addItem(withTitle: "Über Assemblage", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
+
+        let services = NSMenuItem(title: "Dienste", action: nil, keyEquivalent: "")
+        services.submenu = NSMenu()
+        NSApp.servicesMenu = services.submenu
+        menu.addItem(services)
+        menu.addItem(.separator())
+
+        menu.addItem(withTitle: "Assemblage ausblenden", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = NSMenuItem(title: "Andere ausblenden", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        menu.addItem(hideOthers)
+        menu.addItem(withTitle: "Alle einblenden", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Assemblage beenden", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        return menu
+    }
+
+    private func fileMenu() -> NSMenu {
+        let menu = NSMenu(title: "Ablage")
+        menu.addItem(withTitle: "Neu", action: #selector(NSDocumentController.newDocument(_:)), keyEquivalent: "n")
+        menu.addItem(withTitle: "Öffnen…", action: #selector(NSDocumentController.openDocument(_:)), keyEquivalent: "o")
+
+        let recent = NSMenuItem(title: "Benutzte Dokumente", action: nil, keyEquivalent: "")
+        // Genau dieser Menütitel lässt AppKit die Liste selbst füllen.
+        recent.submenu = NSMenu(title: "Benutzte Dokumente")
+        recent.submenu?.addItem(withTitle: "Einträge löschen", action: #selector(NSDocumentController.clearRecentDocuments(_:)), keyEquivalent: "")
+        menu.addItem(recent)
+        menu.addItem(.separator())
+
+        menu.addItem(withTitle: "Schliessen", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        menu.addItem(withTitle: "Sichern…", action: #selector(NSDocument.save(_:)), keyEquivalent: "s")
+
+        let duplicate = NSMenuItem(title: "Duplizieren", action: #selector(NSDocument.duplicate(_:)), keyEquivalent: "s")
+        duplicate.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(duplicate)
+
+        menu.addItem(withTitle: "Zurücksetzen auf…", action: #selector(NSDocument.revertToSaved(_:)), keyEquivalent: "")
+        // „Alle Versionen durchsuchen…" — der Zeitmaschinen-Browser aus
+        // Plan 2.1, den NSDocument mitbringt.
+        menu.addItem(withTitle: "Alle Versionen durchsuchen…", action: #selector(NSDocument.browseVersions(_:)), keyEquivalent: "")
+        return menu
+    }
+
+    private func editMenu() -> NSMenu {
+        let menu = NSMenu(title: "Bearbeiten")
+        menu.addItem(withTitle: "Widerrufen", action: Selector(("undo:")), keyEquivalent: "z")
+
+        let redo = NSMenuItem(title: "Wiederholen", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(redo)
+        menu.addItem(.separator())
+
+        menu.addItem(withTitle: "Ausschneiden", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        menu.addItem(withTitle: "Kopieren", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        menu.addItem(withTitle: "Einsetzen", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        menu.addItem(withTitle: "Löschen", action: #selector(NSText.delete(_:)), keyEquivalent: "\u{8}")
+        menu.addItem(withTitle: "Alles auswählen", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        return menu
+    }
+
+    private func viewMenu() -> NSMenu {
+        let menu = NSMenu(title: "Darstellung")
+        menu.addItem(withTitle: "Einzoomen", action: #selector(DocumentWindowController.zoomIn(_:)), keyEquivalent: "+")
+        menu.addItem(withTitle: "Auszoomen", action: #selector(DocumentWindowController.zoomOut(_:)), keyEquivalent: "-")
+        menu.addItem(withTitle: "Originalgrösse", action: #selector(DocumentWindowController.zoomToActualSize(_:)), keyEquivalent: "0")
+        menu.addItem(withTitle: "Ins Fenster einpassen", action: #selector(DocumentWindowController.zoomToFit(_:)), keyEquivalent: "9")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Vollbild", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        return menu
+    }
+
+    private func windowMenu() -> NSMenu {
+        let menu = NSMenu(title: "Fenster")
+        menu.addItem(withTitle: "Im Dock ablegen", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        menu.addItem(withTitle: "Zoomen", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Alle nach vorne bringen", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        NSApp.windowsMenu = menu
+        return menu
+    }
+}

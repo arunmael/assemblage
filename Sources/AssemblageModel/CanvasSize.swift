@@ -1,7 +1,9 @@
-/// Grösse der Arbeitsfläche eines Dokuments, in Punkten.
+/// Breite × Höhe in Punkten — für die Arbeitsfläche ebenso wie für die
+/// Grösse einer Formebene.
 ///
-/// Plan-Referenz: 5.1 „Import & Canvas" — freie Leinwandgrösse + Vorlagen-Presets.
-public struct CanvasSize: Codable, Equatable, Sendable {
+/// Bewusst eigene Struktur statt `CGSize`: das Modell bleibt so
+/// plattformunabhängig (siehe Package.swift).
+public struct Size: Codable, Equatable, Sendable {
     public var width: Double
     public var height: Double
 
@@ -9,7 +11,14 @@ public struct CanvasSize: Codable, Equatable, Sendable {
         self.width = width
         self.height = height
     }
+
+    public static let zero = Size(width: 0, height: 0)
 }
+
+/// Grösse der Arbeitsfläche eines Dokuments.
+///
+/// Plan-Referenz: 5.1 „Import & Canvas" — freie Leinwandgrösse + Vorlagen-Presets.
+public typealias CanvasSize = Size
 
 /// Vordefinierte Canvas-Vorlagen aus Plan-Abschnitt 5.1.
 /// `.custom` deckt frei gewählte Grössen ab.

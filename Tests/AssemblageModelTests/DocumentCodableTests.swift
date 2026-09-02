@@ -29,7 +29,7 @@ final class DocumentCodableTests: XCTestCase {
             ))
         )
         let textLayer = Layer(name: "Titel", content: .text(TextLayerContent(string: "Assemblage", fontSize: 72, alignment: .center)))
-        let shapeLayer = Layer(name: "Rahmen", content: .shape(ShapeLayerContent(kind: .roundedRectangle, cornerRadius: 12, fillColorHex: "#FF00FF")))
+        let shapeLayer = Layer(name: "Rahmen", content: .shape(ShapeLayerContent(kind: .roundedRectangle, size: Size(width: 100, height: 100), cornerRadius: 12, fillColorHex: "#FF00FF")))
 
         try document.addLayer(imageLayer)
         try document.addLayer(textLayer)
