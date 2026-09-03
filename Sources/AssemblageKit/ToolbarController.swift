@@ -44,6 +44,8 @@ private extension NSToolbarItem.Identifier {
     static let cropTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Zuschneiden")
     static let brushTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Pinsel")
     static let removeSubject = NSToolbarItem.Identifier("Assemblage.Werkzeug.Freistellen")
+    static let insertText = NSToolbarItem.Identifier("Assemblage.Einfuegen.Text")
+    static let insertShape = NSToolbarItem.Identifier("Assemblage.Einfuegen.Form")
     static let brushSettings = NSToolbarItem.Identifier("Assemblage.Pinsel.Einstellungen")
     static let zoom = NSToolbarItem.Identifier("Assemblage.Zoom")
 }
@@ -177,6 +179,10 @@ final class ToolbarController: NSObject, NSToolbarDelegate {
         updatePresentation()
     }
 
+    @objc private func insertText(_ sender: Any?) {
+        commandTarget?.insertTextLayer(sender)
+    }
+
     @objc private func zoomToFit(_ sender: Any?) { canvasViewController?.zoomToFit() }
     @objc private func zoomToActualSize(_ sender: Any?) { canvasViewController?.zoomToActualSize() }
     @objc private func zoomIn(_ sender: Any?) { canvasViewController?.zoomIn() }
@@ -190,6 +196,8 @@ final class ToolbarController: NSObject, NSToolbarDelegate {
             .cropTool,
             .brushTool,
             .removeSubject,
+            .insertText,
+            .insertShape,
             .flexibleSpace,
             .zoom
         ]
@@ -231,6 +239,15 @@ final class ToolbarController: NSObject, NSToolbarDelegate {
             )
         case .removeSubject:
             return makeRemoveSubjectItem(identifier: itemIdentifier)
+        case .insertText:
+            return makeCommandItem(
+                identifier: itemIdentifier,
+                label: "Text einfügen",
+                symbolName: "textformat",
+                action: #selector(insertText(_:))
+            )
+        case .insertShape:
+            return makeShapeItem(identifier: itemIdentifier)
         case .brushSettings:
             return makeBrushSettingsItem(identifier: itemIdentifier)
         case .zoom:
@@ -275,6 +292,41 @@ final class ToolbarController: NSObject, NSToolbarDelegate {
         item.paletteLabel = label
         item.toolTip = label
         item.view = button
+        return item
+    }
+
+    private func makeCommandItem(
+        identifier: NSToolbarItem.Identifier,
+        label: String,
+        symbolName: String,
+        action: Selector
+    ) -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        item.label = label
+        item.paletteLabel = label
+        item.toolTip = label
+        item.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label)
+        item.target = self
+        item.action = action
+        return item
+    }
+
+    /// Ein sichtbares Form-Icon, dessen Menü genau die drei Formen aus Plan
+    /// 5.7 anbietet. So belegen die Formen nicht drei Plätze in der Leiste.
+    private func makeShapeItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
+        let label = "Form einfügen"
+        let item = NSMenuToolbarItem(itemIdentifier: identifier)
+        item.label = label
+        item.paletteLabel = label
+        item.toolTip = label
+        item.image = NSImage(systemSymbolName: "square.on.circle", accessibilityDescription: label)
+
+        let menu = NSMenu(title: label)
+        menu.addItem(withTitle: "Rechteck", action: #selector(DocumentWindowController.insertRectangleLayer(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "Abgerundetes Rechteck", action: #selector(DocumentWindowController.insertRoundedRectangleLayer(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "Ellipse", action: #selector(DocumentWindowController.insertEllipseLayer(_:)), keyEquivalent: "")
+        for menuItem in menu.items { menuItem.target = commandTarget }
+        item.menu = menu
         return item
     }
 
@@ -364,20 +416,19 @@ final class ToolbarController: NSObject, NSToolbarDelegate {
             ("Tatsächliche Grösse", "1.magnifyingglass", #selector(zoomToActualSize(_:))),
             ("An Fenster anpassen", "arrow.down.right.and.arrow.up.left", #selector(zoomToFit(_:)))
         ]
-        let subitems = definitions.map { label, symbol, action -> NSToolbarItem in
-            let subitem = NSToolbarItem(itemIdentifier: NSToolbarItem.Identifier("\(identifier.rawValue).\(symbol)"))
-            subitem.label = label
-            subitem.toolTip = label
-            subitem.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
-            subitem.target = self
-            subitem.action = action
-            return subitem
-        }
-
-        let item = NSToolbarItemGroup(itemIdentifier: identifier)
+        let item = NSMenuToolbarItem(itemIdentifier: identifier)
         item.label = "Zoom"
         item.paletteLabel = "Zoom"
-        item.subitems = subitems
+        item.toolTip = "Zoom"
+        item.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Zoom")
+        let menu = NSMenu(title: "Zoom")
+        for (label, symbol, action) in definitions {
+            let menuItem = NSMenuItem(title: label, action: action, keyEquivalent: "")
+            menuItem.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+            menuItem.target = self
+            menu.addItem(menuItem)
+        }
+        item.menu = menu
         return item
     }
 }

@@ -126,6 +126,16 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
     @IBAction func zoomIn(_ sender: Any?) { canvasViewController?.zoomIn() }
     @IBAction func zoomOut(_ sender: Any?) { canvasViewController?.zoomOut() }
 
+    @IBAction func insertTextLayer(_ sender: Any?) { insertLayer(.text) }
+    @IBAction func insertRectangleLayer(_ sender: Any?) { insertLayer(.rectangle) }
+    @IBAction func insertRoundedRectangleLayer(_ sender: Any?) { insertLayer(.roundedRectangle) }
+    @IBAction func insertEllipseLayer(_ sender: Any?) { insertLayer(.ellipse) }
+
+    private func insertLayer(_ kind: NewLayerKind) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(kind, into: state)
+    }
+
     /// „Bearbeiten › Motiv freistellen“ wirkt ausschliesslich auf die aktuell
     /// ausgewählte Bildebene. Die eigentliche Arbeit und Darstellung liegen
     /// in `ForegroundMaskingCommand.swift`.
