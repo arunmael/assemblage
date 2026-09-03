@@ -121,6 +121,27 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Rechteck", action: #selector(DocumentWindowController.insertRectangleLayer(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Abgerundetes Rechteck", action: #selector(DocumentWindowController.insertRoundedRectangleLayer(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Ellipse", action: #selector(DocumentWindowController.insertEllipseLayer(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
+
+        let templates = NSMenu(title: "Collage-Vorlage")
+        templates.addItem(
+            withTitle: "2×2-Raster",
+            action: #selector(DocumentWindowController.applyGrid2x2Template(_:)),
+            keyEquivalent: ""
+        )
+        templates.addItem(
+            withTitle: "3×3-Raster",
+            action: #selector(DocumentWindowController.applyGrid3x3Template(_:)),
+            keyEquivalent: ""
+        )
+        templates.addItem(
+            withTitle: "Polaroid-Stapel",
+            action: #selector(DocumentWindowController.applyPolaroidStackTemplate(_:)),
+            keyEquivalent: ""
+        )
+        let templateItem = NSMenuItem(title: "Collage-Vorlage", action: nil, keyEquivalent: "")
+        templateItem.submenu = templates
+        menu.addItem(templateItem)
         return menu
     }
 
