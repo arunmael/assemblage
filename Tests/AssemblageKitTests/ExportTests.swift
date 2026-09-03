@@ -369,3 +369,163 @@ final class ExportTests: XCTestCase {
         }
     }
 }
+
+/// Text muss im Export dort und so gross landen wie auf dem Bildschirm.
+///
+/// Der ärgerlichste Fehler einer Collage-App wäre, dass der Export anders
+/// aussieht als das, was man zusammengestellt hat. Bei Text ist die Gefahr am
+/// grössten, weil Leinwand und Export ihn auf verschiedenen Wegen zeichnen —
+/// `CATextLayer` dort, `NSAttributedString.draw(in:)` hier. Beide beziehen
+/// ihre Masse inzwischen aus derselben Quelle (`TextLayout`); dieser Test
+/// hält fest, dass das so bleibt.
+@MainActor
+final class TextParityTests: XCTestCase {
+
+    private let seite = 400
+
+    private func dokument() -> AssemblageModel.Document {
+        AssemblageModel.Document(
+            canvas: CanvasSize(width: Double(seite), height: Double(seite)),
+            layers: [
+                // Weisser Grund, damit beide Wege denselben Untergrund haben:
+                // die Leinwand ist weiss, der PNG-Export durchsichtig.
+                Layer(
+                    name: "Grund",
+                    transform: Transform2D(x: 200, y: 200),
+                    content: .shape(ShapeLayerContent(
+                        kind: .rectangle,
+                        size: Size(width: 400, height: 400),
+                        fillColorHex: "#FFFFFF"
+                    ))
+                ),
+                Layer(
+                    name: "Titel",
+                    transform: Transform2D(x: 200, y: 200),
+                    content: .text(TextLayerContent(
+                        string: "Assemblage",
+                        fontName: "Helvetica-Bold",
+                        fontSize: 48,
+                        colorHex: "#000000"
+                    ))
+                )
+            ]
+        )
+    }
+
+    /// Zählt je Zeile und Spalte die bemalten Pixel und meldet den davon
+    /// belegten Kasten — ein grobes, aber aussagekräftiges Mass dafür, wo der
+    /// Text sitzt und wie gross er ist.
+    private func schriftKasten(_ context: CGContext) throws -> (x: Int, y: Int, breite: Int, hoehe: Int) {
+        let data = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
+        var minX = seite, maxX = -1, minY = seite, maxY = -1
+
+        for y in 0..<seite {
+            let row = context.height - 1 - y
+            for x in 0..<seite {
+                let p = data.advanced(by: row * context.bytesPerRow + x * 4)
+                // Alles deutlich Dunklere als der weisse Grund ist Schrift.
+                guard Int(p[0]) < 128 else { continue }
+                minX = min(minX, x); maxX = max(maxX, x)
+                minY = min(minY, y); maxY = max(maxY, y)
+            }
+        }
+        XCTAssertGreaterThan(maxX, 0, "es muss überhaupt Schrift zu sehen sein")
+        return (minX, minY, maxX - minX, maxY - minY)
+    }
+
+    func testTextIsPlacedIdenticallyOnCanvasAndInExport() async throws {
+        let document = dokument()
+
+        // Bildschirm-Canvas
+        let ansicht = CanvasView(document: document, images: ImageStore(resources: DocumentResources()))
+        ansicht.layer?.layoutIfNeeded()
+        let canvasKontext = try XCTUnwrap(CGContext(
+            data: nil, width: seite, height: seite, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        try XCTUnwrap(ansicht.layer?.sublayers?.first).render(in: canvasKontext)
+
+        // Export
+        let bild = try await DocumentExporter.image(
+            of: document,
+            resources: DocumentResources(),
+            targetSize: CGSize(width: seite, height: seite)
+        )
+        let exportKontext = try XCTUnwrap(CGContext(
+            data: nil, width: seite, height: seite, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        exportKontext.draw(bild, in: CGRect(x: 0, y: 0, width: seite, height: seite))
+
+        let aufLeinwand = try schriftKasten(canvasKontext)
+        let imExport = try schriftKasten(exportKontext)
+
+        // Toleranz, weil die beiden Wege unterschiedlich kantenglätten.
+        XCTAssertEqual(imExport.x, aufLeinwand.x, accuracy: 3, "linke Kante der Schrift")
+        XCTAssertEqual(imExport.y, aufLeinwand.y, accuracy: 3, "obere Kante der Schrift")
+        XCTAssertEqual(imExport.breite, aufLeinwand.breite, accuracy: 3, "Breite der Schrift")
+        XCTAssertEqual(imExport.hoehe, aufLeinwand.hoehe, accuracy: 3, "Höhe der Schrift")
+    }
+
+    /// Beweist die Ausrichtung, die der Kasten-Vergleich nicht sehen kann.
+    ///
+    /// Ein „L" hat seine Masse unten (der Fussbalken) und oben nur den
+    /// schmalen Stamm. Landet die Masse oben, ist der Text vertikal
+    /// gespiegelt — bei symmetrischen Formen fällt genau das nicht auf.
+    func testExportedTextIsNotUpsideDown() async throws {
+        let document = AssemblageModel.Document(
+            canvas: CanvasSize(width: 200, height: 200),
+            layers: [
+                Layer(
+                    name: "Grund",
+                    transform: Transform2D(x: 100, y: 100),
+                    content: .shape(ShapeLayerContent(
+                        kind: .rectangle, size: Size(width: 200, height: 200), fillColorHex: "#FFFFFF"
+                    ))
+                ),
+                Layer(
+                    name: "L",
+                    transform: Transform2D(x: 100, y: 100),
+                    content: .text(TextLayerContent(
+                        string: "L", fontName: "Helvetica-Bold", fontSize: 120, colorHex: "#000000"
+                    ))
+                )
+            ]
+        )
+
+        let bild = try await DocumentExporter.image(
+            of: document, resources: DocumentResources(),
+            targetSize: CGSize(width: 200, height: 200)
+        )
+        let kontext = try XCTUnwrap(CGContext(
+            data: nil, width: 200, height: 200, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        kontext.draw(bild, in: CGRect(x: 0, y: 0, width: 200, height: 200))
+
+        let daten = try XCTUnwrap(kontext.data).assumingMemoryBound(to: UInt8.self)
+        func schwarzeInZeile(_ y: Int) -> Int {
+            let row = kontext.height - 1 - y
+            return (0..<200).filter { x in
+                Int(daten.advanced(by: row * kontext.bytesPerRow + x * 4)[0]) < 128
+            }.count
+        }
+
+        // Die Ränder des „L" suchen, dann obere und untere Hälfte vergleichen.
+        let bemalt = (0..<200).filter { schwarzeInZeile($0) > 0 }
+        let oben = try XCTUnwrap(bemalt.first)
+        let unten = try XCTUnwrap(bemalt.last)
+        let mitte = (oben + unten) / 2
+
+        let masseOben = (oben...mitte).map(schwarzeInZeile).reduce(0, +)
+        let masseUnten = ((mitte + 1)...unten).map(schwarzeInZeile).reduce(0, +)
+
+        XCTAssertGreaterThan(
+            masseUnten, masseOben,
+            "beim L liegt die Masse unten; liegt sie oben, ist der Text gespiegelt"
+        )
+    }
+}

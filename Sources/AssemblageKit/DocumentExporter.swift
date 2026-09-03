@@ -260,7 +260,7 @@ enum DocumentExporter {
             return CGSize(width: loaded.width, height: loaded.height)
 
         case .text(let text):
-            return naturalTextSize(of: text)
+            return TextLayout.naturalSize(of: text)
 
         case .shape(let shape):
             return shape.size.cgSize
@@ -316,8 +316,13 @@ enum DocumentExporter {
     private static func drawText(_ content: TextLayerContent, in rect: CGRect, context: CGContext) {
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
-        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-        attributedString(for: content).draw(in: rect)
+        // `flipped: true`, weil der Kontext für die Leinwandkoordinaten
+        // (Ursprung oben links) bereits gespiegelt ist. Meldet man hier
+        // `false`, zeichnet AppKit den Text seitenverkehrt — mit `L` sofort
+        // sichtbar, mit einer Formebene dagegen unsichtbar, weil Rechteck und
+        // Ellipse senkrecht symmetrisch sind.
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
+        TextLayout.attributedString(for: content).draw(in: rect)
     }
 
     private static func drawShape(_ content: ShapeLayerContent, in rect: CGRect, context: CGContext) {
@@ -353,49 +358,14 @@ enum DocumentExporter {
         context.stroke(rect.insetBy(dx: 1, dy: 1))
     }
 
-    // MARK: - Textsatz
-
-    /// Nachgebildet aus `LayerRenderer.attributedString(for:)` — bewusst
-    /// dupliziert statt aufgerufen: `LayerRenderer` ist `@MainActor`-
-    /// gebunden, der Export soll aber gerade ohne Hauptakteur laufen.
-    private static func attributedString(for content: TextLayerContent) -> NSAttributedString {
-        let font = NSFont(name: content.fontName, size: content.fontSize) ?? .systemFont(ofSize: content.fontSize)
-        let color = RGBA(hex: content.colorHex) ?? .black
-        return NSAttributedString(
-            string: content.string,
-            attributes: [.font: font, .foregroundColor: NSColor(cgColor: color.cgColor) ?? .black]
-        )
-    }
-
-    private static func naturalTextSize(of content: TextLayerContent) -> CGSize {
-        var size = attributedString(for: content).size()
-        size.width = max(size.width.rounded(.up), content.fontSize)
-        size.height = max(size.height.rounded(.up), content.fontSize)
-        return size
-    }
-
     // MARK: - Bilddekodierung
 
-    /// Nachgebildet aus `ImageStore.decode(_:)` — ebenfalls dupliziert statt
-    /// wiederverwendet, aus demselben Grund: `ImageStore` ist
-    /// `@MainActor`-gebunden (sein Zwischenspeicher ist es auch), der Export
-    /// dekodiert bewusst zustandslos und ohne Hauptakteur. Nutzt aber
-    /// denselben gemeinsamen `RenderContext.shared`, um nicht für jedes Bild
-    /// einen eigenen `CIContext` aufzubauen (Plan 2.1: kein GPU-Ruckeln durch
-    /// unnötig viele Kontexte).
+    /// Der Export dekodiert jedes Original neu, statt den Zwischenspeicher
+    /// von `ImageStore` zu nutzen: Der ist an den Hauptakteur gebunden, und
+    /// der Export läuft bewusst daneben.
     private static func loadImage(named name: String, resources: DocumentResources) -> CGImage? {
-        guard let data = resources.data(for: name),
-              let source = CGImageSourceCreateWithData(data as CFData, nil),
-              CGImageSourceGetCount(source) > 0,
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
-        else { return nil }
-
-        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-        let orientation = properties?[kCGImagePropertyOrientation] as? UInt32 ?? 1
-        guard orientation > 1, orientation <= 8 else { return image }
-
-        let oriented = CIImage(cgImage: image).oriented(forExifOrientation: Int32(orientation))
-        return RenderContext.shared.createCGImage(oriented, from: oriented.extent) ?? image
+        guard let data = resources.data(for: name) else { return nil }
+        return ImageDecoding.decode(data)
     }
 
     // MARK: - Hilfskontext
@@ -433,10 +403,14 @@ extension AssemblageModel.BlendMode {
 
 // MARK: - Sendable-Übergabe an den Hintergrund-Task
 
-/// `DocumentResources` ist nicht als `Sendable` deklariert, weil es intern
-/// veränderliche `FileWrapper`s hält. Für den Export ist das vertretbar wie
-/// beim `ParsedContents`-Muster in `AssemblageDocument.swift`: Solange
-/// niemand gleichzeitig während eines laufenden Exports Originale
-/// importiert oder löscht, liest `runOffMainActor` hier nur — und genau das
-/// tut auch `ImageStore` bereits mit derselben Instanz vom Hauptakteur aus.
+/// Der Export liest die Originale von einem Hintergrund-Task aus, während der
+/// Hauptthread weiterläuft. `DocumentResources` sichert seinen Zustand dafür
+/// mit einer Sperre ab — `@unchecked` bezieht sich also nur darauf, dass der
+/// Übersetzer diese Sperre nicht selbst nachprüfen kann, nicht auf eine
+/// Annahme über das Verhalten der Nutzer.
+///
+/// Diese Zusicherung stand hier zunächst mit der Begründung, es werde während
+/// eines Exports schon niemand importieren. Das trifft nicht zu — der Export
+/// läuft ja gerade deshalb im Hintergrund, damit man weiterarbeiten kann — und
+/// führte reproduzierbar zum Absturz.
 extension DocumentResources: @unchecked Sendable {}

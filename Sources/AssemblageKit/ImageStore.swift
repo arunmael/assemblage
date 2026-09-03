@@ -37,7 +37,7 @@ final class ImageStore {
         guard !failed.contains(name) else { return nil }
 
         guard let data = resources.data(for: name),
-              let image = Self.decode(data)
+              let image = ImageDecoding.decode(data)
         else {
             failed.insert(name)
             return nil
@@ -52,29 +52,4 @@ final class ImageStore {
         failed.remove(name)
     }
 
-    // MARK: - Dekodierung
-
-    /// Dekodiert Bilddaten und richtet sie nach ihrer EXIF-Orientierung aus.
-    ///
-    /// Ohne diesen Schritt liegen Fotos vom iPhone quer auf der Leinwand: die
-    /// Kamera speichert sie in Sensor-Lage und vermerkt die Drehung nur als
-    /// Metadatum, das `CGImage` von sich aus ignoriert.
-    ///
-    /// Die Drehung übernimmt Core Image statt einer selbstgebauten Matrix —
-    /// die acht EXIF-Fälle (besonders die gespiegelten 5 und 7) falsch
-    /// zusammenzusetzen ist ein klassischer, schwer zu bemerkender Fehler.
-    private static func decode(_ data: Data) -> CGImage? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              CGImageSourceGetCount(source) > 0,
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
-        else { return nil }
-
-        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-        let orientation = properties?[kCGImagePropertyOrientation] as? UInt32 ?? 1
-        guard orientation > 1, orientation <= 8 else { return image }
-
-        let oriented = CIImage(cgImage: image).oriented(forExifOrientation: Int32(orientation))
-        // Scheitert das Neuzeichnen, lieber das ungedrehte Bild zeigen als gar keines.
-        return RenderContext.shared.createCGImage(oriented, from: oriented.extent) ?? image
-    }
 }

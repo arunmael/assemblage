@@ -76,7 +76,7 @@ struct LayerRenderer {
             return Size(width: Double(loaded.width), height: Double(loaded.height))
 
         case .text(let text):
-            return Size(Self.naturalSize(of: text))
+            return Size(TextLayout.naturalSize(of: text))
 
         case .shape(let shape):
             return shape.size
@@ -122,7 +122,7 @@ struct LayerRenderer {
 
     private func makeTextLayer(_ content: TextLayerContent) -> CATextLayer {
         let layer = CATextLayer()
-        layer.string = Self.attributedString(for: content)
+        layer.string = TextLayout.attributedString(for: content)
         layer.isWrapped = false
         layer.truncationMode = .none
         layer.alignmentMode = switch content.alignment {
@@ -165,32 +165,6 @@ struct LayerRenderer {
         layer.borderColor = NSColor.systemRed.cgColor
         layer.borderWidth = 2
         return layer
-    }
-
-    // MARK: - Textsatz
-
-    static func attributedString(for content: TextLayerContent) -> NSAttributedString {
-        let font = NSFont(name: content.fontName, size: content.fontSize)
-            // Fehlt die Schrift auf diesem Mac (Dokument von einem anderen
-            // Rechner), auf die Systemschrift ausweichen statt nichts zu zeigen.
-            ?? .systemFont(ofSize: content.fontSize)
-        let color = RGBA(hex: content.colorHex) ?? .black
-
-        return NSAttributedString(
-            string: content.string,
-            attributes: [.font: font, .foregroundColor: NSColor(cgColor: color.cgColor) ?? .black]
-        )
-    }
-
-    /// Der Platz, den der Text tatsächlich braucht — eine Textebene hat keine
-    /// im Modell gespeicherte Grösse, sie ergibt sich aus dem Satz.
-    static func naturalSize(of content: TextLayerContent) -> CGSize {
-        var size = attributedString(for: content).size()
-        // Leerer Text hätte Grösse null und wäre damit weder sicht- noch
-        // anklickbar — dem Nutzer bliebe nur, die Ebene zu löschen.
-        size.width = max(size.width.rounded(.up), content.fontSize)
-        size.height = max(size.height.rounded(.up), content.fontSize)
-        return size
     }
 }
 
