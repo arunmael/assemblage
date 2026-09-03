@@ -96,6 +96,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Einsetzen", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         menu.addItem(withTitle: "Löschen", action: #selector(NSText.delete(_:)), keyEquivalent: "\u{8}")
         menu.addItem(withTitle: "Alles auswählen", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        menu.addItem(.separator())
+
+        let foregroundMask = NSMenuItem(
+            title: "Motiv freistellen",
+            action: #selector(DocumentWindowController.removeSubjectBackground(_:)),
+            keyEquivalent: "m"
+        )
+        foregroundMask.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(foregroundMask)
         return menu
     }
 

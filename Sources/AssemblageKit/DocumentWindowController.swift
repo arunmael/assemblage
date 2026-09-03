@@ -9,7 +9,7 @@ import SwiftUI
 /// System die durchscheinende Materialfläche — nachgebaut sieht sie immer
 /// falsch aus.
 @MainActor
-final class DocumentWindowController: NSWindowController {
+final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
 
     private var splitViewController: NSSplitViewController?
     private var canvasViewController: CanvasViewController?
@@ -116,6 +116,20 @@ final class DocumentWindowController: NSWindowController {
     @IBAction func zoomToActualSize(_ sender: Any?) { canvasViewController?.zoomToActualSize() }
     @IBAction func zoomIn(_ sender: Any?) { canvasViewController?.zoomIn() }
     @IBAction func zoomOut(_ sender: Any?) { canvasViewController?.zoomOut() }
+
+    /// „Bearbeiten › Motiv freistellen“ wirkt ausschliesslich auf die aktuell
+    /// ausgewählte Bildebene. Die eigentliche Arbeit und Darstellung liegen
+    /// in `ForegroundMaskingCommand.swift`.
+    @IBAction func removeSubjectBackground(_ sender: Any?) {
+        guard let document = document as? AssemblageDocument, let window else { return }
+        ForegroundMaskingCommandController.perform(in: document, host: window)
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard menuItem.action == #selector(removeSubjectBackground(_:)) else { return true }
+        guard let document = document as? AssemblageDocument else { return false }
+        return ForegroundMaskingCommandController.canPerform(in: document)
+    }
 
     /// „Ablage › Exportieren…" (Plan 5.8). Ohne Dokument oder Fenster passiert
     /// nichts — dieselbe Absicherung wie beim Rest der Menübefehle hier;
