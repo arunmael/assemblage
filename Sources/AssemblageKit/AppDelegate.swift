@@ -23,7 +23,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func makeMainMenu() -> NSMenu {
         let mainMenu = NSMenu()
-        for menu in [appMenu(), fileMenu(), editMenu(), viewMenu(), windowMenu()] {
+        for menu in [appMenu(), fileMenu(), editMenu(), insertMenu(), viewMenu(), windowMenu()] {
             let item = NSMenuItem()
             item.submenu = menu
             mainMenu.addItem(item)
@@ -105,6 +105,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         foregroundMask.keyEquivalentModifierMask = [.command, .shift]
         menu.addItem(foregroundMask)
+        return menu
+    }
+
+    private func insertMenu() -> NSMenu {
+        let menu = NSMenu(title: "Einfügen")
+        let text = NSMenuItem(
+            title: "Text",
+            action: #selector(DocumentWindowController.insertTextLayer(_:)),
+            keyEquivalent: "t"
+        )
+        text.keyEquivalentModifierMask = [.command, .option]
+        menu.addItem(text)
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Rechteck", action: #selector(DocumentWindowController.insertRectangleLayer(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "Abgerundetes Rechteck", action: #selector(DocumentWindowController.insertRoundedRectangleLayer(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "Ellipse", action: #selector(DocumentWindowController.insertEllipseLayer(_:)), keyEquivalent: "")
         return menu
     }
 
