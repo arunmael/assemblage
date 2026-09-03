@@ -297,6 +297,20 @@ enum DocumentExporter {
             drawnImage = cropped
         }
 
+        // Anpassungen aus Plan 5.5 anwenden. Dieselbe Kette wie auf dem
+        // Bildschirm (`AdjustmentPipeline`), damit der Export nicht anders
+        // aussieht als das, was man eingestellt hat — nur läuft sie hier über
+        // den CIContext statt über CALayer.filters.
+        //
+        // Nach dem Zuschneiden, nicht davor: Ein Weichzeichnen soll die
+        // sichtbare Kante weichzeichnen und nicht Bildteile hereinholen, die
+        // weggeschnitten wurden.
+        if content.adjustments != .neutral,
+           let angepasst = AdjustmentPipeline.apply(content.adjustments, to: CIImage(cgImage: drawnImage)),
+           let gerendert = RenderContext.shared.createCGImage(angepasst, from: angepasst.extent) {
+            drawnImage = gerendert
+        }
+
         context.interpolationQuality = .high
 
         // `CGContext.draw(_:in:)` zeichnet ein `CGImage` verkehrt herum,

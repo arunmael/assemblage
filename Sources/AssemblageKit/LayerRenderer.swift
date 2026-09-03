@@ -55,6 +55,17 @@ struct LayerRenderer {
         renderedLayer.isHidden = !layer.isVisible
         renderedLayer.opacity = Float(layer.opacity.clamped(to: 0...1))
         renderedLayer.compositingFilter = layer.blendMode.compositingFilterName
+
+        // Anpassungen als Filterkette an die Schicht hängen statt das Bild neu
+        // zu berechnen (Plan 7.2): Core Animation wendet sie auf der GPU an,
+        // ein Reglerzug kostet damit keinen neu dekodierten Pixel. Genau das
+        // macht das sofortige Feedback aus Plan 4.4 möglich.
+        if case .image(let inhalt) = layer.content {
+            let kette = AdjustmentPipeline.filters(for: inhalt.adjustments)
+            renderedLayer.filters = kette.isEmpty ? nil : kette
+        } else {
+            renderedLayer.filters = nil
+        }
     }
 
     // MARK: - Inhaltsgrösse
