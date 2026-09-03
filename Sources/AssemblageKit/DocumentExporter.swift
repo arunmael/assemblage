@@ -234,7 +234,7 @@ enum DocumentExporter {
             width: contentSize.width,
             height: contentSize.height
         )
-        drawContent(layer.content, in: rect, resources: resources, context: context)
+        drawContent(layer.content, in: rect, resources: resources, context: context, mask: maskImage(for: layer, resources: resources))
 
         context.restoreGState()
     }
@@ -269,7 +269,30 @@ enum DocumentExporter {
 
     // MARK: - Inhaltstypen zeichnen
 
-    private static func drawContent(_ content: LayerContent, in rect: CGRect, resources: DocumentResources, context: CGContext) {
+    /// Die wirksame Maske einer Ebene (Plan 5.4), bereits auf den Zuschnitt
+    /// beschnitten und bei Bedarf umgekehrt. `nil` heisst „keine Maske" und
+    /// nicht „alles ausblenden".
+    private static func maskImage(for layer: Layer, resources: DocumentResources) -> CGImage? {
+        let ausschnitt: Rect?
+        if case .image(let inhalt) = layer.content {
+            ausschnitt = inhalt.cropRect
+        } else {
+            ausschnitt = nil
+        }
+        return MaskRendering.grayMaskImage(for: layer, cropRect: ausschnitt, resources: resources)
+    }
+
+    private static func drawContent(_ content: LayerContent, in rect: CGRect, resources: DocumentResources, context: CGContext, mask: CGImage?) {
+        // Maske als Beschnitt des Zeichenbereichs: `CGContext.clip(to:mask:)`
+        // nimmt die Graustufen der Maske als Deckung — genau die Wirkung, die
+        // Plan 7.3 mit CIBlendWithMask beschreibt, nur ohne für jede Ebene ein
+        // Zwischenbild anlegen zu müssen.
+        if let mask {
+            context.saveGState()
+            context.clip(to: rect, mask: mask)
+        }
+        defer { if mask != nil { context.restoreGState() } }
+
         switch content {
         case .image(let image):
             drawImage(image, in: rect, resources: resources, context: context)

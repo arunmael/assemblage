@@ -164,7 +164,10 @@ final class CanvasView: NSView {
             // auffrischen, kein Neuaufbau, keine neu dekodierten Bilder.
             for layer in document.layers {
                 guard let rendered = renderedLayers[layer.id] else { continue }
-                withoutAnimation { renderer.apply(layer, to: rendered) }
+                withoutAnimation {
+                    renderer.apply(layer, to: rendered)
+                    renderer.applyMask(layer, to: rendered)
+                }
             }
         }
 

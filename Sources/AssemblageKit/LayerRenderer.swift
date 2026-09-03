@@ -23,7 +23,39 @@ struct LayerRenderer {
     func makeLayer(for layer: Layer) -> CALayer {
         let rendered = makeContentLayer(for: layer.content)
         apply(layer, to: rendered)
+        applyMask(layer, to: rendered)
         return rendered
+    }
+
+    /// Hängt die Ebenenmaske als `CALayer.mask` an (Plan 5.4).
+    ///
+    /// Core Animation wendet sie damit auf der GPU an — dasselbe Vorgehen wie
+    /// bei den Anpassungen, und aus demselben Grund: Eine Maske zu ändern darf
+    /// kein Neuzeichnen des Bildes auslösen.
+    func applyMask(_ layer: Layer, to renderedLayer: CALayer) {
+        let ausschnitt: Rect?
+        if case .image(let inhalt) = layer.content {
+            ausschnitt = inhalt.cropRect
+        } else {
+            ausschnitt = nil
+        }
+
+        guard let maskenbild = MaskRendering.alphaMaskImage(
+            for: layer,
+            cropRect: ausschnitt,
+            resources: images.resources
+        ) else {
+            renderedLayer.mask = nil
+            return
+        }
+
+        let maske = CALayer()
+        maske.contents = maskenbild
+        maske.contentsGravity = .resize
+        // Deckungsgleich mit der Ebene: Die Maske liegt im selben
+        // Koordinatensystem wie ihr Inhalt.
+        maske.frame = CGRect(origin: .zero, size: renderedLayer.bounds.size)
+        renderedLayer.mask = maske
     }
 
     /// Überträgt alles, was unabhängig vom Ebenentyp gilt.

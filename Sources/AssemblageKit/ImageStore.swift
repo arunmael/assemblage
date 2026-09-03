@@ -20,7 +20,9 @@ enum RenderContext {
 @MainActor
 final class ImageStore {
 
-    private let resources: DocumentResources
+    /// Wird auch für Maskenbitmaps gebraucht, die nicht im
+    /// Bild-Zwischenspeicher landen.
+    let resources: DocumentResources
     private var cache: [String: CGImage] = [:]
     /// Namen, deren Laden bereits fehlgeschlagen ist — verhindert, dass eine
     /// kaputte Datei bei jedem Frame erneut erfolglos dekodiert wird.
