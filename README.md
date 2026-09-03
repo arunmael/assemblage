@@ -6,7 +6,15 @@ Jedes Feature muss sich rechtfertigen. Lieber fünf Werkzeuge, die exzellent fun
 
 ## Status
 
-**Phase 0 (Grundgerüst) steht.** Die App lässt sich bauen und starten, öffnet und sichert Dokumente und zeigt den Ebenenbaum auf einer zoombaren Leinwand. Bearbeiten kommt ab Phase 1.
+**Phasen 0 bis 3 der Roadmap stehen.** Die App importiert Fotos per Drag & Drop, ordnet sie frei an, maskiert sie von Hand oder automatisch, passt sie an und exportiert nach PNG, JPEG und PDF.
+
+| Phase | Inhalt | Stand |
+| --- | --- | --- |
+| 0 | Dokumentarchitektur, Canvas, Ebenenliste | ✅ |
+| 1 | Import, Anordnen, Zuschneiden, Ausrichtungshilfen, PNG/JPEG-Export | ✅ |
+| 2 | Bildanpassungen, Pinsel-Maske, automatisches Freistellen, Blend-Modi | ✅ |
+| 3 | Text, Formen, Collage-Vorlagen, PDF-Export | ✅ |
+| 4 | Politur: Tastenkürzel, Vorlagen-Bibliothek, optional iPad/iCloud | offen |
 
 Der vollständige Entwicklungsplan (Vision, Feature-Set, technische Architektur, Roadmap) liegt in [`docs/entwicklungsplan.md`](docs/entwicklungsplan.md), die Regeln für die Mitarbeit in [`agent-rules.md`](agent-rules.md).
 
