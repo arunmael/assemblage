@@ -13,6 +13,7 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
 
     private var splitViewController: NSSplitViewController?
     private var canvasViewController: CanvasViewController?
+    private var toolbarController: ToolbarController?
 
     convenience init() {
         let window = NSWindow(
@@ -21,10 +22,8 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
             backing: .buffered,
             defer: false
         )
-        // Bewusst ohne `.fullSizeContentView`: Ohne Werkzeugleiste liefe die
-        // Leinwand sonst unter die Titelleiste und überdeckte den
-        // Dokumentnamen. Sobald die Werkzeugleiste aus Plan 8 dazukommt, kann
-        // sie den Platz übernehmen und der durchgehende Inhalt wieder rein.
+        // Bewusst ohne `.fullSizeContentView`: Der dreigeteilte Inhalt soll
+        // weder unter dem Dokumentnamen noch unter der Werkzeugleiste liegen.
 
         // Mindestgrösse **vor** dem Wiederherstellen des gesicherten Rahmens
         // setzen, sonst zieht AppKit sie nicht heran.
@@ -100,6 +99,16 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
 
         contentViewController = splitViewController
         window?.toolbarStyle = .unified
+
+        let toolbarController = ToolbarController(
+            state: state,
+            canvasViewController: canvas,
+            commandTarget: self
+        )
+        self.toolbarController = toolbarController
+        if let window {
+            toolbarController.install(on: window)
+        }
     }
 
     /// Wird beim Laden aus einer Feder aufgerufen; bei uns entsteht das
