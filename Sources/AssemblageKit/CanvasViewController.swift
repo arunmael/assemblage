@@ -146,6 +146,18 @@ extension CanvasViewController: CanvasInteractionDelegate {
         state.owner?.endInteraction(actionName: actionName)
     }
 
+    func canvasView(_ canvasView: CanvasView, didChangeCropOfLayerWithID id: UUID, to crop: Rect) {
+        guard let ebene = state.document.layer(withID: id),
+              case .image(let inhalt) = ebene.content,
+              let bild = state.images.image(named: inhalt.originalFileReference)
+        else { return }
+
+        let groesse = Size(width: Double(bild.width), height: Double(bild.height))
+        state.owner?.modify("Zuschneiden") {
+            try? $0.updateLayer(id: id) { $0 = $0.cropped(to: crop, imageSize: groesse) }
+        }
+    }
+
     func canvasView(_ canvasView: CanvasView, didReceiveDropFrom pasteboard: NSPasteboard) {
         guard let document = state.owner else { return }
 

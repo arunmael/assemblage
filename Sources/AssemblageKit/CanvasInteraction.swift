@@ -25,6 +25,9 @@ protocol CanvasInteractionDelegate: AnyObject {
     /// Auf die Leinwand gezogene Bilder (Plan 5.1). Der Canvas nimmt sie nur
     /// entgegen; was damit geschieht, entscheidet das Dokument.
     func canvasView(_ canvasView: CanvasView, didReceiveDropFrom pasteboard: NSPasteboard)
+
+    /// Neuer Zuschnitt für eine Bildebene (Plan 5.3), in Bildkoordinaten.
+    func canvasView(_ canvasView: CanvasView, didChangeCropOfLayerWithID id: UUID, to crop: Rect)
 }
 
 /// Ein laufendes Ziehen auf dem Canvas.
@@ -106,5 +109,41 @@ struct CanvasDrag {
                 snappingTo: constrains ? Self.rotationStep : nil
             )
         }
+    }
+}
+
+/// Ein laufendes Ziehen an einem Zuschnitt-Griff (Plan 5.3).
+///
+/// Bewusst getrennt von `CanvasDrag`: Zuschneiden ändert ein Rechteck in
+/// **Bild**koordinaten, nicht die Transformation der Ebene. Beides in eine
+/// Struktur zu zwingen hiesse, überall zu unterscheiden, was gerade gemeint
+/// ist.
+struct CropDrag {
+    let layerID: UUID
+    let handle: ResizeHandle
+    /// Der Ausschnitt beim Aufsetzen der Maus. Jede Zwischenmeldung rechnet
+    /// dagegen, nicht gegen den zuletzt gesetzten Wert.
+    let startCrop: Rect
+    let imageSize: Size
+    private(set) var hasPassedThreshold = false
+    private let startPoint: Point
+
+    init(layerID: UUID, handle: ResizeHandle, startCrop: Rect, imageSize: Size, startPoint: Point) {
+        self.layerID = layerID
+        self.handle = handle
+        self.startCrop = startCrop
+        self.imageSize = imageSize
+        self.startPoint = startPoint
+    }
+
+    /// Neuer Ausschnitt für einen Punkt in **Bild**koordinaten.
+    mutating func crop(draggedTo imagePoint: Point, canvasPoint: Point) -> Rect? {
+        if !hasPassedThreshold {
+            let dx = canvasPoint.x - startPoint.x
+            let dy = canvasPoint.y - startPoint.y
+            guard (dx * dx + dy * dy).squareRoot() >= CanvasDrag.threshold else { return nil }
+            hasPassedThreshold = true
+        }
+        return startCrop.adjusted(handle: handle, to: imagePoint)
     }
 }

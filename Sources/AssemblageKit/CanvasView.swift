@@ -72,6 +72,24 @@ final class CanvasView: NSView {
     static let snapDistance: Double = 8
 
     private var drag: CanvasDrag?
+    private var cropDrag: CropDrag?
+
+    /// Die Ebene, die gerade zugeschnitten wird (Plan 5.3) — oder `nil`.
+    ///
+    /// Ein eigener Modus, weil dieselben Griffe je nach Modus etwas anderes
+    /// bedeuten: sonst die Ebene skalieren, hier den Ausschnitt verschieben.
+    var croppingLayerID: UUID? {
+        didSet {
+            guard croppingLayerID != oldValue else { return }
+            updateSelectionOutline()
+        }
+    }
+
+    /// Zeigt beim Zuschneiden das ganze Bild abgeschwächt, damit sichtbar ist,
+    /// was man wieder hereinholen könnte. Ohne das schneidet man blind: Was
+    /// ausserhalb des Ausschnitts liegt, wäre unsichtbar, und man wüsste nicht,
+    /// wie weit sich der Rahmen überhaupt aufziehen lässt.
+    private let cropPreviewLayer = CALayer()
 
     init(document: AssemblageModel.Document, images: ImageStore) {
         self.document = document
@@ -94,6 +112,10 @@ final class CanvasView: NSView {
 
         overlayLayer.isGeometryFlipped = true
         overlayLayer.addSublayer(selectionOutline)
+        overlayLayer.addSublayer(cropPreviewLayer)
+        cropPreviewLayer.opacity = 0.3
+        cropPreviewLayer.contentsGravity = .resize
+        cropPreviewLayer.isHidden = true
         overlayLayer.addSublayer(guideShapes)
         overlayLayer.addSublayer(handleShapes)
         guideShapes.fillColor = nil
@@ -176,6 +198,16 @@ final class CanvasView: NSView {
         CATransaction.commit()
     }
 
+    // MARK: - Zugang für Tests
+
+    // Benannt statt über die Position im Schichtbaum: Sonst brechen Tests,
+    // sobald eine weitere Schicht dazwischenkommt — genau das ist beim
+    // Zuschneiden-Modus passiert.
+    var selectionOutlineLayerForTesting: CAShapeLayer { selectionOutline }
+    var handleLayerForTesting: CAShapeLayer { handleShapes }
+    var guideLayerForTesting: CAShapeLayer { guideShapes }
+    var cropPreviewLayerForTesting: CALayer { cropPreviewLayer }
+
     // MARK: - Auswahlrahmen
 
     private func updateSelectionOutline() {
@@ -226,11 +258,52 @@ final class CanvasView: NSView {
             handleShapes.path = griffe
             handleShapes.lineWidth = 1 / zoomScale
         }
+
+        updateCropPreview(for: layer)
+    }
+
+    /// Blendet im Zuschneiden-Modus das ganze Bild abgeschwächt hinter dem
+    /// Ausschnitt ein.
+    private func updateCropPreview(for layer: Layer) {
+        guard croppingLayerID == layer.id,
+              case .image(let inhalt) = layer.content,
+              let bild = renderer.images.image(named: inhalt.originalFileReference)
+        else {
+            withoutAnimation {
+                cropPreviewLayer.isHidden = true
+                cropPreviewLayer.contents = nil
+            }
+            return
+        }
+
+        let bildGroesse = Size(width: Double(bild.width), height: Double(bild.height))
+        // Die Transformation des *ganzen* Bildes ergibt sich, indem man die
+        // Ebene auf das ganze Bild „zuschneidet" — dieselbe Rechnung, die
+        // beim Zuschneiden das Bild an Ort und Stelle hält.
+        let ganz = layer.cropped(
+            to: Rect(x: 0, y: 0, width: bildGroesse.width, height: bildGroesse.height),
+            imageSize: bildGroesse
+        )
+        let rahmen = ganz.transform.unrotatedFrame(forContentSize: bildGroesse).cgRect
+
+        withoutAnimation {
+            cropPreviewLayer.isHidden = false
+            cropPreviewLayer.contents = bild
+            cropPreviewLayer.bounds = CGRect(origin: .zero, size: rahmen.size)
+            cropPreviewLayer.position = CGPoint(x: ganz.transform.x, y: ganz.transform.y)
+            cropPreviewLayer.transform = ganz.transform.renderTransform
+        }
     }
 
     // MARK: - Maus
 
     override var acceptsFirstResponder: Bool { true }
+
+    /// Escape verlässt das Zuschneiden — der Weg, den man reflexhaft nimmt,
+    /// wenn man nicht mehr weiterweiss.
+    override func cancelOperation(_ sender: Any?) {
+        croppingLayerID = nil
+    }
 
     /// Rechnet einen Punkt aus der Ansicht in Leinwandkoordinaten um.
     ///
@@ -242,8 +315,27 @@ final class CanvasView: NSView {
         return Point(x: Double(inView.x), y: Double(bounds.height - inView.y))
     }
 
+    /// Doppelklick auf eine Bildebene schaltet das Zuschneiden ein und wieder
+    /// aus — dieselbe Geste wie in der Fotos-App und in Keynote.
     override func mouseDown(with event: NSEvent) {
         let punkt = canvasPoint(from: event)
+
+        if event.clickCount == 2 {
+            let getroffen = document.topmostLayer(at: punkt) { renderer.contentSize(of: $0.content) }
+            if let getroffen, case .image = getroffen.content {
+                selectedLayerID = getroffen.id
+                interactionDelegate?.canvasView(self, didSelectLayerWithID: getroffen.id)
+                croppingLayerID = (croppingLayerID == getroffen.id) ? nil : getroffen.id
+                return
+            }
+            croppingLayerID = nil
+        }
+
+        if let treffer = cropHandleDrag(at: punkt) {
+            cropDrag = treffer
+            drag = nil
+            return
+        }
 
         // Griffe zuerst: Sie liegen zum Teil ausserhalb der Ebene (der
         // Drehgriff ganz) und würden sonst nie erreicht — man träfe stets die
@@ -261,6 +353,11 @@ final class CanvasView: NSView {
 
         let getroffen = document.topmostLayer(at: punkt) { layer in
             renderer.contentSize(of: layer.content)
+        }
+
+        // Wer eine andere Ebene anfasst, ist mit dem Zuschneiden fertig.
+        if getroffen?.id != croppingLayerID {
+            croppingLayerID = nil
         }
 
         selectedLayerID = getroffen?.id
@@ -303,7 +400,37 @@ final class CanvasView: NSView {
         return nil
     }
 
+    /// Sitzt der Punkt im Zuschneiden-Modus auf einem Griff?
+    private func cropHandleDrag(at punkt: Point) -> CropDrag? {
+        guard let id = croppingLayerID,
+              let ebene = document.layer(withID: id),
+              case .image(let inhalt) = ebene.content,
+              let bild = renderer.images.image(named: inhalt.originalFileReference)
+        else { return nil }
+
+        let bildGroesse = Size(width: Double(bild.width), height: Double(bild.height))
+        let ausschnitt = ebene.effectiveCrop(imageSize: bildGroesse) ?? Rect(x: 0, y: 0, width: bildGroesse.width, height: bildGroesse.height)
+
+        guard let griff = ebene.transform.handle(
+            at: punkt,
+            contentSize: renderer.contentSize(of: ebene.content),
+            tolerance: Self.handleHitRadius / zoomScale
+        ) else { return nil }
+
+        return CropDrag(
+            layerID: id,
+            handle: griff,
+            startCrop: ausschnitt,
+            imageSize: bildGroesse,
+            startPoint: punkt
+        )
+    }
+
     override func mouseDragged(with event: NSEvent) {
+        if cropDrag != nil {
+            dragCrop(to: canvasPoint(from: event))
+            return
+        }
         guard var laufend = drag else { return }
         let warSchonAmZiehen = laufend.hasPassedThreshold
 
@@ -381,7 +508,32 @@ final class CanvasView: NSView {
         }
     }
 
+    private func dragCrop(to punkt: Point) {
+        guard var laufend = cropDrag,
+              let ebene = document.layer(withID: laufend.layerID),
+              let imBild = ebene.imagePoint(forCanvasPoint: punkt, imageSize: laufend.imageSize)
+        else { return }
+
+        let warSchonAmZiehen = laufend.hasPassedThreshold
+        let neu = laufend.crop(draggedTo: imBild, canvasPoint: punkt)
+        cropDrag = laufend
+
+        guard let neu else { return }
+        if !warSchonAmZiehen {
+            interactionDelegate?.canvasViewDidBeginInteraction(self)
+        }
+        interactionDelegate?.canvasView(self, didChangeCropOfLayerWithID: laufend.layerID, to: neu)
+    }
+
     override func mouseUp(with event: NSEvent) {
+        if let laufend = cropDrag {
+            cropDrag = nil
+            if laufend.hasPassedThreshold {
+                interactionDelegate?.canvasView(self, didEndInteractionNamed: "Zuschneiden")
+            }
+            return
+        }
+
         // Die Linien sind eine Hilfe *während* des Ziehens; danach wären sie
         // nur noch Striche ohne Bezug.
         zeigeAusrichtungslinien([])

@@ -34,6 +34,10 @@ final class CanvasInteractionTests: XCTestCase {
         func canvasView(_ canvasView: CanvasView, didReceiveDropFrom pasteboard: NSPasteboard) {
             wuerfe += 1
         }
+        var zuschnitte: [(id: UUID, crop: Rect)] = []
+        func canvasView(_ canvasView: CanvasView, didChangeCropOfLayerWithID id: UUID, to crop: Rect) {
+            zuschnitte.append((id, crop))
+        }
     }
 
     private var fenster: NSWindow!
@@ -173,8 +177,7 @@ final class CanvasInteractionTests: XCTestCase {
     // MARK: - Auswahlrahmen
 
     func testSelectionOutlineAppearsAndDisappears() throws {
-        let overlay = try XCTUnwrap(canvas.layer?.sublayers?.last)
-        let rahmen = try XCTUnwrap(overlay.sublayers?.first as? CAShapeLayer)
+        let rahmen = canvas.selectionOutlineLayerForTesting
 
         XCTAssertNil(rahmen.path, "ohne Auswahl kein Rahmen")
 
@@ -190,8 +193,7 @@ final class CanvasInteractionTests: XCTestCase {
     /// Der Rahmen muss beim Zoomen gleich dick wirken — sonst ist er bei
     /// 8-fachem Zoom ein Balken und bei 10 % unsichtbar.
     func testOutlineWidthCompensatesForZoom() throws {
-        let overlay = try XCTUnwrap(canvas.layer?.sublayers?.last)
-        let rahmen = try XCTUnwrap(overlay.sublayers?.first as? CAShapeLayer)
+        let rahmen = canvas.selectionOutlineLayerForTesting
         canvas.selectedLayerID = ebeneID
 
         canvas.zoomScale = 1
@@ -283,8 +285,7 @@ final class CanvasInteractionTests: XCTestCase {
 
     /// Griffe müssen gezeichnet werden, sobald etwas ausgewählt ist.
     func testHandlesAreDrawnForTheSelection() throws {
-        let overlay = try XCTUnwrap(canvas.layer?.sublayers?.last)
-        let griffe = try XCTUnwrap(overlay.sublayers?.last as? CAShapeLayer)
+        let griffe = canvas.handleLayerForTesting
 
         XCTAssertNil(griffe.path, "ohne Auswahl keine Griffe")
 
@@ -300,13 +301,7 @@ final class CanvasInteractionTests: XCTestCase {
 
     // MARK: - Ausrichtungshilfen
 
-    private var linienSchicht: CAShapeLayer {
-        get throws {
-            let overlay = try XCTUnwrap(canvas.layer?.sublayers?.last)
-            // Reihenfolge im Overlay: Rahmen, Linien, Griffe.
-            return try XCTUnwrap(overlay.sublayers?[1] as? CAShapeLayer)
-        }
-    }
+    private var linienSchicht: CAShapeLayer { canvas.guideLayerForTesting }
 
     /// Beim Ziehen nahe der Leinwandmitte muss die Ebene einrasten — das ist
     /// der häufigste Fall überhaupt (Plan 5.3: „Zentrieren").
@@ -318,7 +313,7 @@ final class CanvasInteractionTests: XCTestCase {
         let letzte = try XCTUnwrap(protokoll.aenderungen.last)
         XCTAssertEqual(letzte.transform.x, 200, accuracy: 0.001, "waagrecht eingerastet")
         XCTAssertEqual(letzte.transform.y, 200, accuracy: 0.001, "senkrecht eingerastet")
-        XCTAssertNotNil(try linienSchicht.path, "und die Hilfslinien sind sichtbar")
+        XCTAssertNotNil(linienSchicht.path, "und die Hilfslinien sind sichtbar")
     }
 
     /// Weit weg von allem darf nichts einrasten — sonst kann man eine Ebene
@@ -330,7 +325,7 @@ final class CanvasInteractionTests: XCTestCase {
         let letzte = try XCTUnwrap(protokoll.aenderungen.last)
         XCTAssertEqual(letzte.transform.x, 137, accuracy: 0.001)
         XCTAssertEqual(letzte.transform.y, 262, accuracy: 0.001)
-        XCTAssertNil(try linienSchicht.path, "und keine Linien ohne Einrasten")
+        XCTAssertNil(linienSchicht.path, "und keine Linien ohne Einrasten")
     }
 
     /// Nach dem Loslassen dürfen keine Linien stehen bleiben — sie sind eine
@@ -338,10 +333,10 @@ final class CanvasInteractionTests: XCTestCase {
     func testGuidesDisappearWhenTheDragEnds() throws {
         canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 200, y: 200))
         canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 203, y: 197))
-        XCTAssertNotNil(try linienSchicht.path)
+        XCTAssertNotNil(linienSchicht.path)
 
         canvas.mouseUp(with: try ereignis(.leftMouseUp, atCanvasX: 203, y: 197))
-        XCTAssertNil(try linienSchicht.path)
+        XCTAssertNil(linienSchicht.path)
     }
 
     /// Beim Skalieren wird nicht eingerastet: Die Ebene würde unter dem Griff
@@ -352,7 +347,7 @@ final class CanvasInteractionTests: XCTestCase {
         canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 250, y: 200))
         canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 303, y: 200))
 
-        XCTAssertNil(try linienSchicht.path)
+        XCTAssertNil(linienSchicht.path)
     }
 
     /// Die Fangdistanz wird in Bildschirmpunkten gemessen: Wer hineinzoomt,
