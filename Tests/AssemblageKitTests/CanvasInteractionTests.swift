@@ -35,6 +35,10 @@ final class CanvasInteractionTests: XCTestCase {
             wuerfe += 1
         }
         var zuschnitte: [(id: UUID, crop: Rect)] = []
+        var striche = 0
+        func canvasView(_ canvasView: CanvasView, didPaintMaskForLayerWithID id: UUID, pngData: Data) {
+            striche += 1
+        }
         func canvasView(_ canvasView: CanvasView, didChangeCropOfLayerWithID id: UUID, to crop: Rect) {
             zuschnitte.append((id, crop))
         }

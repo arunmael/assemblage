@@ -25,6 +25,10 @@ final class CropModeTests: XCTestCase {
             beendet.append(actionName)
         }
         func canvasView(_ canvasView: CanvasView, didReceiveDropFrom pasteboard: NSPasteboard) {}
+        var striche = 0
+        func canvasView(_ canvasView: CanvasView, didPaintMaskForLayerWithID id: UUID, pngData: Data) {
+            striche += 1
+        }
         func canvasView(_ canvasView: CanvasView, didChangeCropOfLayerWithID id: UUID, to crop: Rect) {
             zuschnitte.append((id, crop))
         }

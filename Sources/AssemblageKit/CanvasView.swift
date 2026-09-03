@@ -73,6 +73,21 @@ final class CanvasView: NSView {
 
     private var drag: CanvasDrag?
     private var cropDrag: CropDrag?
+    private var stroke: BrushStroke?
+
+    /// Die Ebene, deren Maske gerade mit dem Pinsel bearbeitet wird (Plan
+    /// 5.4) — oder `nil`. Schliesst sich mit dem Zuschneiden-Modus aus:
+    /// dieselben Mausbewegungen können nicht zweierlei bedeuten.
+    var brushLayerID: UUID? {
+        didSet {
+            guard brushLayerID != oldValue else { return }
+            if brushLayerID != nil { croppingLayerID = nil }
+        }
+    }
+
+    /// Einstellungen des Pinsels. Werden von aussen gesetzt (Werkzeugleiste,
+    /// Inspector) und hier nur verwendet.
+    var brush = MaskBrush(diameter: 60, hardness: 0.5, mode: .hide)
 
     /// Die Ebene, die gerade zugeschnitten wird (Plan 5.3) — oder `nil`.
     ///
@@ -306,6 +321,7 @@ final class CanvasView: NSView {
     /// wenn man nicht mehr weiterweiss.
     override func cancelOperation(_ sender: Any?) {
         croppingLayerID = nil
+        brushLayerID = nil
     }
 
     /// Rechnet einen Punkt aus der Ansicht in Leinwandkoordinaten um.
@@ -322,6 +338,16 @@ final class CanvasView: NSView {
     /// aus — dieselbe Geste wie in der Fotos-App und in Keynote.
     override func mouseDown(with event: NSEvent) {
         let punkt = canvasPoint(from: event)
+
+        // Im Pinselmodus bedeutet Ziehen ausschliesslich Malen — kein
+        // Verschieben, kein Skalieren. Sonst verschöbe der erste Strich die
+        // Ebene, statt sie zu maskieren.
+        if let angefangen = beginStroke(at: punkt, event: event) {
+            stroke = angefangen
+            drag = nil
+            cropDrag = nil
+            return
+        }
 
         if event.clickCount == 2 {
             let getroffen = document.topmostLayer(at: punkt) { renderer.contentSize(of: $0.content) }
@@ -429,7 +455,70 @@ final class CanvasView: NSView {
         )
     }
 
+    /// Beginnt einen Strich, wenn der Pinselmodus für eine Bildebene aktiv ist.
+    private func beginStroke(at punkt: Point, event: NSEvent) -> BrushStroke? {
+        guard let id = brushLayerID,
+              let ebene = document.layer(withID: id),
+              case .image(let inhalt) = ebene.content,
+              let bild = renderer.images.image(named: inhalt.originalFileReference)
+        else { return nil }
+
+        let groesse = Size(width: Double(bild.width), height: Double(bild.height))
+
+        // Auf der bestehenden Maske weitermalen, nicht bei null anfangen —
+        // sonst wäre jeder Strich der erste und löschte den vorherigen.
+        let bisherige = ebene.mask?.maskImageReference
+            .flatMap { renderer.images.resources.data(for: $0) }
+            .flatMap { ImageDecoding.decode($0) }
+
+        guard let painter = MaskPainter(imageSize: groesse, existing: bisherige),
+              let imBild = ebene.imagePoint(forCanvasPoint: punkt, imageSize: groesse)
+        else { return nil }
+
+        var strich = BrushStroke(layerID: id, painter: painter, imageSize: groesse)
+        painter.beginStroke(at: imBild, pressure: Double(event.pressure), brush: brush)
+        strich.markPainted()
+        zeigeStrichvorschau(strich)
+        return strich
+    }
+
+    /// Zeigt den laufenden Strich sofort an, ohne das Dokument anzufassen.
+    ///
+    /// Plan 4.4 verlangt sofortiges Feedback; über das Dokument zu gehen
+    /// hiesse, pro Mausmeldung eine Maskendatei anzulegen und einen
+    /// Undo-Schritt zu erzeugen.
+    private func zeigeStrichvorschau(_ strich: BrushStroke) {
+        guard let gerendert = renderedLayers[strich.layerID],
+              let maske = strich.painter.currentMask()
+        else { return }
+
+        // Dieselbe Umrechnung wie im Renderer: Core Animation wertet bei
+        // einer Maskenschicht ausschliesslich Alpha aus, die Bitmap trägt die
+        // Deckung aber in der Helligkeit.
+        let alpha = CIImage(cgImage: maske).applyingFilter("CIMaskToAlpha")
+        guard let alphaBild = RenderContext.shared.createCGImage(alpha, from: alpha.extent) else { return }
+
+        let schicht = gerendert.mask ?? CALayer()
+        withoutAnimation {
+            schicht.contents = alphaBild
+            schicht.contentsGravity = .resize
+            schicht.frame = CGRect(origin: .zero, size: gerendert.bounds.size)
+            gerendert.mask = schicht
+        }
+    }
+
     override func mouseDragged(with event: NSEvent) {
+        if var strich = stroke {
+            let punkt = canvasPoint(from: event)
+            if let ebene = document.layer(withID: strich.layerID),
+               let imBild = ebene.imagePoint(forCanvasPoint: punkt, imageSize: strich.imageSize) {
+                strich.painter.continueStroke(to: imBild, pressure: Double(event.pressure))
+                strich.markPainted()
+                zeigeStrichvorschau(strich)
+                stroke = strich
+            }
+            return
+        }
         if cropDrag != nil {
             dragCrop(to: canvasPoint(from: event))
             return
@@ -529,6 +618,14 @@ final class CanvasView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if let strich = stroke {
+            stroke = nil
+            strich.painter.endStroke()
+            if strich.hasPainted, let daten = strich.painter.pngData() {
+                interactionDelegate?.canvasView(self, didPaintMaskForLayerWithID: strich.layerID, pngData: daten)
+            }
+            return
+        }
         if let laufend = cropDrag {
             cropDrag = nil
             if laufend.hasPassedThreshold {

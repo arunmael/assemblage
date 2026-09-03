@@ -28,6 +28,30 @@ protocol CanvasInteractionDelegate: AnyObject {
 
     /// Neuer Zuschnitt für eine Bildebene (Plan 5.3), in Bildkoordinaten.
     func canvasView(_ canvasView: CanvasView, didChangeCropOfLayerWithID id: UUID, to crop: Rect)
+
+    /// Ein fertig gemalter Pinselstrich (Plan 5.4), als PNG in Bildauflösung.
+    ///
+    /// Gemeldet wird erst beim Loslassen, nicht während des Malens: Die
+    /// Vorschau während des Strichs läuft direkt über die Maskenschicht, ohne
+    /// das Dokument anzufassen. Sonst entstünde pro Mausmeldung eine
+    /// Maskendatei.
+    func canvasView(_ canvasView: CanvasView, didPaintMaskForLayerWithID id: UUID, pngData: Data)
+}
+
+/// Ein laufender Pinselstrich (Plan 5.4).
+struct BrushStroke {
+    let layerID: UUID
+    let painter: MaskPainter
+    let imageSize: Size
+    private(set) var hasPainted = false
+
+    init(layerID: UUID, painter: MaskPainter, imageSize: Size) {
+        self.layerID = layerID
+        self.painter = painter
+        self.imageSize = imageSize
+    }
+
+    mutating func markPainted() { hasPainted = true }
 }
 
 /// Ein laufendes Ziehen auf dem Canvas.

@@ -158,6 +158,23 @@ extension CanvasViewController: CanvasInteractionDelegate {
         }
     }
 
+    func canvasView(_ canvasView: CanvasView, didPaintMaskForLayerWithID id: UUID, pngData: Data) {
+        // Jeder Strich legt eine **neue** Maskendatei an, statt die bestehende
+        // zu überschreiben. Nur so holt ⌘Z die alten Pixel zurück: Der
+        // Undo-Schnappschuss hält bloss die Referenz, nicht die Bitmap.
+        //
+        // Vertretbar ist das, weil Masken als PNG liegen und eine Maske sich
+        // sehr gut komprimiert — grosse Flächen einer Farbe. Verwaiste
+        // Maskendateien räumt `removeUnreferencedFiles` beim Sichern weg.
+        let referenz = state.resources.addMask(pngData)
+
+        state.owner?.modify("Maske malen") {
+            try? $0.updateLayer(id: id) { ebene in
+                ebene.mask = LayerMask(maskImageReference: referenz, source: .manualBrush)
+            }
+        }
+    }
+
     func canvasView(_ canvasView: CanvasView, didReceiveDropFrom pasteboard: NSPasteboard) {
         guard let document = state.owner else { return }
 
