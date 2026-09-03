@@ -134,12 +134,11 @@ extension CanvasViewController: CanvasInteractionDelegate {
         state.owner?.beginInteraction()
     }
 
-    func canvasView(_ canvasView: CanvasView, didMoveLayerWithID id: UUID, toCentre centre: Point) {
-        state.owner?.modify("Ebene verschieben") {
-            try? $0.updateLayer(id: id) { layer in
-                layer.transform.x = centre.x
-                layer.transform.y = centre.y
-            }
+    func canvasView(_ canvasView: CanvasView, didChangeLayerWithID id: UUID, to transform: Transform2D) {
+        // Der Name landet nur dann im Undo-Menü, wenn kein Ziehen läuft;
+        // während eines Zugs setzt ihn `endInteraction(actionName:)`.
+        state.owner?.modify("Ebene ändern") {
+            try? $0.updateLayer(id: id) { $0.transform = transform }
         }
     }
 

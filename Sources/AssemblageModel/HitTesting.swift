@@ -110,3 +110,28 @@ extension Transform2D {
         )
     }
 }
+
+extension Transform2D {
+
+    /// Die achsenparallele Umschliessende der Ebene.
+    ///
+    /// Die Ausrichtungshilfen rechnen mit achsenparallelen Rechtecken und
+    /// kennen keine Drehung; sie brauchen deshalb genau diesen Rahmen. Bei
+    /// einer um 45° gedrehten Ebene ist er spürbar grösser als die Ebene
+    /// selbst — das ist gewollt und der Grund, warum es diese Funktion
+    /// überhaupt gibt.
+    public func boundingFrame(contentSize: Size) -> Rect {
+        let ecken = corners(contentSize: contentSize)
+        let xs = ecken.map(\.x)
+        let ys = ecken.map(\.y)
+
+        let minX = xs.min() ?? x
+        let minY = ys.min() ?? y
+        return Rect(
+            x: minX,
+            y: minY,
+            width: (xs.max() ?? x) - minX,
+            height: (ys.max() ?? y) - minY
+        )
+    }
+}

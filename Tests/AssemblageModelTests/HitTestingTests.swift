@@ -203,3 +203,44 @@ final class LayerCornersTests: XCTestCase {
         }
     }
 }
+
+/// Die achsenparallele Umschliessende einer Ebene.
+///
+/// Genau das erwarten die Ausrichtungshilfen: Sie rechnen mit `Rect` und
+/// kennen keine Drehung (siehe Kopfkommentar in `AlignmentGuides.swift`).
+final class BoundingFrameTests: XCTestCase {
+
+    private let hundert = Size(width: 100, height: 100)
+
+    func testUnrotatedBoundingFrameIsTheLayerItself() {
+        let rahmen = Transform2D(x: 200, y: 200).boundingFrame(contentSize: hundert)
+
+        XCTAssertEqual(rahmen, Rect(x: 150, y: 150, width: 100, height: 100))
+    }
+
+    /// Bei 45° wächst die Umschliessende auf das Wurzel-Zwei-fache — das ist
+    /// der ganze Grund, warum es diese Funktion gibt.
+    func testRotatedLayerHasALargerBoundingFrame() {
+        let rahmen = Transform2D(x: 200, y: 200, rotationDegrees: 45).boundingFrame(contentSize: hundert)
+
+        XCTAssertEqual(rahmen.width, 141.42, accuracy: 0.01)
+        XCTAssertEqual(rahmen.height, 141.42, accuracy: 0.01)
+        XCTAssertEqual(rahmen.x + rahmen.width / 2, 200, accuracy: 0.001, "bleibt mittig")
+    }
+
+    func testBoundingFrameFollowsScale() {
+        let rahmen = Transform2D(x: 0, y: 0, scaleX: 2, scaleY: 0.5).boundingFrame(contentSize: hundert)
+
+        XCTAssertEqual(rahmen.width, 200, accuracy: 0.001)
+        XCTAssertEqual(rahmen.height, 50, accuracy: 0.001)
+    }
+
+    /// Eine 90°-Drehung vertauscht Breite und Höhe.
+    func testNinetyDegreesSwapsWidthAndHeight() {
+        let rahmen = Transform2D(x: 0, y: 0, rotationDegrees: 90)
+            .boundingFrame(contentSize: Size(width: 200, height: 100))
+
+        XCTAssertEqual(rahmen.width, 100, accuracy: 0.001)
+        XCTAssertEqual(rahmen.height, 200, accuracy: 0.001)
+    }
+}

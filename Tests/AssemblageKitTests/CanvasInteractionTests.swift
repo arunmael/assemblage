@@ -15,7 +15,7 @@ final class CanvasInteractionTests: XCTestCase {
     private final class Protokoll: CanvasInteractionDelegate {
         var auswahl: [UUID?] = []
         var begonnen = 0
-        var bewegungen: [(id: UUID, mitte: Point)] = []
+        var aenderungen: [(id: UUID, transform: Transform2D)] = []
         var beendet: [String] = []
 
         func canvasView(_ canvasView: CanvasView, didSelectLayerWithID id: UUID?) {
@@ -24,8 +24,8 @@ final class CanvasInteractionTests: XCTestCase {
         func canvasViewDidBeginInteraction(_ canvasView: CanvasView) {
             begonnen += 1
         }
-        func canvasView(_ canvasView: CanvasView, didMoveLayerWithID id: UUID, toCentre centre: Point) {
-            bewegungen.append((id, centre))
+        func canvasView(_ canvasView: CanvasView, didChangeLayerWithID id: UUID, to transform: Transform2D) {
+            aenderungen.append((id, transform))
         }
         func canvasView(_ canvasView: CanvasView, didEndInteractionNamed actionName: String) {
             beendet.append(actionName)
@@ -121,10 +121,10 @@ final class CanvasInteractionTests: XCTestCase {
         canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 260, y: 230))
         canvas.mouseUp(with: try ereignis(.leftMouseUp, atCanvasX: 260, y: 230))
 
-        let letzte = try XCTUnwrap(protokoll.bewegungen.last)
+        let letzte = try XCTUnwrap(protokoll.aenderungen.last)
         XCTAssertEqual(letzte.id, ebeneID)
-        XCTAssertEqual(letzte.mitte.x, 260, accuracy: 0.001)
-        XCTAssertEqual(letzte.mitte.y, 230, accuracy: 0.001)
+        XCTAssertEqual(letzte.transform.x, 260, accuracy: 0.001)
+        XCTAssertEqual(letzte.transform.y, 230, accuracy: 0.001)
         XCTAssertEqual(protokoll.begonnen, 1, "genau eine Undo-Klammer")
         XCTAssertEqual(protokoll.beendet, ["Ebene verschieben"])
     }
@@ -141,8 +141,8 @@ final class CanvasInteractionTests: XCTestCase {
         }
         canvas.mouseUp(with: try ereignis(.leftMouseUp, atCanvasX: 250, y: 200))
 
-        let letzte = try XCTUnwrap(protokoll.bewegungen.last)
-        XCTAssertEqual(letzte.mitte.x, 250, accuracy: 0.001)
+        let letzte = try XCTUnwrap(protokoll.aenderungen.last)
+        XCTAssertEqual(letzte.transform.x, 250, accuracy: 0.001)
     }
 
     /// Ein Klick mit leichtem Wackeln darf die Ebene nicht verschieben —
@@ -152,7 +152,7 @@ final class CanvasInteractionTests: XCTestCase {
         canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 201, y: 201))
         canvas.mouseUp(with: try ereignis(.leftMouseUp, atCanvasX: 201, y: 201))
 
-        XCTAssertTrue(protokoll.bewegungen.isEmpty)
+        XCTAssertTrue(protokoll.aenderungen.isEmpty)
         XCTAssertEqual(protokoll.begonnen, 0, "keine Undo-Klammer für einen Klick")
         XCTAssertTrue(protokoll.beendet.isEmpty)
     }
@@ -162,7 +162,7 @@ final class CanvasInteractionTests: XCTestCase {
         canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 300, y: 300))
         canvas.mouseUp(with: try ereignis(.leftMouseUp, atCanvasX: 300, y: 300))
 
-        XCTAssertTrue(protokoll.bewegungen.isEmpty)
+        XCTAssertTrue(protokoll.aenderungen.isEmpty)
         XCTAssertEqual(protokoll.begonnen, 0)
     }
 
@@ -196,5 +196,173 @@ final class CanvasInteractionTests: XCTestCase {
         let beiVier = rahmen.lineWidth
 
         XCTAssertEqual(beiVier, beiEins / 4, accuracy: 0.001)
+    }
+
+    // MARK: - Griffe
+
+    /// Ein Griff muss auch dann greifen, wenn er ausserhalb der Ebene liegt —
+    /// beim Drehgriff ist das immer so. Ohne Vorrang vor der Trefferprüfung
+    /// der Ebene wäre er unerreichbar.
+    func testHandlesTakePrecedenceOverTheLayerBeneath() throws {
+        canvas.selectedLayerID = ebeneID
+
+        // Ecke oben links der Ebene (Mittelpunkt 200/200, Grösse 100).
+        canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 150, y: 150))
+        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 100, y: 100))
+        canvas.mouseUp(with: try ereignis(.leftMouseUp, atCanvasX: 100, y: 100))
+
+        XCTAssertEqual(protokoll.beendet, ["Ebene skalieren"], "kein Verschieben, sondern Skalieren")
+
+        let letzte = try XCTUnwrap(protokoll.aenderungen.last)
+        // Gegenüberliegende Ecke bleibt bei 250/250, gezogene Ecke bei 100/100
+        // ergibt eine Ebene von 150 Punkten Kantenlänge.
+        XCTAssertEqual(abs(letzte.transform.scaleX), 1.5, accuracy: 0.001)
+        XCTAssertEqual(letzte.transform.x, 175, accuracy: 0.001, "der Mittelpunkt wandert mit")
+    }
+
+    /// Der Drehgriff sitzt ausserhalb der Ebene und muss trotzdem greifen.
+    func testRotationHandleIsReachableOutsideTheLayer() throws {
+        canvas.selectedLayerID = ebeneID
+
+        // Oberkante bei y=150, Drehgriff 28 Punkte darüber.
+        let griffY = 150.0 - CanvasView.rotationHandleDistance
+        canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 200, y: griffY))
+        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 300, y: 200))
+        canvas.mouseUp(with: try ereignis(.leftMouseUp, atCanvasX: 300, y: 200))
+
+        XCTAssertEqual(protokoll.beendet, ["Ebene drehen"])
+        let letzte = try XCTUnwrap(protokoll.aenderungen.last)
+        XCTAssertEqual(letzte.transform.rotationDegrees, 90, accuracy: 0.001)
+    }
+
+    /// Ohne Auswahl gibt es keine Griffe — ein Klick dort, wo bei ausgewählter
+    /// Ebene ein Griff sässe, darf nichts skalieren.
+    func testNoHandlesWithoutASelection() throws {
+        canvas.selectedLayerID = nil
+
+        canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 150, y: 150))
+        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 100, y: 100))
+        canvas.mouseUp(with: try ereignis(.leftMouseUp, atCanvasX: 100, y: 100))
+
+        XCTAssertNotEqual(protokoll.beendet.first, "Ebene skalieren")
+    }
+
+    /// Das Ziehen eines Griffs darf die Auswahl nicht ändern — sonst verlöre
+    /// man mitten im Skalieren die Ebene, an der man gerade arbeitet.
+    func testDraggingAHandleKeepsTheSelection() throws {
+        canvas.selectedLayerID = ebeneID
+        protokoll.auswahl.removeAll()
+
+        canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 250, y: 200))
+        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 300, y: 200))
+        canvas.mouseUp(with: try ereignis(.leftMouseUp, atCanvasX: 300, y: 200))
+
+        XCTAssertTrue(protokoll.auswahl.isEmpty, "keine neue Auswahlmeldung")
+        XCTAssertEqual(canvas.selectedLayerID, ebeneID)
+    }
+
+    /// Die Fangbereiche der Griffe müssen mit dem Zoom mitgehen: Bei
+    /// vierfacher Vergrösserung ist ein Bildschirmpunkt nur ein Viertel
+    /// Leinwandpunkt, der Fangbereich in Leinwandkoordinaten also kleiner.
+    func testHandleHitAreaShrinksWithZoom() throws {
+        canvas.selectedLayerID = ebeneID
+        canvas.zoomScale = 8
+
+        // 9 Leinwandpunkte neben der Ecke: bei Zoom 1 im Fangbereich,
+        // bei Zoom 8 (Fangbereich 11/8 ≈ 1,4 Punkte) deutlich ausserhalb.
+        canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 159, y: 159))
+        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 120, y: 120))
+        canvas.mouseUp(with: try ereignis(.leftMouseUp, atCanvasX: 120, y: 120))
+
+        XCTAssertEqual(protokoll.beendet, ["Ebene verschieben"], "kein Griff, also verschieben")
+    }
+
+    /// Griffe müssen gezeichnet werden, sobald etwas ausgewählt ist.
+    func testHandlesAreDrawnForTheSelection() throws {
+        let overlay = try XCTUnwrap(canvas.layer?.sublayers?.last)
+        let griffe = try XCTUnwrap(overlay.sublayers?.last as? CAShapeLayer)
+
+        XCTAssertNil(griffe.path, "ohne Auswahl keine Griffe")
+
+        canvas.selectedLayerID = ebeneID
+        let pfad = try XCTUnwrap(griffe.path)
+        // Acht Skaliergriffe plus Drehgriff plus Verbindungsstrich reichen
+        // über die Ebene hinaus nach oben.
+        XCTAssertLessThan(
+            pfad.boundingBox.minY, 150,
+            "der Drehgriff liegt oberhalb der Ebene"
+        )
+    }
+
+    // MARK: - Ausrichtungshilfen
+
+    private var linienSchicht: CAShapeLayer {
+        get throws {
+            let overlay = try XCTUnwrap(canvas.layer?.sublayers?.last)
+            // Reihenfolge im Overlay: Rahmen, Linien, Griffe.
+            return try XCTUnwrap(overlay.sublayers?[1] as? CAShapeLayer)
+        }
+    }
+
+    /// Beim Ziehen nahe der Leinwandmitte muss die Ebene einrasten — das ist
+    /// der häufigste Fall überhaupt (Plan 5.3: „Zentrieren").
+    func testDraggingNearTheCanvasCentreSnapsToIt() throws {
+        canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 200, y: 200))
+        // Ziel 3 Punkte neben der Leinwandmitte (200/200 bei 400×400).
+        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 203, y: 197))
+
+        let letzte = try XCTUnwrap(protokoll.aenderungen.last)
+        XCTAssertEqual(letzte.transform.x, 200, accuracy: 0.001, "waagrecht eingerastet")
+        XCTAssertEqual(letzte.transform.y, 200, accuracy: 0.001, "senkrecht eingerastet")
+        XCTAssertNotNil(try linienSchicht.path, "und die Hilfslinien sind sichtbar")
+    }
+
+    /// Weit weg von allem darf nichts einrasten — sonst kann man eine Ebene
+    /// nicht mehr frei platzieren.
+    func testDraggingFarFromAnyGuideDoesNotSnap() throws {
+        canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 200, y: 200))
+        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 137, y: 262))
+
+        let letzte = try XCTUnwrap(protokoll.aenderungen.last)
+        XCTAssertEqual(letzte.transform.x, 137, accuracy: 0.001)
+        XCTAssertEqual(letzte.transform.y, 262, accuracy: 0.001)
+        XCTAssertNil(try linienSchicht.path, "und keine Linien ohne Einrasten")
+    }
+
+    /// Nach dem Loslassen dürfen keine Linien stehen bleiben — sie sind eine
+    /// Hilfe während des Ziehens, danach nur noch Striche ohne Bezug.
+    func testGuidesDisappearWhenTheDragEnds() throws {
+        canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 200, y: 200))
+        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 203, y: 197))
+        XCTAssertNotNil(try linienSchicht.path)
+
+        canvas.mouseUp(with: try ereignis(.leftMouseUp, atCanvasX: 203, y: 197))
+        XCTAssertNil(try linienSchicht.path)
+    }
+
+    /// Beim Skalieren wird nicht eingerastet: Die Ebene würde unter dem Griff
+    /// wegspringen, statt der Bewegung zu folgen.
+    func testResizingDoesNotSnap() throws {
+        canvas.selectedLayerID = ebeneID
+
+        canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 250, y: 200))
+        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 303, y: 200))
+
+        XCTAssertNil(try linienSchicht.path)
+    }
+
+    /// Die Fangdistanz wird in Bildschirmpunkten gemessen: Wer hineinzoomt,
+    /// arbeitet feiner und will nicht aus grosser Entfernung eingefangen werden.
+    func testSnapDistanceShrinksWhenZoomedIn() throws {
+        canvas.zoomScale = 8
+
+        canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 200, y: 200))
+        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 205, y: 200))
+
+        let letzte = try XCTUnwrap(protokoll.aenderungen.last)
+        XCTAssertEqual(
+            letzte.transform.x, 205, accuracy: 0.001,
+            "5 Punkte sind bei 8-fachem Zoom deutlich mehr als die Fangdistanz"
+        )
     }
 }

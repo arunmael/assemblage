@@ -88,7 +88,7 @@ final class DocumentResources {
     /// aufgerufen, damit Pakete nicht unbegrenzt wachsen (Plan 2.1).
     func removeUnreferencedFiles(for document: AssemblageModel.Document) {
         for name in DocumentPackage.unreferencedFileNames(in: fileNames, for: document) {
-            unterSperre { wrappers.removeValue(forKey: name) }
+            unterSperre { _ = wrappers.removeValue(forKey: name) }
         }
     }
 
