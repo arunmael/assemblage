@@ -179,6 +179,21 @@ final class CanvasView: NSView {
             // auffrischen, kein Neuaufbau, keine neu dekodierten Bilder.
             for layer in document.layers {
                 guard let rendered = renderedLayers[layer.id] else { continue }
+
+                // Wechselt die Ebenenart (oder taucht ein fehlendes Original
+                // wieder auf), braucht es eine andere Schichtklasse. Sonst
+                // wird der Inhalt in der bestehenden Schicht aufgefrischt —
+                // ein Neuaufbau würde bei Bildebenen jedes Foto erneut
+                // dekodieren.
+                guard renderer.canReuse(rendered, for: layer.content) else {
+                    let neu = renderer.makeLayer(for: layer)
+                    withoutAnimation {
+                        canvasLayer.replaceSublayer(rendered, with: neu)
+                    }
+                    renderedLayers[layer.id] = neu
+                    continue
+                }
+
                 withoutAnimation {
                     renderer.apply(layer, to: rendered)
                     renderer.applyMask(layer, to: rendered)

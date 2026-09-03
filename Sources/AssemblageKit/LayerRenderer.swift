@@ -27,6 +27,25 @@ struct LayerRenderer {
         return rendered
     }
 
+    /// Lässt sich diese Schicht für den Inhalt weiterverwenden?
+    ///
+    /// Nur der Wechsel der Ebenen*art* verlangt eine neue Schicht — Text
+    /// braucht eine `CATextLayer`, eine Form eine `CAShapeLayer`. Alles
+    /// andere, auch ein geänderter Text oder eine andere Füllfarbe, wird in
+    /// der bestehenden Schicht aufgefrischt: Sie neu zu bauen hiesse bei
+    /// Bildebenen, das Foto erneut zu dekodieren.
+    func canReuse(_ renderedLayer: CALayer, for content: LayerContent) -> Bool {
+        switch content {
+        case .text: return renderedLayer is CATextLayer
+        case .shape: return renderedLayer is CAShapeLayer
+        case .image:
+            // Der Platzhalter für ein fehlendes Original ist eine schlichte
+            // CALayer; taucht die Datei wieder auf, muss neu gebaut werden.
+            guard !(renderedLayer is CATextLayer), !(renderedLayer is CAShapeLayer) else { return false }
+            return renderedLayer.contents != nil
+        }
+    }
+
     /// Hängt die Ebenenmaske als `CALayer.mask` an (Plan 5.4).
     ///
     /// Core Animation wendet sie damit auf der GPU an — dasselbe Vorgehen wie
@@ -58,8 +77,15 @@ struct LayerRenderer {
         renderedLayer.mask = maske
     }
 
-    /// Überträgt alles, was unabhängig vom Ebenentyp gilt.
+    /// Überträgt alles, was unabhängig vom Ebenentyp gilt — und frischt den
+    /// Inhalt der Schicht auf.
+    ///
+    /// Das Auffrischen gehört hierher und nicht nur in `makeLayer`: Sonst
+    /// zeigte die Leinwand nach dem Umschreiben eines Textes weiter den
+    /// alten, weil die Schicht ja schon existiert. Ein Neuaufbau passiert
+    /// nur, wenn sich die Ebenenstruktur ändert — beim Tippen also nie.
     func apply(_ layer: Layer, to renderedLayer: CALayer) {
+        applyContent(layer.content, to: renderedLayer)
         let contentSize = self.contentSize(of: layer.content)
 
         // `bounds` bleibt die *unskalierte* Inhaltsgrösse; Skalierung,
@@ -136,6 +162,27 @@ struct LayerRenderer {
         }
     }
 
+    /// Schreibt die inhaltsabhängigen Eigenschaften in eine bestehende
+    /// Schicht. Passt die Art nicht zur Schicht, passiert nichts — dann baut
+    /// der Aufrufer neu (siehe `canReuse(_:for:)`).
+    private func applyContent(_ content: LayerContent, to renderedLayer: CALayer) {
+        switch content {
+        case .text(let text):
+            guard let schicht = renderedLayer as? CATextLayer else { return }
+            applyText(text, to: schicht)
+
+        case .shape(let shape):
+            guard let schicht = renderedLayer as? CAShapeLayer else { return }
+            applyShape(shape, to: schicht)
+
+        case .image(let image):
+            guard !(renderedLayer is CATextLayer), !(renderedLayer is CAShapeLayer) else { return }
+            guard let bild = images.image(named: image.originalFileReference) else { return }
+            renderedLayer.contents = bild
+            applyCrop(image.cropRect, imageWidth: bild.width, imageHeight: bild.height, to: renderedLayer)
+        }
+    }
+
     private func makeImageLayer(_ content: ImageLayerContent) -> CALayer {
         guard let image = images.image(named: content.originalFileReference) else {
             return Self.makePlaceholderLayer()
@@ -149,35 +196,49 @@ struct LayerRenderer {
         layer.contentsGravity = .resize
         layer.magnificationFilter = .trilinear
         layer.minificationFilter = .trilinear
-
-        if let crop = content.cropRect {
-            // Zuschnitt nicht-destruktiv (Plan 5.3): Core Animation zeigt
-            // einfach einen Ausschnitt der Bitmap, das Original bleibt ganz.
-            layer.contentsRect = CGRect(
-                x: crop.x / Double(image.width),
-                y: crop.y / Double(image.height),
-                width: crop.width / Double(image.width),
-                height: crop.height / Double(image.height)
-            )
-        }
+        applyCrop(content.cropRect, imageWidth: image.width, imageHeight: image.height, to: layer)
         return layer
+    }
+
+    /// Zuschnitt nicht-destruktiv (Plan 5.3): Core Animation zeigt einen
+    /// Ausschnitt der Bitmap, das Original bleibt ganz.
+    private func applyCrop(_ crop: Rect?, imageWidth: Int, imageHeight: Int, to layer: CALayer) {
+        guard let crop, imageWidth > 0, imageHeight > 0 else {
+            layer.contentsRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+            return
+        }
+        layer.contentsRect = CGRect(
+            x: crop.x / Double(imageWidth),
+            y: crop.y / Double(imageHeight),
+            width: crop.width / Double(imageWidth),
+            height: crop.height / Double(imageHeight)
+        )
     }
 
     private func makeTextLayer(_ content: TextLayerContent) -> CATextLayer {
         let layer = CATextLayer()
-        layer.string = TextLayout.attributedString(for: content)
         layer.isWrapped = false
         layer.truncationMode = .none
+        applyText(content, to: layer)
+        return layer
+    }
+
+    private func applyText(_ content: TextLayerContent, to layer: CATextLayer) {
+        layer.string = TextLayout.attributedString(for: content)
         layer.alignmentMode = switch content.alignment {
         case .left: .left
         case .center: .center
         case .right: .right
         }
-        return layer
     }
 
     private func makeShapeLayer(_ content: ShapeLayerContent) -> CAShapeLayer {
         let layer = CAShapeLayer()
+        applyShape(content, to: layer)
+        return layer
+    }
+
+    private func applyShape(_ content: ShapeLayerContent, to layer: CAShapeLayer) {
         let bounds = CGRect(origin: .zero, size: content.size.cgSize)
 
         layer.path = switch content.kind {
@@ -197,7 +258,6 @@ struct LayerRenderer {
         }
 
         layer.fillColor = (RGBA(hex: content.fillColorHex) ?? .white).cgColor
-        return layer
     }
 
     /// Sichtbarer Platzhalter für eine Ebene, deren Originaldatei fehlt.
