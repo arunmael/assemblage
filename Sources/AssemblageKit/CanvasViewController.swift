@@ -89,6 +89,39 @@ final class CanvasViewController: NSViewController {
 
     // MARK: - Zoom
 
+    /// Setzt genau einen der von der Werkzeugleiste angebotenen Canvas-Modi.
+    /// `select` ist der gemeinsame Normalmodus für Auswählen und Verschieben:
+    /// Ein Klick wählt, ein Zug verschiebt die getroffene Ebene.
+    func setTool(_ tool: CanvasTool, forSelected layer: Layer?) {
+        loadViewIfNeeded()
+        guard let canvasView else { return }
+
+        let imageLayerID: UUID?
+        if let layer, case .image = layer.content {
+            imageLayerID = layer.id
+        } else {
+            imageLayerID = nil
+        }
+
+        switch tool {
+        case .select:
+            canvasView.croppingLayerID = nil
+            canvasView.brushLayerID = nil
+        case .crop:
+            canvasView.brushLayerID = nil
+            canvasView.croppingLayerID = imageLayerID
+        case .brush:
+            canvasView.croppingLayerID = nil
+            canvasView.brushLayerID = imageLayerID
+        }
+    }
+
+    /// Übergibt die sichtbaren Pinsel-Einstellungen unverändert an den Canvas.
+    func setBrush(_ brush: MaskBrush) {
+        loadViewIfNeeded()
+        canvasView?.brush = brush
+    }
+
     /// Passt die Leinwand mit etwas Luft ins Fenster ein.
     @objc func zoomToFit() {
         let available = scrollView.contentView.bounds.size
