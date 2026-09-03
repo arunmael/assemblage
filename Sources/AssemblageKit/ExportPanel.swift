@@ -18,11 +18,13 @@ import AssemblageModel
 enum ExportFormat: String, CaseIterable, Equatable {
     case png
     case jpeg
+    case pdf
 
     var displayName: String {
         switch self {
         case .png: return "PNG"
         case .jpeg: return "JPEG"
+        case .pdf: return "PDF"
         }
     }
 
@@ -30,6 +32,7 @@ enum ExportFormat: String, CaseIterable, Equatable {
         switch self {
         case .png: return "png"
         case .jpeg: return "jpg"
+        case .pdf: return "pdf"
         }
     }
 
@@ -37,11 +40,12 @@ enum ExportFormat: String, CaseIterable, Equatable {
         switch self {
         case .png: return .png
         case .jpeg: return .jpeg
+        case .pdf: return .pdf
         }
     }
 
-    /// PNG ist verlustfrei und kennt keine Qualitätsstufe — der Regler ergibt
-    /// nur bei JPEG einen Sinn (Aufgabe Punkt 2).
+    /// PNG ist verlustfrei, PDF zeichnet direkt in einen Vektorkontext. Der
+    /// Qualitätsregler ergibt deshalb nur bei JPEG einen Sinn.
     var supportsQuality: Bool { self == .jpeg }
 }
 
@@ -124,6 +128,16 @@ enum ExportPanelLogic {
         return "\(width) × \(height) Pixel"
     }
 
+    /// Menschenlesbare Zielgrösse für das gewählte Format. Bei PDF skaliert
+    /// die Auswahl die physische Seitengrösse: Eine Leinwandeinheit entspricht
+    /// bei 1× einem PDF-Punkt, bei 2× beziehungsweise 3× zwei oder drei
+    /// Punkten. „Pixel" wäre für eine Vektorseite irreführend.
+    static func formattedSize(canvas: CanvasSize, scale: Double, format: ExportFormat) -> String {
+        guard format == .pdf else { return formattedPixelSize(canvas: canvas, scale: scale) }
+        let size = pixelSize(canvas: canvas, scale: scale)
+        return "\(Int(size.width.rounded())) × \(Int(size.height.rounded())) Punkte"
+    }
+
     /// Rendert und schreibt die Export-Datei. Läuft komplett asynchron
     /// (Plan 2.1) über `DocumentExporter`; Schreibfehler werden als
     /// `ExportWriteError` gemeldet statt still zu verschwinden.
@@ -143,6 +157,8 @@ enum ExportPanelLogic {
             data = try await DocumentExporter.pngData(of: document, resources: resources, targetSize: targetSize)
         case .jpeg:
             data = try await DocumentExporter.jpegData(of: document, resources: resources, targetSize: targetSize, quality: quality)
+        case .pdf:
+            data = try await DocumentExporter.pdfData(of: document, resources: resources, pageSize: targetSize)
         }
 
         do {
@@ -316,6 +332,7 @@ final class ExportPanelController: NSObject {
         format = ExportFormat.allCases[sender.indexOfSelectedItem]
         applyFileExtension()
         updateQualityRowVisibility()
+        updatePixelSizeLabel()
     }
 
     @objc private func qualityChanged(_ sender: NSSlider) {
@@ -348,9 +365,10 @@ final class ExportPanelController: NSObject {
     }
 
     private func updatePixelSizeLabel() {
-        pixelSizeLabel.stringValue = ExportPanelLogic.formattedPixelSize(
+        pixelSizeLabel.stringValue = ExportPanelLogic.formattedSize(
             canvas: document.state.document.canvas,
-            scale: scaleOption.factor
+            scale: scaleOption.factor,
+            format: format
         )
     }
 

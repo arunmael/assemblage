@@ -39,12 +39,14 @@ final class ExportPanelTests: XCTestCase {
     func testFormatFileExtensions() {
         XCTAssertEqual(ExportFormat.png.fileExtension, "png")
         XCTAssertEqual(ExportFormat.jpeg.fileExtension, "jpg")
+        XCTAssertEqual(ExportFormat.pdf.fileExtension, "pdf")
     }
 
     func testFormatContentTypesDiffer() {
         XCTAssertNotEqual(ExportFormat.png.contentType, ExportFormat.jpeg.contentType)
         XCTAssertEqual(ExportFormat.png.contentType, .png)
         XCTAssertEqual(ExportFormat.jpeg.contentType, .jpeg)
+        XCTAssertEqual(ExportFormat.pdf.contentType, .pdf)
     }
 
     // MARK: - Qualität nur bei JPEG von Bedeutung
@@ -52,6 +54,7 @@ final class ExportPanelTests: XCTestCase {
     func testOnlyJPEGSupportsQuality() {
         XCTAssertFalse(ExportFormat.png.supportsQuality)
         XCTAssertTrue(ExportFormat.jpeg.supportsQuality)
+        XCTAssertFalse(ExportFormat.pdf.supportsQuality)
     }
 
     // MARK: - Pixelgrösse je Skalierungsfaktor
@@ -68,6 +71,14 @@ final class ExportPanelTests: XCTestCase {
         // voneinander skaliert werden, nicht nur eine Zahl verdoppelt.
         let canvas = CanvasSize(width: 1080, height: 1920)
         XCTAssertEqual(ExportPanelLogic.formattedPixelSize(canvas: canvas, scale: ExportScaleOption.x2.factor), "2160 × 3840 Pixel")
+    }
+
+    func testPDFSizeIsLabelledInPoints() {
+        let canvas = CanvasSize(width: 1080, height: 1920)
+        XCTAssertEqual(
+            ExportPanelLogic.formattedSize(canvas: canvas, scale: ExportScaleOption.x2.factor, format: .pdf),
+            "2160 × 3840 Punkte"
+        )
     }
 
     // MARK: - Export: Fehler beim Schreiben
