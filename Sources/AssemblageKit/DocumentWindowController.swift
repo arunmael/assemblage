@@ -17,18 +17,31 @@ final class DocumentWindowController: NSWindowController {
     convenience init() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.titlebarAppearsTransparent = true
+        // Bewusst ohne `.fullSizeContentView`: Ohne Werkzeugleiste liefe die
+        // Leinwand sonst unter die Titelleiste und überdeckte den
+        // Dokumentnamen. Sobald die Werkzeugleiste aus Plan 8 dazukommt, kann
+        // sie den Platz übernehmen und der durchgehende Inhalt wieder rein.
         window.setFrameAutosaveName("AssemblageDocumentWindow")
         self.init(window: window)
     }
 
-    override func windowDidLoad() {
-        super.windowDidLoad()
-        guard let state = (document as? AssemblageDocument)?.state else { return }
+    /// Der Inhalt entsteht erst, wenn das Dokument zugewiesen ist.
+    ///
+    /// Nicht in `windowDidLoad()`: Das läuft, *bevor*
+    /// `NSDocument.addWindowController(_:)` das Dokument setzt — der Aufbau
+    /// fände dort kein `state` vor und das Fenster bliebe leer.
+    override var document: AnyObject? {
+        didSet { buildContentIfNeeded() }
+    }
+
+    private func buildContentIfNeeded() {
+        guard contentViewController == nil,
+              let state = (document as? AssemblageDocument)?.state
+        else { return }
 
         let layers = NSHostingController(rootView: LayerListView(state: state))
         let canvas = CanvasViewController(state: state)
@@ -57,6 +70,14 @@ final class DocumentWindowController: NSWindowController {
 
         contentViewController = splitViewController
         window?.toolbarStyle = .unified
+    }
+
+    /// Wird beim Laden aus einer Feder aufgerufen; bei uns entsteht das
+    /// Fenster im Code. Trotzdem hier abgesichert, falls das Dokument
+    /// ausnahmsweise schon vor dem Laden gesetzt war.
+    override func windowDidLoad() {
+        super.windowDidLoad()
+        buildContentIfNeeded()
     }
 
     // MARK: - Menübefehle

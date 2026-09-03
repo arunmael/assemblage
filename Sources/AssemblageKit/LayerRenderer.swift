@@ -22,7 +22,6 @@ struct LayerRenderer {
 
     func makeLayer(for layer: Layer) -> CALayer {
         let rendered = makeContentLayer(for: layer.content)
-        rendered.contentsScale = contentsScale
         apply(layer, to: rendered)
         return rendered
     }
@@ -30,14 +29,28 @@ struct LayerRenderer {
     /// Überträgt alles, was unabhängig vom Ebenentyp gilt.
     func apply(_ layer: Layer, to renderedLayer: CALayer) {
         let contentSize = self.contentSize(of: layer.content)
-        let frame = layer.transform.unrotatedFrame(forContentSize: contentSize).cgRect
 
-        // Erst bounds/position setzen, dann die Matrix: `frame` ist bei einer
-        // gedrehten Ebene nicht mehr sinnvoll beschreibbar, deshalb nie
-        // `renderedLayer.frame = …` verwenden.
-        renderedLayer.bounds = CGRect(origin: .zero, size: frame.size)
-        renderedLayer.position = CGPoint(x: frame.midX, y: frame.midY)
+        // `bounds` bleibt die *unskalierte* Inhaltsgrösse; Skalierung,
+        // Spiegelung und Drehung stecken zusammen in der Matrix.
+        //
+        // Das muss so herum sein: Der Pfad einer `CAShapeLayer` wächst nicht
+        // mit ihren Bounds, und `CATextLayer` setzt in `fontSize` statt auf
+        // Bounds-Grösse. Skalierung über `bounds` würde also nur Bildebenen
+        // treffen und Formen wie Text unverändert lassen.
+        //
+        // Nie `renderedLayer.frame = …` verwenden: Bei einer gedrehten Ebene
+        // ist `frame` nicht mehr sinnvoll beschreibbar.
+        renderedLayer.bounds = CGRect(origin: .zero, size: contentSize.cgSize)
+        renderedLayer.position = CGPoint(x: layer.transform.x, y: layer.transform.y)
         renderedLayer.transform = layer.transform.renderTransform
+
+        // Vektorinhalte bei starker Vergrösserung feiner rastern, sonst wird
+        // eine hochskalierte Schrift sichtbar unscharf. Bei Bildern bringt das
+        // nichts — deren Pixelzahl steht fest.
+        renderedLayer.contentsScale = switch layer.content {
+        case .image: contentsScale
+        case .text, .shape: contentsScale * max(abs(layer.transform.scaleX), abs(layer.transform.scaleY), 1)
+        }
 
         renderedLayer.isHidden = !layer.isVisible
         renderedLayer.opacity = Float(layer.opacity.clamped(to: 0...1))

@@ -125,6 +125,96 @@ final class CanvasRenderingTests: XCTestCase {
         assertRoughly(try color(of: context, atCanvasX: 200, y: 140), leereLeinwand, "knapp darüber ist leer")
     }
 
+    // MARK: - Skalierung
+
+    /// Skalierung muss für *alle* Ebenentypen wirken, nicht nur für Bilder.
+    ///
+    /// Anlass: Der Pfad einer `CAShapeLayer` skaliert nicht mit ihren
+    /// `bounds` — eine Hintergrundfläche mit Skalierung 2,7 blieb dadurch in
+    /// Originalgrösse und liess die Leinwand halb leer. Bei Text wäre es
+    /// genauso: `CATextLayer` setzt in `fontSize`, nicht auf Bounds-Grösse.
+    func testScaledShapeCoversTheScaledArea() throws {
+        // 100×100 bei doppelter Skalierung um (200,200) → belegt 100…300.
+        let document = AssemblageModel.Document(
+            canvas: CanvasSize(width: 400, height: 400),
+            layers: [
+                Layer(
+                    name: "Gross",
+                    transform: Transform2D(x: 200, y: 200, scaleX: 2, scaleY: 2),
+                    content: .shape(
+                        ShapeLayerContent(
+                            kind: .rectangle,
+                            size: Size(width: 100, height: 100),
+                            fillColorHex: "#FF0000"
+                        )
+                    )
+                )
+            ]
+        )
+
+        let context = try render(document)
+
+        assertRoughly(try color(of: context, atCanvasX: 200, y: 110), (255, 0, 0), "obere Kante bei y=100")
+        assertRoughly(try color(of: context, atCanvasX: 110, y: 200), (255, 0, 0), "linke Kante bei x=100")
+        assertRoughly(try color(of: context, atCanvasX: 200, y: 290), (255, 0, 0), "untere Kante bei y=300")
+        assertRoughly(try color(of: context, atCanvasX: 200, y: 80), leereLeinwand, "darüber bleibt leer")
+    }
+
+    /// Eine Textebene muss ebenfalls mitwachsen.
+    func testScaledTextCoversMoreThanUnscaledText() throws {
+        func breiteDerSchrift(scale: Double) throws -> Int {
+            let document = AssemblageModel.Document(
+                canvas: CanvasSize(width: 400, height: 400),
+                layers: [
+                    Layer(
+                        name: "T",
+                        transform: Transform2D(x: 200, y: 200, scaleX: scale, scaleY: scale),
+                        content: .text(
+                            TextLayerContent(string: "MMM", fontSize: 40, colorHex: "#000000")
+                        )
+                    )
+                ]
+            )
+            let context = try render(document)
+            // Bemalte Spalten auf der Mittelzeile zählen.
+            return try (0..<400).filter { x in
+                try color(of: context, atCanvasX: x, y: 200) != leereLeinwand
+            }.count
+        }
+
+        let einfach = try breiteDerSchrift(scale: 1)
+        let doppelt = try breiteDerSchrift(scale: 2)
+
+        XCTAssertGreaterThan(einfach, 0, "der Text muss überhaupt erscheinen")
+        XCTAssertGreaterThan(doppelt, einfach * 3 / 2, "doppelt skaliert muss deutlich breiter sein")
+    }
+
+    /// Spiegeln (negative Skalierung, Plan 5.5) muss das Bild kippen, nicht
+    /// die Ebene verschwinden lassen.
+    func testMirroredLayerIsStillDrawnInPlace() throws {
+        let document = AssemblageModel.Document(
+            canvas: CanvasSize(width: 400, height: 400),
+            layers: [
+                Layer(
+                    name: "Gespiegelt",
+                    transform: Transform2D(x: 200, y: 200, scaleX: -2, scaleY: 2),
+                    content: .shape(
+                        ShapeLayerContent(
+                            kind: .rectangle,
+                            size: Size(width: 100, height: 100),
+                            fillColorHex: "#0000FF"
+                        )
+                    )
+                )
+            ]
+        )
+
+        let context = try render(document)
+
+        assertRoughly(try color(of: context, atCanvasX: 200, y: 200), (0, 0, 255), "die Ebene bleibt sichtbar")
+        assertRoughly(try color(of: context, atCanvasX: 110, y: 200), (0, 0, 255), "und behält ihre Ausdehnung")
+    }
+
     // MARK: - Ebenenreihenfolge & Sichtbarkeit
 
     /// Index 0 liegt zuunterst — die spätere Ebene muss die frühere verdecken.
