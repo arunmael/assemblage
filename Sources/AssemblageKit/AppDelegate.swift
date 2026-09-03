@@ -71,6 +71,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         duplicate.keyEquivalentModifierMask = [.command, .shift]
         menu.addItem(duplicate)
 
+        let export = NSMenuItem(title: "Exportieren…", action: #selector(DocumentWindowController.exportDocument(_:)), keyEquivalent: "e")
+        export.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(export)
+
         menu.addItem(withTitle: "Zurücksetzen auf…", action: #selector(NSDocument.revertToSaved(_:)), keyEquivalent: "")
         // „Alle Versionen durchsuchen…" — der Zeitmaschinen-Browser aus
         // Plan 2.1, den NSDocument mitbringt.
