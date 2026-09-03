@@ -5,9 +5,9 @@ import ImageIO
 import Foundation
 import AssemblageModel
 
-/// Rendert die komplette Ebenenkette eines Dokuments in eine Bitmap zum
-/// Exportieren (Plan 5.8: PNG mit Transparenz, JPEG). PDF ist ausdrücklich
-/// nicht Teil dieser Datei (Phase 3).
+/// Rendert die komplette Ebenenkette eines Dokuments für den Export (Plan
+/// 5.8: PNG mit Transparenz, JPEG und PDF). Bitmap- und PDF-Ausgabe verwenden
+/// dieselbe `CGContext`-Zeichenlogik, damit sie nicht auseinanderlaufen.
 ///
 /// Warum das nicht einfach `CanvasView`/`LayerRenderer` wiederverwendet:
 /// Der Bildschirm-Canvas komponiert über einen `CALayer`-Baum, dessen
@@ -31,6 +31,7 @@ enum DocumentExporter {
         case invalidTargetSize
         case renderingFailed
         case encodingFailed
+        case pdfCreationFailed
 
         var errorDescription: String? {
             switch self {
@@ -40,6 +41,8 @@ enum DocumentExporter {
                 return "Die Ebenen liessen sich nicht zu einem Bild zusammensetzen."
             case .encodingFailed:
                 return "Das gerenderte Bild liess sich nicht in das Zielformat kodieren."
+            case .pdfCreationFailed:
+                return "Das PDF-Dokument liess sich nicht erstellen."
             }
         }
     }
@@ -93,6 +96,20 @@ enum DocumentExporter {
         }
     }
 
+    /// PDF-Daten mit genau einer transparenten Seite. Die Seitengrösse wird
+    /// in Punkten angegeben. Direktes Zeichnen in den PDF-Kontext erhält
+    /// Text und Formen als Vektoren; nur Bildebenen und Masken bleiben ihrer
+    /// Natur entsprechend Rasterdaten.
+    static func pdfData(
+        of document: AssemblageModel.Document,
+        resources: DocumentResources,
+        pageSize: CGSize
+    ) async throws -> Data {
+        try await runOffMainActor {
+            try encodedPDFData(of: document, resources: resources, pageSize: pageSize)
+        }
+    }
+
     /// Verlagert eine wirft-fähige, nicht-Sendable-freie Berechnung auf einen
     /// Hintergrund-Task. `@unchecked Sendable`-Fracht ist hier vertretbar wie
     /// beim `ParsedContents`-Muster in `AssemblageDocument.swift`: das
@@ -121,10 +138,23 @@ enum DocumentExporter {
             throw ExportError.renderingFailed
         }
 
-        // Eine Leinwand mit Grösse null hat kein sinnvolles Koordinaten-
-        // system — ein leeres (durchsichtiges) Bild ist dann die richtige
-        // Antwort, kein Fehler (Plan 2.1: fehlende Inhalte dürfen den Export
-        // nicht scheitern lassen).
+        drawDocument(document, resources: resources, targetSize: targetSize, into: context)
+
+        guard let image = context.makeImage() else { throw ExportError.renderingFailed }
+        return image
+    }
+
+    /// Gemeinsamer Zeichenpfad für Bitmap und PDF. Der Zielkontext bestimmt,
+    /// ob Pfade und Text als Pixel oder als Vektoren ausgegeben werden.
+    private static func drawDocument(
+        _ document: AssemblageModel.Document,
+        resources: DocumentResources,
+        targetSize: CGSize,
+        into context: CGContext
+    ) {
+        // Eine Leinwand mit Grösse null hat kein sinnvolles Koordinatensystem.
+        // In diesem Fall bleibt das Ziel leer, statt den Export wegen
+        // fehlender Inhalte scheitern zu lassen (Plan 2.1).
         if document.canvas.width > 0, document.canvas.height > 0 {
             let exportScale = CGSize(
                 width: targetSize.width / CGFloat(document.canvas.width),
@@ -140,9 +170,6 @@ enum DocumentExporter {
                 context.restoreGState()
             }
         }
-
-        guard let image = context.makeImage() else { throw ExportError.renderingFailed }
-        return image
     }
 
     private static func encodedPNGData(
@@ -181,6 +208,33 @@ enum DocumentExporter {
             throw ExportError.encodingFailed
         }
         return data
+    }
+
+    private static func encodedPDFData(
+        of document: AssemblageModel.Document,
+        resources: DocumentResources,
+        pageSize: CGSize
+    ) throws -> Data {
+        guard pageSize.width > 0, pageSize.height > 0 else {
+            throw ExportError.invalidTargetSize
+        }
+
+        let mutableData = NSMutableData()
+        guard let consumer = CGDataConsumer(data: mutableData as CFMutableData) else {
+            throw ExportError.pdfCreationFailed
+        }
+        var mediaBox = CGRect(origin: .zero, size: pageSize)
+        guard let context = CGContext(consumer: consumer, mediaBox: &mediaBox, nil) else {
+            throw ExportError.pdfCreationFailed
+        }
+
+        context.beginPDFPage(nil)
+        drawDocument(document, resources: resources, targetSize: pageSize, into: context)
+        context.endPDFPage()
+        context.closePDF()
+
+        guard mutableData.length > 0 else { throw ExportError.pdfCreationFailed }
+        return mutableData as Data
     }
 
     // MARK: - Eine Ebene zeichnen
