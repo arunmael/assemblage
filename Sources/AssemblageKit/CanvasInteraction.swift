@@ -21,6 +21,10 @@ protocol CanvasInteractionDelegate: AnyObject {
     func canvasView(_ canvasView: CanvasView, didChangeLayerWithID id: UUID, to transform: Transform2D)
 
     func canvasView(_ canvasView: CanvasView, didEndInteractionNamed actionName: String)
+
+    /// Auf die Leinwand gezogene Bilder (Plan 5.1). Der Canvas nimmt sie nur
+    /// entgegen; was damit geschieht, entscheidet das Dokument.
+    func canvasView(_ canvasView: CanvasView, didReceiveDropFrom pasteboard: NSPasteboard)
 }
 
 /// Ein laufendes Ziehen auf dem Canvas.

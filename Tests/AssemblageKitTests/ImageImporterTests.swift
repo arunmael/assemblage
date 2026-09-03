@@ -209,3 +209,75 @@ final class ImageImporterTests: XCTestCase {
         XCTAssertEqual(importable, [png])
     }
 }
+
+/// Vorabprüfung für Drag & Drop.
+///
+/// Der Canvas muss beim Darüberziehen entscheiden, ob er Bereitschaft
+/// signalisiert — **bevor** irgendetwas importiert wird. Ohne diese Prüfung
+/// zeigt der Finder ein Pluszeichen, und die App verschluckt den Wurf danach
+/// wortlos: der Nutzer sieht eine Zusage, die nicht eingehalten wird.
+final class ImportPreflightTests: XCTestCase {
+
+    private func pasteboard(withFiles urls: [URL]) -> NSPasteboard {
+        let board = NSPasteboard(name: NSPasteboard.Name(rawValue: "Test-\(UUID().uuidString)"))
+        board.clearContents()
+        board.writeObjects(urls as [NSURL])
+        return board
+    }
+
+    private var verzeichnis: URL!
+
+    override func setUpWithError() throws {
+        verzeichnis = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("ImportPreflight-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: verzeichnis, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: verzeichnis)
+    }
+
+    private func datei(_ name: String) throws -> URL {
+        let url = verzeichnis.appendingPathComponent(name)
+        try Data("Inhalt".utf8).write(to: url)
+        return url
+    }
+
+    func testPasteboardWithSupportedImageIsAccepted() throws {
+        let board = pasteboard(withFiles: [try datei("foto.png")])
+
+        XCTAssertTrue(ImageImporter.canImport(from: board))
+    }
+
+    func testPasteboardWithOnlyUnsupportedFilesIsRejected() throws {
+        let board = pasteboard(withFiles: [try datei("text.pdf"), try datei("tabelle.xlsx")])
+
+        XCTAssertFalse(ImageImporter.canImport(from: board))
+    }
+
+    /// Gemischte Auswahl: Sind Bilder dabei, wird angenommen — die
+    /// unbrauchbaren werden beim Import übergangen.
+    func testMixedSelectionIsAccepted() throws {
+        let board = pasteboard(withFiles: [try datei("text.pdf"), try datei("foto.jpg")])
+
+        XCTAssertTrue(ImageImporter.canImport(from: board))
+    }
+
+    func testEmptyPasteboardIsRejected() {
+        let board = NSPasteboard(name: NSPasteboard.Name(rawValue: "Leer-\(UUID().uuidString)"))
+        board.clearContents()
+
+        XCTAssertFalse(ImageImporter.canImport(from: board))
+    }
+
+    /// Die Prüfung darf nichts importieren — sie läuft bei jeder Mausbewegung
+    /// über der Leinwand, während der Nutzer noch zieht.
+    func testPreflightDoesNotTouchTheDocumentPackage() throws {
+        let board = pasteboard(withFiles: [try datei("foto.png")])
+        let resources = DocumentResources()
+
+        _ = ImageImporter.canImport(from: board)
+
+        XCTAssertTrue(resources.fileNames.isEmpty)
+    }
+}

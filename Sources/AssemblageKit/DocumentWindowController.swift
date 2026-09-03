@@ -25,7 +25,37 @@ final class DocumentWindowController: NSWindowController {
         // Leinwand sonst unter die Titelleiste und überdeckte den
         // Dokumentnamen. Sobald die Werkzeugleiste aus Plan 8 dazukommt, kann
         // sie den Platz übernehmen und der durchgehende Inhalt wieder rein.
+
+        // Mindestgrösse **vor** dem Wiederherstellen des gesicherten Rahmens
+        // setzen, sonst zieht AppKit sie nicht heran.
+        //
+        // Ohne sie kann das Fenster auf einen Streifen in Höhe der Titelleiste
+        // zusammenfallen — und `setFrameAutosaveName` schreibt genau das in
+        // die Voreinstellungen, sodass die App bei jedem weiteren Start leer
+        // hochkommt und sich ohne Eingriff von Hand nicht mehr erholt. Die
+        // Werte reichen für die drei Bereiche aus Plan 8: Ebenenliste (200),
+        // Leinwand (400) und Eigenschaften (260).
+        window.contentMinSize = NSSize(width: 880, height: 480)
         window.setFrameAutosaveName("AssemblageDocumentWindow")
+
+        // Einen bereits zusammengefallen gesicherten Rahmen aufrichten.
+        // `contentMinSize` allein genügt nicht: Sie begrenzt das Ziehen am
+        // Fensterrand, nicht das Wiederherstellen eines gesicherten Rahmens.
+        // Ohne diese Zeile bliebe eine App, der das einmal passiert ist, für
+        // immer kaputt.
+        let mindest = window.frameRect(forContentRect: NSRect(origin: .zero, size: window.contentMinSize)).size
+        if window.frame.width < mindest.width || window.frame.height < mindest.height {
+            window.setFrame(
+                NSRect(
+                    origin: window.frame.origin,
+                    size: NSSize(
+                        width: max(window.frame.width, mindest.width),
+                        height: max(window.frame.height, mindest.height)
+                    )
+                ),
+                display: false
+            )
+        }
         self.init(window: window)
     }
 

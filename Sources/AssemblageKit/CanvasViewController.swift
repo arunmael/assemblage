@@ -145,4 +145,51 @@ extension CanvasViewController: CanvasInteractionDelegate {
     func canvasView(_ canvasView: CanvasView, didEndInteractionNamed actionName: String) {
         state.owner?.endInteraction(actionName: actionName)
     }
+
+    func canvasView(_ canvasView: CanvasView, didReceiveDropFrom pasteboard: NSPasteboard) {
+        guard let document = state.owner else { return }
+
+        let ergebnis = ImageImporter.import(
+            from: pasteboard,
+            resources: state.resources,
+            canvas: state.document.canvas
+        )
+
+        if !ergebnis.images.isEmpty {
+            // Alle auf einmal gezogenen Bilder bilden einen Undo-Schritt: Wer
+            // fünf Fotos hereinzieht und es sich anders überlegt, will einmal
+            // ⌘Z drücken, nicht fünfmal.
+            document.beginInteraction()
+            document.modify("Bilder einsetzen") { dokument in
+                for bild in ergebnis.images {
+                    try? dokument.addLayer(bild.layer)
+                }
+            }
+            document.endInteraction(
+                actionName: ergebnis.images.count == 1 ? "Bild einsetzen" : "Bilder einsetzen"
+            )
+
+            // Das zuletzt eingesetzte Bild auswählen — man will es meist
+            // gleich verschieben.
+            state.selectedLayerID = ergebnis.images.last?.layer.id
+        }
+
+        // Fehlgeschlagene Dateien benennen statt stillschweigend zu schlucken
+        // (Plan 2.1). Die erfolgreichen sind zu diesem Zeitpunkt schon drin.
+        if let ersterFehler = ergebnis.failures.first {
+            let alert = NSAlert()
+            alert.messageText = ergebnis.failures.count == 1
+                ? "\(ersterFehler.name) konnte nicht importiert werden."
+                : "\(ergebnis.failures.count) Dateien konnten nicht importiert werden."
+            alert.informativeText = ergebnis.failures
+                .map { "\($0.name): \($0.error.localizedDescription)" }
+                .joined(separator: "\n")
+            alert.alertStyle = .warning
+            if let fenster = canvasView.window {
+                alert.beginSheetModal(for: fenster)
+            } else {
+                alert.runModal()
+            }
+        }
+    }
 }

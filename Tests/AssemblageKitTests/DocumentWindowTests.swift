@@ -68,3 +68,58 @@ final class DocumentWindowTests: XCTestCase {
         XCTAssertNotNil(canvas.view as? NSScrollView)
     }
 }
+
+/// Das Dokumentfenster darf nicht auf nichts zusammenfallen können.
+///
+/// Anlass war ein Fenster, das als 860 × **42** Punkte grosser Streifen
+/// startete — nur die Titelleiste. Es meldete sich als sichtbar, war aber
+/// leer, und weil `setFrameAutosaveName` diesen Zustand speichert, kam die
+/// App bei jedem weiteren Start so wieder hoch. Ein Fehler, den man nicht
+/// mehr los wird, ohne Voreinstellungen von Hand zu löschen — genau das darf
+/// nach Plan 2.1 nicht passieren.
+@MainActor
+final class WindowMinimumSizeTests: XCTestCase {
+
+    private func fenster() throws -> NSWindow {
+        let document = AssemblageDocument()
+        document.makeWindowControllers()
+        let controller = try XCTUnwrap(document.windowControllers.first)
+        return try XCTUnwrap(controller.window)
+    }
+
+    /// Die Mindestgrösse muss die drei Bereiche aus Plan 8 überhaupt
+    /// unterbringen können: Ebenen, Leinwand, Eigenschaften.
+    func testWindowHasAUsableMinimumSize() throws {
+        let w = try fenster()
+
+        XCTAssertGreaterThanOrEqual(w.contentMinSize.width, 640)
+        XCTAssertGreaterThanOrEqual(w.contentMinSize.height, 400)
+    }
+
+    /// Der entscheidende Fall, genau so aufgetreten: In den Voreinstellungen
+    /// steht ein zusammengefallener Rahmen aus einer früheren Sitzung. Beim
+    /// Start muss er korrigiert werden — sonst kommt die App dauerhaft leer
+    /// hoch und erholt sich ohne Eingriff von Hand nicht mehr.
+    func testCollapsedSavedFrameIsCorrectedOnLaunch() throws {
+        let schluessel = "NSWindow Frame AssemblageDocumentWindow"
+        let vorher = UserDefaults.standard.string(forKey: schluessel)
+        defer {
+            if let vorher {
+                UserDefaults.standard.set(vorher, forKey: schluessel)
+            } else {
+                UserDefaults.standard.removeObject(forKey: schluessel)
+            }
+        }
+
+        // Der tatsächlich vorgefundene Wert: 860 breit, 42 hoch.
+        UserDefaults.standard.set("0 810 860 42 0 0 1470 923 ", forKey: schluessel)
+
+        let w = try fenster()
+
+        XCTAssertGreaterThanOrEqual(
+            w.frame.height, w.contentMinSize.height,
+            "ein zusammengefallen gesicherter Rahmen muss sich wieder aufrichten"
+        )
+        XCTAssertGreaterThanOrEqual(w.frame.width, w.contentMinSize.width)
+    }
+}

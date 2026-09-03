@@ -30,6 +30,10 @@ final class CanvasInteractionTests: XCTestCase {
         func canvasView(_ canvasView: CanvasView, didEndInteractionNamed actionName: String) {
             beendet.append(actionName)
         }
+        var wuerfe = 0
+        func canvasView(_ canvasView: CanvasView, didReceiveDropFrom pasteboard: NSPasteboard) {
+            wuerfe += 1
+        }
     }
 
     private var fenster: NSWindow!
@@ -364,5 +368,74 @@ final class CanvasInteractionTests: XCTestCase {
             letzte.transform.x, 205, accuracy: 0.001,
             "5 Punkte sind bei 8-fachem Zoom deutlich mehr als die Fangdistanz"
         )
+    }
+
+    // MARK: - Bilder auf die Leinwand ziehen
+
+    private final class Wurf: NSObject, NSDraggingInfo {
+        let board: NSPasteboard
+        init(board: NSPasteboard) { self.board = board }
+
+        var draggingPasteboard: NSPasteboard { board }
+        var draggingDestinationWindow: NSWindow? { nil }
+        var draggingSourceOperationMask: NSDragOperation { .copy }
+        var draggingLocation: NSPoint { .zero }
+        var draggedImageLocation: NSPoint { .zero }
+        // Veraltete Anforderung des Protokolls; wird von unserem Code nicht
+        // gelesen, muss aber vorhanden sein.
+        var draggedImage: NSImage? { nil }
+        var draggingSequenceNumber: Int { 0 }
+        var draggingSource: Any? { nil }
+        var animatesToDestination: Bool { get { false } set {} }
+        var numberOfValidItemsForDrop: Int { get { 1 } set {} }
+        var draggingFormation: NSDraggingFormation { get { .default } set {} }
+        var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+        func slideDraggedImage(to screenPoint: NSPoint) {}
+        func enumerateDraggingItems(
+            options: NSDraggingItemEnumerationOptions,
+            for view: NSView?,
+            classes: [AnyClass],
+            searchOptions: [NSPasteboard.ReadingOptionKey: Any],
+            using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
+        ) {}
+        func resetSpringLoading() {}
+    }
+
+    private func wurfMit(dateien namen: [String]) throws -> Wurf {
+        let ordner = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("Wurf-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: ordner, withIntermediateDirectories: true)
+        let urls = try namen.map { name -> URL in
+            let url = ordner.appendingPathComponent(name)
+            try Data("x".utf8).write(to: url)
+            return url
+        }
+        let board = NSPasteboard(name: NSPasteboard.Name(rawValue: "Wurf-\(UUID().uuidString)"))
+        board.clearContents()
+        board.writeObjects(urls as [NSURL])
+        return Wurf(board: board)
+    }
+
+    /// Bereitschaft nur melden, wenn wirklich etwas Brauchbares dabei ist —
+    /// sonst zeigt der Finder ein Pluszeichen und der Wurf verpufft.
+    func testCanvasAcceptsImagesAndRefusesOtherFiles() throws {
+        XCTAssertEqual(canvas.draggingEntered(try wurfMit(dateien: ["foto.png"])), .copy)
+        XCTAssertEqual(canvas.draggingEntered(try wurfMit(dateien: ["text.pdf"])), [])
+    }
+
+    func testDroppingImagesReachesTheDelegate() throws {
+        let angenommen = canvas.performDragOperation(try wurfMit(dateien: ["a.png", "b.jpg"]))
+
+        XCTAssertTrue(angenommen)
+        XCTAssertEqual(protokoll.wuerfe, 1, "der Wurf wird als Ganzes gemeldet, nicht je Datei")
+    }
+
+    /// Ein Wurf ohne Bilder darf nicht angenommen werden — sonst meldet die
+    /// App Erfolg für etwas, das sie gar nicht verarbeitet hat.
+    func testDroppingUnsupportedFilesIsRefused() throws {
+        let angenommen = canvas.performDragOperation(try wurfMit(dateien: ["text.pdf"]))
+
+        XCTAssertFalse(angenommen)
+        XCTAssertEqual(protokoll.wuerfe, 0)
     }
 }

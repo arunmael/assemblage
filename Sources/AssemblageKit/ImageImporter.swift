@@ -111,6 +111,19 @@ enum ImageImporter {
         return process(sources, resources: resources, canvas: canvas)
     }
 
+    /// Ist auf dem Pasteboard überhaupt etwas Importierbares?
+    ///
+    /// Für Drag & Drop: Der Canvas muss beim Darüberziehen Bereitschaft
+    /// melden oder eben nicht — und zwar **bevor** etwas importiert wird.
+    /// Meldet er Bereitschaft für etwas, das er dann doch nicht annimmt, sieht
+    /// der Nutzer ein Pluszeichen und danach passiert nichts.
+    ///
+    /// Liest bewusst nur die Typen, nicht die Daten: Die Prüfung läuft bei
+    /// jeder Mausbewegung über der Leinwand.
+    static func canImport(from pasteboard: NSPasteboard) -> Bool {
+        !importableSources(from: pasteboard).isEmpty
+    }
+
     /// Importiert alles Importierbare von einem Pasteboard — die Quelle
     /// sowohl für Drag & Drop aus Finder/Fotos-App als auch für „Einfügen“.
     /// Deckt zwei Fälle ab: Dateien (Finder legt Datei-URLs ab) und reine

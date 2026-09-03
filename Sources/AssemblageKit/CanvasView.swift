@@ -109,6 +109,10 @@ final class CanvasView: NSView {
         handleShapes.strokeColor = NSColor.controlAccentColor.cgColor
         layer?.addSublayer(overlayLayer)
 
+        // Fotos aus dem Finder oder der Fotos-App direkt auf die Leinwand
+        // ziehen (Plan 5.1).
+        registerForDraggedTypes([.fileURL, .tiff, .png])
+
         rebuild()
     }
 
@@ -419,5 +423,31 @@ final class CenteringClipView: NSClipView {
             rect.origin.y = (content.height - rect.height) / 2
         }
         return rect
+    }
+}
+
+// MARK: - Bilder auf die Leinwand ziehen
+
+extension CanvasView {
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        dropOperation(for: sender)
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        dropOperation(for: sender)
+    }
+
+    /// Meldet nur dann Bereitschaft, wenn tatsächlich etwas Brauchbares
+    /// dabei ist — sonst zeigt der Finder ein Pluszeichen an und die App
+    /// verschluckt den Wurf danach wortlos.
+    private func dropOperation(for sender: any NSDraggingInfo) -> NSDragOperation {
+        ImageImporter.canImport(from: sender.draggingPasteboard) ? .copy : []
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        guard ImageImporter.canImport(from: sender.draggingPasteboard) else { return false }
+        interactionDelegate?.canvasView(self, didReceiveDropFrom: sender.draggingPasteboard)
+        return true
     }
 }
