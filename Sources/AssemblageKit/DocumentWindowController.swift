@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import AssemblageModel
 
 /// Das Dokumentfenster: Ebenen links, Canvas in der Mitte, Eigenschaften
 /// rechts (Plan 8).
@@ -131,9 +132,18 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
     @IBAction func insertRoundedRectangleLayer(_ sender: Any?) { insertLayer(.roundedRectangle) }
     @IBAction func insertEllipseLayer(_ sender: Any?) { insertLayer(.ellipse) }
 
+    @IBAction func applyGrid2x2Template(_ sender: Any?) { applyTemplate(.grid2x2) }
+    @IBAction func applyGrid3x3Template(_ sender: Any?) { applyTemplate(.grid3x3) }
+    @IBAction func applyPolaroidStackTemplate(_ sender: Any?) { applyTemplate(.polaroidStack) }
+
     private func insertLayer(_ kind: NewLayerKind) {
         guard let state = (document as? AssemblageDocument)?.state else { return }
         LayerCreation.insert(kind, into: state)
+    }
+
+    private func applyTemplate(_ template: CollageTemplate) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        CollageTemplateCommand.apply(template, to: state)
     }
 
     /// „Bearbeiten › Motiv freistellen“ wirkt ausschliesslich auf die aktuell
@@ -145,9 +155,22 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        guard menuItem.action == #selector(removeSubjectBackground(_:)) else { return true }
-        guard let document = document as? AssemblageDocument else { return false }
-        return ForegroundMaskingCommandController.canPerform(in: document)
+        if menuItem.action == #selector(removeSubjectBackground(_:)) {
+            guard let document = document as? AssemblageDocument else { return false }
+            return ForegroundMaskingCommandController.canPerform(in: document)
+        }
+
+        if let action = menuItem.action,
+           [
+            #selector(applyGrid2x2Template(_:)),
+            #selector(applyGrid3x3Template(_:)),
+            #selector(applyPolaroidStackTemplate(_:))
+           ].contains(action) {
+            guard let state = (document as? AssemblageDocument)?.state else { return false }
+            return CollageTemplateCommand.canApply(to: state)
+        }
+
+        return true
     }
 
     /// „Ablage › Exportieren…" (Plan 5.8). Ohne Dokument oder Fenster passiert
