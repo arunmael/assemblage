@@ -86,4 +86,13 @@ final class DocumentWindowController: NSWindowController {
     @IBAction func zoomToActualSize(_ sender: Any?) { canvasViewController?.zoomToActualSize() }
     @IBAction func zoomIn(_ sender: Any?) { canvasViewController?.zoomIn() }
     @IBAction func zoomOut(_ sender: Any?) { canvasViewController?.zoomOut() }
+
+    /// „Ablage › Exportieren…" (Plan 5.8). Ohne Dokument oder Fenster passiert
+    /// nichts — dieselbe Absicherung wie beim Rest der Menübefehle hier;
+    /// ohne Ziel ist der Menüpunkt über die Responder-Chain-Validierung
+    /// ohnehin schon ausgegraut.
+    @IBAction func exportDocument(_ sender: Any?) {
+        guard let assemblageDocument = document as? AssemblageDocument, let window else { return }
+        ExportPanelController.present(for: assemblageDocument, host: window)
+    }
 }
