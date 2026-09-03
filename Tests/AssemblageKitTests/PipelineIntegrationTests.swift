@@ -210,9 +210,50 @@ final class PipelineIntegrationTests: XCTestCase {
         XCTAssertEqual(actual.a, expected.a, accuracy: tolerance, message, file: file, line: line)
     }
 
-    // MARK: - Noch offen
+    // MARK: - Automatisches Freistellen (Plan 5.4, 7.3)
 
-    func testAutomaticForegroundMaskProducesNonEmptyMask() throws {
-        throw XCTSkip("Automatisches Freistellen kommt in Phase 2 (Roadmap 9) — VNGenerateForegroundInstanceMaskRequest.")
+    /// Grundfall der Kernpipeline: ein Bild mit klarem Vordergrund-Objekt vor
+    /// einheitlichem Grund liefert eine nicht-leere Maske in den Massen des
+    /// Quellbilds. Die Einzelfälle (kein Motiv, kaputte Daten, Skalierung,
+    /// Nebenläufigkeit) stehen ausführlich in `ForegroundMaskingTests` — hier
+    /// nur der Beleg, dass die Pipeline als Ganzes funktioniert.
+    ///
+    /// Vision ist ein Modell, keine deterministische Funktion; erkennt es auf
+    /// diesem gemalten Testbild nichts, ist das keine Regression dieser App,
+    /// sondern eine Modellentscheidung, die je nach macOS-Version anders
+    /// ausfallen darf — deshalb `XCTSkip` statt `XCTFail` in diesem Fall,
+    /// analog zur bisherigen Konvention dieser Datei.
+    func testAutomaticForegroundMaskProducesNonEmptyMask() async throws {
+        let width = 500, height = 500
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(srgbRed: 0.9, green: 0.9, blue: 0.92, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.setFillColor(CGColor(srgbRed: 0.1, green: 0.1, blue: 0.1, alpha: 1))
+        context.fillEllipse(in: CGRect(x: 125, y: 125, width: 250, height: 250))
+        let image = try XCTUnwrap(context.makeImage())
+
+        let result = try await ForegroundMasking.generateMask(from: image)
+
+        guard case .mask(let data) = result else {
+            throw XCTSkip("Vision hat auf diesem gemalten Testbild kein Motiv erkannt — modellabhängig, kein Fehler der Pipeline.")
+        }
+
+        XCTAssertFalse(data.isEmpty, "eine gefundene Maske darf nicht leer sein")
+        let decodedMask = try XCTUnwrap(ImageDecoding.decode(data))
+        XCTAssertEqual(decodedMask.width, width, "die Maske muss dieselbe Breite wie das Bild haben")
+        XCTAssertEqual(decodedMask.height, height, "die Maske muss dieselbe Höhe wie das Bild haben")
+
+        // Aus der Maske liesse sich direkt eine `LayerMask` bauen, so wie sie
+        // laut Plan 5.4 ins Dokumentpaket abgelegt wird — der eigentliche
+        // Anschluss an Ebene/Dokument ist bewusst nicht Teil dieser Aufgabe.
+        let resources = DocumentResources()
+        let reference = resources.addMask(data)
+        let mask = LayerMask(maskImageReference: reference, source: .automaticForegroundInstance)
+        XCTAssertEqual(mask.source, .automaticForegroundInstance)
+        XCTAssertNotNil(resources.data(for: reference))
     }
 }
