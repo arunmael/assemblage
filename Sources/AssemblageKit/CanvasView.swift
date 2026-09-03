@@ -21,6 +21,35 @@ final class CanvasView: NSView {
 
     private var document: AssemblageModel.Document
 
+    weak var interactionDelegate: CanvasInteractionDelegate?
+
+    /// Die ausgewählte Ebene bekommt einen Rahmen. Nur eine — Assemblage
+    /// kennt bewusst keine Mehrfachauswahl (Plan 4: „Ein Fenster, ein Fokus").
+    var selectedLayerID: UUID? {
+        didSet {
+            guard selectedLayerID != oldValue else { return }
+            updateSelectionOutline()
+        }
+    }
+
+    /// Die Zoomstufe der umgebenden Bildlaufansicht.
+    ///
+    /// Der Auswahlrahmen wird mitskaliert wie alles andere; ohne Ausgleich
+    /// wäre er bei 8-fachem Zoom ein fetter Balken und bei 10 % unsichtbar.
+    var zoomScale: CGFloat = 1 {
+        didSet {
+            guard zoomScale != oldValue else { return }
+            updateSelectionOutline()
+        }
+    }
+
+    /// Liegt über der Leinwand statt darin: Der Auswahlrahmen einer Ebene am
+    /// Bildrand soll nicht am Leinwandrand abgeschnitten werden.
+    private let overlayLayer = CALayer()
+    private let selectionOutline = CAShapeLayer()
+
+    private var drag: CanvasDrag?
+
     init(document: AssemblageModel.Document, images: ImageStore) {
         self.document = document
         self.renderer = LayerRenderer(images: images)
@@ -39,6 +68,12 @@ final class CanvasView: NSView {
         canvasLayer.shadowOpacity = 0.18
         canvasLayer.shadowRadius = 12
         canvasLayer.shadowOffset = CGSize(width: 0, height: -2)
+
+        overlayLayer.isGeometryFlipped = true
+        overlayLayer.addSublayer(selectionOutline)
+        selectionOutline.fillColor = nil
+        selectionOutline.strokeColor = NSColor.controlAccentColor.cgColor
+        layer?.addSublayer(overlayLayer)
 
         rebuild()
     }
@@ -72,6 +107,8 @@ final class CanvasView: NSView {
                 withoutAnimation { renderer.apply(layer, to: rendered) }
             }
         }
+
+        updateSelectionOutline()
     }
 
     private func rebuild() {
@@ -80,6 +117,7 @@ final class CanvasView: NSView {
 
         withoutAnimation {
             canvasLayer.frame = CGRect(origin: .zero, size: document.canvas.cgSize)
+            overlayLayer.frame = canvasLayer.frame
             // Reihenfolge im Modell = Kompositing-Reihenfolge, Index 0 zuunterst
             // — und genau so erwartet Core Animation seine `sublayers`.
             for layer in document.layers {
@@ -98,6 +136,86 @@ final class CanvasView: NSView {
         CATransaction.setDisableActions(true)
         body()
         CATransaction.commit()
+    }
+
+    // MARK: - Auswahlrahmen
+
+    private func updateSelectionOutline() {
+        guard let id = selectedLayerID, let layer = document.layer(withID: id) else {
+            selectionOutline.path = nil
+            return
+        }
+
+        let ecken = layer.transform.corners(
+            contentSize: renderer.contentSize(of: layer.content)
+        )
+        let pfad = CGMutablePath()
+        pfad.addLines(between: ecken.map { CGPoint(x: $0.x, y: $0.y) })
+        pfad.closeSubpath()
+
+        withoutAnimation {
+            selectionOutline.path = pfad
+            // Zoom herausrechnen, damit der Rahmen immer gleich dick wirkt.
+            selectionOutline.lineWidth = 1.5 / zoomScale
+        }
+    }
+
+    // MARK: - Maus
+
+    override var acceptsFirstResponder: Bool { true }
+
+    /// Rechnet einen Punkt aus der Ansicht in Leinwandkoordinaten um.
+    ///
+    /// Die Ansicht selbst ist nicht geflippt (Ursprung unten links), die
+    /// Leinwand rechnet oben links — die Umrechnung passiert genau hier und
+    /// sonst nirgends.
+    private func canvasPoint(from event: NSEvent) -> Point {
+        let inView = convert(event.locationInWindow, from: nil)
+        return Point(x: Double(inView.x), y: Double(bounds.height - inView.y))
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let punkt = canvasPoint(from: event)
+        let getroffen = document.topmostLayer(at: punkt) { layer in
+            renderer.contentSize(of: layer.content)
+        }
+
+        selectedLayerID = getroffen?.id
+        interactionDelegate?.canvasView(self, didSelectLayerWithID: getroffen?.id)
+
+        guard let getroffen else {
+            drag = nil
+            return
+        }
+        drag = CanvasDrag(
+            layerID: getroffen.id,
+            startCentre: Point(x: getroffen.transform.x, y: getroffen.transform.y),
+            startPoint: punkt
+        )
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard var laufend = drag else { return }
+        let warSchonAmZiehen = laufend.hasPassedThreshold
+
+        let mitte = laufend.centre(draggedTo: canvasPoint(from: event))
+        drag = laufend
+
+        guard let mitte else { return }  // Schwelle noch nicht erreicht
+
+        // Die Undo-Klammer erst beim ersten echten Ziehen öffnen: Ein blosser
+        // Klick zum Auswählen soll keinen leeren Schritt hinterlassen.
+        if !warSchonAmZiehen {
+            interactionDelegate?.canvasViewDidBeginInteraction(self)
+        }
+
+        interactionDelegate?.canvasView(self, didMoveLayerWithID: laufend.layerID, toCentre: mitte)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer { drag = nil }
+        guard drag?.hasPassedThreshold == true else { return }
+        interactionDelegate?.canvasView(self, didEndInteractionNamed: "Ebene verschieben")
     }
 
     // MARK: - Bildschirmauflösung

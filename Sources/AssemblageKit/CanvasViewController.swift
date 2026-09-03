@@ -9,7 +9,7 @@ final class CanvasViewController: NSViewController {
     private let state: DocumentState
     private var canvasView: CanvasView!
     private let scrollView = NSScrollView()
-    private var observation: AnyCancellable?
+    private var observations: Set<AnyCancellable> = []
     /// Beim ersten Anzeigen einmal auf Fenstergrösse einpassen — danach nicht
     /// mehr, sonst würde jede Fenstergrössenänderung den vom Nutzer gewählten
     /// Zoom zurücksetzen.
@@ -41,16 +41,43 @@ final class CanvasViewController: NSViewController {
         scrollView.minMagnification = 0.05
         scrollView.maxMagnification = 16
 
+        canvasView.interactionDelegate = self
+        canvasView.selectedLayerID = state.selectedLayerID
+
+        // Die Zoomstufe ändert sich auch durch Pinch und Bildlauf, nicht nur
+        // durch unsere Menübefehle — deshalb beobachten statt nur setzen.
+        scrollView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(zoomDidChange),
+            name: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView
+        )
+
         view = scrollView
+    }
+
+    @objc private func zoomDidChange() {
+        canvasView.zoomScale = scrollView.magnification
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        observation = state.$document.sink { [weak self] document in
-            // Auf den nächsten Durchlauf verschieben: `sink` feuert, *bevor*
-            // `@Published` den neuen Wert geschrieben hat.
-            DispatchQueue.main.async { self?.canvasView.update(to: document) }
-        }
+        state.$document
+            .sink { [weak self] document in
+                // Auf den nächsten Durchlauf verschieben: `sink` feuert,
+                // *bevor* `@Published` den neuen Wert geschrieben hat.
+                DispatchQueue.main.async { self?.canvasView.update(to: document) }
+            }
+            .store(in: &observations)
+
+        // Auswahl über die Ebenenliste muss den Rahmen auf dem Canvas
+        // mitziehen — sonst zeigen Liste und Leinwand Verschiedenes.
+        state.$selectedLayerID
+            .sink { [weak self] id in
+                DispatchQueue.main.async { self?.canvasView.selectedLayerID = id }
+            }
+            .store(in: &observations)
     }
 
     override func viewDidLayout() {
@@ -89,5 +116,34 @@ final class CanvasViewController: NSViewController {
 
     @objc func zoomOut() {
         scrollView.magnification = max(scrollView.magnification / 1.5, scrollView.minMagnification)
+    }
+}
+
+
+// MARK: - Was auf dem Canvas passiert
+
+extension CanvasViewController: CanvasInteractionDelegate {
+
+    func canvasView(_ canvasView: CanvasView, didSelectLayerWithID id: UUID?) {
+        // Auswahl ist keine Dokumentänderung: Sie gehört nicht in den
+        // Undo-Stack und macht das Dokument nicht ungesichert.
+        state.selectedLayerID = id
+    }
+
+    func canvasViewDidBeginInteraction(_ canvasView: CanvasView) {
+        state.owner?.beginInteraction()
+    }
+
+    func canvasView(_ canvasView: CanvasView, didMoveLayerWithID id: UUID, toCentre centre: Point) {
+        state.owner?.modify("Ebene verschieben") {
+            try? $0.updateLayer(id: id) { layer in
+                layer.transform.x = centre.x
+                layer.transform.y = centre.y
+            }
+        }
+    }
+
+    func canvasView(_ canvasView: CanvasView, didEndInteractionNamed actionName: String) {
+        state.owner?.endInteraction(actionName: actionName)
     }
 }

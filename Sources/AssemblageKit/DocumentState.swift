@@ -22,6 +22,14 @@ final class DocumentState: ObservableObject {
     private(set) var resources: DocumentResources
     private(set) var images: ImageStore
 
+    /// Das Dokument, dem dieser Zustand gehört.
+    ///
+    /// Schwach, weil das Dokument den Zustand besitzt — andersherum wäre es
+    /// ein Zyklus und das Dokument bliebe nach dem Schliessen im Speicher.
+    /// Ansichten ändern über `owner?.modify(_:_:)`; nur so landet alles im
+    /// Undo-Stack.
+    weak var owner: AssemblageDocument?
+
     init(document: AssemblageModel.Document, resources: DocumentResources) {
         self.document = document
         self.resources = resources
@@ -79,6 +87,14 @@ extension AssemblageDocument {
 
         state.setDocument(updated)
 
+        // Während einer Interaktion nicht einzeln registrieren — den einen
+        // Schritt setzt `endInteraction(actionName:)` ans Ende.
+        guard !isInteracting else { return }
+
+        registerUndo(restoring: before, actionName: actionName)
+    }
+
+    private func registerUndo(restoring before: AssemblageModel.Document, actionName: String) {
         undoManager?.registerUndo(withTarget: self) { document in
             MainActor.assumeIsolated {
                 document.modify(actionName) { $0 = before }
@@ -86,4 +102,35 @@ extension AssemblageDocument {
         }
         undoManager?.setActionName(actionName)
     }
+
+    // MARK: - Zusammenhängende Änderungen
+
+    /// Beginnt eine Interaktion — ein Ziehen auf dem Canvas, ein gehaltener
+    /// Regler.
+    ///
+    /// Alles zwischen hier und `endInteraction(actionName:)` wird zu **einem**
+    /// Undo-Schritt zusammengefasst. Ohne das hinterlässt ein einziges
+    /// Verschieben so viele Schritte, wie die Maus Zwischenmeldungen liefert,
+    /// und man drückt vierzigmal ⌘Z, bis sichtbar etwas passiert.
+    func beginInteraction() {
+        // Verschachtelte Aufrufe ignorieren: Der äusserste Zustand ist der,
+        // auf den zurückgesetzt werden soll.
+        guard interactionSnapshot == nil else { return }
+        interactionSnapshot = state.document
+    }
+
+    /// Schliesst die Interaktion ab und setzt den einen Undo-Schritt.
+    ///
+    /// Gefahrlos, wenn keine Interaktion läuft oder wenn sich nichts geändert
+    /// hat (ein Klick, der die Ebene nur berührt hat) — beides kommt in der
+    /// Praxis vor und darf den Undo-Stack nicht verwirren.
+    func endInteraction(actionName: String) {
+        guard let before = interactionSnapshot else { return }
+        interactionSnapshot = nil
+
+        guard state.document != before else { return }
+        registerUndo(restoring: before, actionName: actionName)
+    }
+
+    var isInteracting: Bool { interactionSnapshot != nil }
 }

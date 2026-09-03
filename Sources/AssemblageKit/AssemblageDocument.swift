@@ -15,10 +15,18 @@ final class AssemblageDocument: NSDocument {
     static let fileType = "de.arun.assemblage.document"
     static let fileExtension = "assemblage"
 
-    private(set) lazy var state = DocumentState(
-        document: AssemblageModel.Document(preset: .instagramPost),
-        resources: DocumentResources()
-    )
+    private(set) lazy var state: DocumentState = {
+        let zustand = DocumentState(
+            document: AssemblageModel.Document(preset: .instagramPost),
+            resources: DocumentResources()
+        )
+        zustand.owner = self
+        return zustand
+    }()
+
+    /// Zustand vor Beginn einer Interaktion (Ziehen, gehaltener Regler).
+    /// `nil`, solange keine läuft — siehe `beginInteraction()`.
+    var interactionSnapshot: AssemblageModel.Document?
 
     // MARK: - Verhalten
 
