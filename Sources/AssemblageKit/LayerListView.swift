@@ -5,23 +5,27 @@ import AssemblageModel
 ///
 /// SwiftUI statt AppKit, weil hier nur Standard-UI nötig ist — genau die
 /// Arbeitsteilung aus Plan 7.1: Canvas in AppKit, Paletten in SwiftUI.
-///
-/// Phase 0 zeigt die Ebenen nur an; Umbenennen, Umsortieren und die
-/// Sichtbarkeits-Schalter kommen laut Roadmap in Phase 1.
 struct LayerListView: View {
 
     @ObservedObject var state: DocumentState
 
+    private var editing: LayerListEditing {
+        LayerListEditing(state: state)
+    }
+
     var body: some View {
         List(selection: $state.selectedLayerID) {
-            // Oberste Ebene zuoberst — im Modell liegt Index 0 zuunterst
-            // (Kompositing-Reihenfolge), in der Liste ist es umgekehrt.
-            ForEach(state.document.layers.reversed()) { layer in
-                LayerRow(layer: layer, state: state)
+            ForEach(editing.layersInListOrder) { layer in
+                LayerRow(layer: layer, state: state, editing: editing)
                     .tag(layer.id)
             }
+            .onMove(perform: editing.move)
         }
         .listStyle(.sidebar)
+        .onDeleteCommand {
+            guard let id = state.selectedLayerID else { return }
+            editing.delete(id)
+        }
         .overlay {
             if state.document.layers.isEmpty {
                 ContentUnavailableView(
@@ -38,32 +42,88 @@ private struct LayerRow: View {
 
     let layer: Layer
     @ObservedObject var state: DocumentState
+    let editing: LayerListEditing
+
+    @State private var isRenaming = false
+    @State private var draftName = ""
+    @FocusState private var isNameFocused: Bool
 
     var body: some View {
         HStack(spacing: 10) {
-            LayerThumbnail(layer: layer, state: state)
+            HStack(spacing: 10) {
+                LayerThumbnail(layer: layer, state: state)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(layer.name)
-                    .lineLimit(1)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    name
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
+            .opacity(layer.isVisible ? 1 : 0.5)
 
             Spacer(minLength: 0)
 
-            if !layer.isVisible {
-                Image(systemName: "eye.slash")
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Ausgeblendet")
+            Button {
+                editing.toggleVisibility(of: layer.id)
+            } label: {
+                Image(systemName: layer.isVisible ? "eye" : "eye.slash")
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel(layer.isVisible ? "Ebene ausblenden" : "Ebene einblenden")
+            .help(layer.isVisible ? "Ebene ausblenden" : "Ebene einblenden")
+        }
+        .contextMenu {
+            Button(layer.isVisible ? "Ausblenden" : "Einblenden") {
+                editing.toggleVisibility(of: layer.id)
+            }
+            Button("Umbenennen") {
+                beginRenaming()
+            }
+            Divider()
+            Button("Löschen", role: .destructive) {
+                editing.delete(layer.id)
             }
         }
-        .padding(.vertical, 2)
-        // Ausgeblendete Ebenen auch in der Liste zurücknehmen — sonst sucht
-        // man bei einer langen Liste, welche gerade nicht sichtbar ist.
-        .opacity(layer.isVisible ? 1 : 0.5)
+    }
+
+    @ViewBuilder
+    private var name: some View {
+        if isRenaming {
+            TextField("Ebenenname", text: $draftName)
+                .textFieldStyle(.plain)
+                .focused($isNameFocused)
+                .onSubmit { finishRenaming() }
+                .onExitCommand { cancelRenaming() }
+                .onChange(of: isNameFocused) { _, focused in
+                    guard isRenaming, !focused else { return }
+                    finishRenaming()
+                }
+        } else {
+            Text(layer.name)
+                .lineLimit(1)
+                .onTapGesture(count: 2) { beginRenaming() }
+        }
+    }
+
+    private func beginRenaming() {
+        draftName = layer.name
+        isRenaming = true
+        isNameFocused = true
+    }
+
+    private func finishRenaming() {
+        editing.rename(layer.id, to: draftName)
+        isRenaming = false
+    }
+
+    private func cancelRenaming() {
+        draftName = layer.name
+        isRenaming = false
     }
 
     /// Zeigt nur, was vom Normalfall abweicht — eine Zeile „Normal · 100 %"
