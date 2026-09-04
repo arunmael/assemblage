@@ -14,6 +14,7 @@ final class CanvasViewController: NSViewController {
     /// mehr, sonst würde jede Fenstergrössenänderung den vom Nutzer gewählten
     /// Zoom zurücksetzen.
     private var hasPerformedInitialFit = false
+    var selectToolFromKeyboard: ((CanvasTool) -> Bool)?
 
     init(state: DocumentState) {
         self.state = state
@@ -42,6 +43,7 @@ final class CanvasViewController: NSViewController {
         scrollView.maxMagnification = 16
 
         canvasView.interactionDelegate = self
+        canvasView.keyboardCommandDelegate = self
         canvasView.selectedLayerID = state.selectedLayerID
 
         // Die Zoomstufe ändert sich auch durch Pinch und Bildlauf, nicht nur
@@ -155,7 +157,15 @@ final class CanvasViewController: NSViewController {
 
 // MARK: - Was auf dem Canvas passiert
 
-extension CanvasViewController: CanvasInteractionDelegate {
+extension CanvasViewController: CanvasInteractionDelegate, CanvasKeyboardCommandDelegate {
+
+    func canvasView(_ canvasView: CanvasView, perform command: KeyboardCommand) -> Bool {
+        if case .selectTool(let tool) = command {
+            return selectToolFromKeyboard?(tool) ?? false
+        }
+        KeyboardCommands.perform(command, in: state)
+        return true
+    }
 
     func canvasView(_ canvasView: CanvasView, didSelectLayerWithID id: UUID?) {
         // Auswahl ist keine Dokumentänderung: Sie gehört nicht in den

@@ -2,6 +2,13 @@ import AppKit
 import QuartzCore
 import AssemblageModel
 
+/// Nimmt die bereits übersetzten Tastenbefehle des Canvas entgegen.
+@MainActor
+protocol CanvasKeyboardCommandDelegate: AnyObject {
+    /// `true`, wenn der Befehl verarbeitet wurde und nicht an AppKit soll.
+    func canvasView(_ canvasView: CanvasView, perform command: KeyboardCommand) -> Bool
+}
+
 /// Die Arbeitsfläche: rendert den Ebenenbaum als `CALayer`-Baum (Plan 7.2).
 ///
 /// Die View ist genau so gross wie die Leinwand des Dokuments und liegt in
@@ -22,6 +29,7 @@ final class CanvasView: NSView {
     private var document: AssemblageModel.Document
 
     weak var interactionDelegate: CanvasInteractionDelegate?
+    weak var keyboardCommandDelegate: CanvasKeyboardCommandDelegate?
 
     /// Die ausgewählte Ebene bekommt einen Rahmen. Nur eine — Assemblage
     /// kennt bewusst keine Mehrfachauswahl (Plan 4: „Ein Fenster, ein Fokus").
@@ -331,6 +339,31 @@ final class CanvasView: NSView {
     // MARK: - Maus
 
     override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        // Regulär erhält der Canvas nur Tasten, wenn er selbst Erstempfänger
+        // ist; ein Feldeditor (`NSTextView`, über `NSText` mit erfasst) bekäme
+        // sie direkt. Die Prüfung über den Erstempfänger des ganzen Fensters
+        // ist trotzdem eine billige Absicherung für direkte Weiterleitungen
+        // und Tests: Auch Textfelder in Inspector oder Ebenenliste verwenden
+        // denselben Feldeditor, obwohl sie nicht im Canvas liegen.
+        let firstResponder = window?.firstResponder
+        let isEditingText = firstResponder is NSTextView || firstResponder is NSText
+
+        guard let characters = event.characters,
+              let command = KeyboardCommands.command(
+                forCharacters: characters,
+                modifiers: event.modifierFlags,
+                isEditingText: isEditingText
+              ),
+              keyboardCommandDelegate?.canvasView(self, perform: command) == true
+        else {
+            // Unbekannte Tasten gehören weiter der Responder-Kette: Nur so
+            // funktionieren Menü-Kürzel und der übliche AppKit-Signalton.
+            super.keyDown(with: event)
+            return
+        }
+    }
 
     /// Escape verlässt das Zuschneiden — der Weg, den man reflexhaft nimmt,
     /// wenn man nicht mehr weiterweiss.

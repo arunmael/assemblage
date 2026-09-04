@@ -122,6 +122,16 @@ final class ToolbarController: NSObject, NSToolbarDelegate {
         updatePresentation()
     }
 
+    /// Wählt ein Werkzeug direkt über die Tastatur. Anders als ein erneuter
+    /// Klick auf den aktiven Knopf schaltet derselbe Befehl nicht zurück.
+    func select(_ tool: CanvasTool) -> Bool {
+        guard ToolSelection.isAvailable(tool, forSelected: selectedLayer) else { return true }
+        currentTool = tool
+        applyCurrentToolToCanvas()
+        updatePresentation()
+        return true
+    }
+
     private func applyCurrentToolToCanvas() {
         canvasViewController?.setTool(currentTool, forSelected: selectedLayer)
         if currentTool == .brush {

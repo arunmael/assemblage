@@ -23,7 +23,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func makeMainMenu() -> NSMenu {
         let mainMenu = NSMenu()
-        for menu in [appMenu(), fileMenu(), editMenu(), insertMenu(), viewMenu(), windowMenu()] {
+        for menu in [appMenu(), fileMenu(), editMenu(), layerMenu(), insertMenu(), viewMenu(), windowMenu()] {
             let item = NSMenuItem()
             item.submenu = menu
             mainMenu.addItem(item)
@@ -142,6 +142,50 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let templateItem = NSMenuItem(title: "Collage-Vorlage", action: nil, keyEquivalent: "")
         templateItem.submenu = templates
         menu.addItem(templateItem)
+        return menu
+    }
+
+    /// Ebenenbefehle stehen in einem eigenen Menü: Sie wirken auf die
+    /// Dokumentauswahl, während „Bearbeiten“ die systemweiten Text- und
+    /// Zwischenablagebefehle enthält.
+    private func layerMenu() -> NSMenu {
+        let menu = NSMenu(title: "Ebene")
+
+        let visibility = NSMenuItem(
+            title: "Ebene ein-/ausblenden",
+            action: #selector(DocumentWindowController.toggleSelectedLayerVisibility(_:)),
+            keyEquivalent: "h"
+        )
+        visibility.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(visibility)
+
+        let delete = NSMenuItem(
+            title: "Ebene löschen",
+            action: #selector(DocumentWindowController.deleteSelectedLayer(_:)),
+            keyEquivalent: "\u{8}"
+        )
+        delete.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(delete)
+        menu.addItem(.separator())
+
+        menu.addItem(withTitle: "Ebene nach oben", action: #selector(DocumentWindowController.moveSelectedLayerUp(_:)), keyEquivalent: "]")
+        menu.addItem(withTitle: "Ebene nach unten", action: #selector(DocumentWindowController.moveSelectedLayerDown(_:)), keyEquivalent: "[")
+
+        let toTop = NSMenuItem(
+            title: "Ebene ganz nach oben",
+            action: #selector(DocumentWindowController.moveSelectedLayerToTop(_:)),
+            keyEquivalent: "]"
+        )
+        toTop.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(toTop)
+
+        let toBottom = NSMenuItem(
+            title: "Ebene ganz nach unten",
+            action: #selector(DocumentWindowController.moveSelectedLayerToBottom(_:)),
+            keyEquivalent: "["
+        )
+        toBottom.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(toBottom)
         return menu
     }
 
