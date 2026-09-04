@@ -165,6 +165,11 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
         DistortionCommands.resetSelected(in: state)
     }
 
+    @IBAction func flattenSelectedLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        _ = LayerFlattening.flattenSelected(in: state)
+    }
+
     private func moveSelectedLayer(_ command: LayerOrderCommand) {
         guard let state = (document as? AssemblageDocument)?.state else { return }
         LayerListEditing(state: state).moveSelected(command)
@@ -212,6 +217,13 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
 
         if menuItem.action == #selector(resetSelectedLayerDistortion(_:)) {
             return (document as? AssemblageDocument)?.state.selectedLayer?.distortion != nil
+        }
+
+        if menuItem.action == #selector(flattenSelectedLayer(_:)) {
+            guard let inhalt = (document as? AssemblageDocument)?.state.selectedLayer?.content else {
+                return false
+            }
+            return LayerFlattening.canFlatten(inhalt)
         }
 
         if let action = menuItem.action,

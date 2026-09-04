@@ -29,6 +29,11 @@ protocol CanvasInteractionDelegate: AnyObject {
     /// Neuer Zuschnitt für eine Bildebene (Plan 5.3), in Bildkoordinaten.
     func canvasView(_ canvasView: CanvasView, didChangeCropOfLayerWithID id: UUID, to crop: Rect)
 
+    /// Der auf der Leinwand fertig bearbeitete Text. Während des Tippens
+    /// bleibt das Dokument unberührt; erst diese eine Meldung erzeugt den
+    /// Undo-Schritt für die ganze Bearbeitung.
+    func canvasView(_ canvasView: CanvasView, didFinishEditingTextOfLayerWithID id: UUID, text: String)
+
     /// Neue projektive Verzerrung einer Ebene. `nil` bedeutet unverzerrt.
     func canvasView(
         _ canvasView: CanvasView,
@@ -53,6 +58,8 @@ extension CanvasInteractionDelegate {
         didChangeDistortionOfLayerWithID id: UUID,
         to distortion: QuadDistortion?
     ) {}
+
+    func canvasView(_ canvasView: CanvasView, didFinishEditingTextOfLayerWithID id: UUID, text: String) {}
 }
 
 /// Ein laufender Pinselstrich (Plan 5.4).
