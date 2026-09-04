@@ -19,7 +19,20 @@ Offen sind nur noch die im Plan als „ggf." markierten Punkte (iPad-Version, iC
 | 4 | Tastenkürzel für Power-User | ✅ |
 
 Die nicht verhandelbaren Grundanforderungen aus Plan §2.1 sind ebenfalls abgedeckt: Autosave und Versionsverwaltung über `NSDocument`, asynchroner Export und asynchrones Freistellen, Fehlerbehandlung statt `try!`, automatisierte Tests der Kernpipeline samt Stresstest, und lokale Diagnoseberichte (siehe unten).
-| 4 | Politur: Tastenkürzel, Vorlagen-Bibliothek, optional iPad/iCloud | offen |
+
+### Über die Roadmap hinaus
+
+| Werkzeug | Wo |
+| --- | --- |
+| Freies Verziehen an den vier Ecken, mit Option-Taste proportional | Werkzeugleiste, „Ebene › Verziehen" |
+| Texturen auf einer Ebene, gekachelt und auf ihre Form beschnitten | „Ebene › Textur hinzufügen…" |
+| Formvorlagen: Dreieck, Fünfeck, Sechseck, Stern, Herz, Pfeil, Sprechblase | „Einfügen › Formvorlage" |
+| Leuchten und Schlagschatten, der Silhouette folgend | Inspector |
+| Text direkt auf der Leinwand ändern | Doppelklick auf die Textebene |
+| Text und Formen in ein Objekt umwandeln (dann verziehbar) | „Ebene › In Objekt umwandeln" |
+| Vorher/Nachher je Ebene | ⌘\ oder „Ebene › Vorher/Nachher vergleichen" |
+| Wiederholen auch mit ⌘Y | zusätzlich zu ⇧⌘Z |
+| Werkzeugleiste, die beim Überfahren aufklappt | links neben der Leinwand |
 
 Der vollständige Entwicklungsplan (Vision, Feature-Set, technische Architektur, Roadmap) liegt in [`docs/entwicklungsplan.md`](docs/entwicklungsplan.md), die Regeln für die Mitarbeit in [`agent-rules.md`](agent-rules.md).
 

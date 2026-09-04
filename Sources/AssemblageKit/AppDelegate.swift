@@ -201,6 +201,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(delete)
         menu.addItem(.separator())
 
+        menu.addItem(
+            withTitle: "Textur hinzufügen…",
+            action: #selector(DocumentWindowController.addLayerTexture(_:)),
+            keyEquivalent: ""
+        )
+        menu.addItem(
+            withTitle: "Textur entfernen",
+            action: #selector(DocumentWindowController.removeLayerTexture(_:)),
+            keyEquivalent: ""
+        )
+        menu.addItem(.separator())
+
         let vergleich = NSMenuItem(
             title: "Vorher/Nachher vergleichen",
             action: #selector(DocumentWindowController.toggleLayerComparison(_:)),

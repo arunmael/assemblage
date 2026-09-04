@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import SwiftUI
 @testable import AssemblageKit
 @testable import AssemblageModel
 
@@ -18,15 +19,24 @@ final class DocumentWindowTests: XCTestCase {
         return try XCTUnwrap(document.windowControllers.first as? DocumentWindowController)
     }
 
-    func testWindowShowsTheThreePanesFromThePlan() throws {
+    func testWindowShowsThePanesFromThePlan() throws {
         let controller = try makeWindowController(for: AssemblageDocument())
 
         let split = try XCTUnwrap(
             controller.contentViewController as? NSSplitViewController,
             "das Fenster muss einen Inhalt haben — nicht nur eine leere Fläche"
         )
-        // Ebenen, Canvas, Eigenschaften (Plan 8).
-        XCTAssertEqual(split.splitViewItems.count, 3)
+
+        // Ebenen, Werkzeuge, Canvas, Eigenschaften. Über die Typen und nicht
+        // über die Anzahl: Eine Zahl sagt nicht, *welche* Spalte fehlt, und
+        // bricht bei jedem Zusatz, ohne einen Fehler anzuzeigen.
+        let typen = split.splitViewItems.map { ObjectIdentifier(type(of: $0.viewController)) }
+        for erwartet in [ToolSidebarViewController.self, CanvasViewController.self] {
+            XCTAssertTrue(typen.contains(ObjectIdentifier(erwartet)),
+                          "\(erwartet) fehlt im Fenster")
+        }
+        XCTAssertEqual(split.splitViewItems.filter { $0.viewController is NSHostingController<LayerListView> }.count, 1)
+        XCTAssertEqual(split.splitViewItems.filter { $0.viewController is NSHostingController<InspectorView> }.count, 1)
     }
 
     /// Der eigentliche Regressionstest: Der Inhalt muss den Zustand *dieses*
@@ -45,7 +55,7 @@ final class DocumentWindowTests: XCTestCase {
         let controller = try makeWindowController(for: document)
         let split = try XCTUnwrap(controller.contentViewController as? NSSplitViewController)
         let canvas = try XCTUnwrap(
-            split.splitViewItems[1].viewController as? CanvasViewController
+            split.splitViewItems.compactMap { $0.viewController as? CanvasViewController }.first
         )
         _ = canvas.view  // Ansicht laden
 
@@ -63,7 +73,9 @@ final class DocumentWindowTests: XCTestCase {
     func testUntitledDocumentAlsoGetsContent() throws {
         let controller = try makeWindowController(for: AssemblageDocument())
         let split = try XCTUnwrap(controller.contentViewController as? NSSplitViewController)
-        let canvas = try XCTUnwrap(split.splitViewItems[1].viewController as? CanvasViewController)
+        let canvas = try XCTUnwrap(
+            split.splitViewItems.compactMap { $0.viewController as? CanvasViewController }.first
+        )
 
         XCTAssertNotNil(canvas.view as? NSScrollView)
     }

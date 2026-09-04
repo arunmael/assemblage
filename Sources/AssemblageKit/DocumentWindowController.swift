@@ -85,6 +85,20 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
         // des Fensters nicht als Erstes verschwinden.
         layersItem.canCollapse = true
 
+        // Die Werkzeugleiste sitzt zwischen Ebenenliste und Leinwand — dort,
+        // wo bei Pixelmator die Werkzeuge liegen, und in Griffweite des
+        // Bildes, auf das sie wirken.
+        //
+        // Als eigene Spalte im Split View und nicht als schwebende Ansicht auf
+        // der Leinwand: Eine schwebende Leiste verdeckte beim Aufklappen genau
+        // den Bildrand, an dem man gerade arbeitet.
+        let toolSidebar = ToolSidebarViewController()
+        let toolItem = NSSplitViewItem(viewController: toolSidebar)
+        toolItem.canCollapse = false
+        toolItem.holdingPriority = .defaultHigh + 1
+        toolItem.minimumThickness = ToolSidebarView.collapsedWidth
+        toolItem.maximumThickness = ToolSidebarView.collapsedWidth
+
         let canvasItem = NSSplitViewItem(viewController: canvas)
         canvasItem.minimumThickness = 400
 
@@ -94,6 +108,7 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
 
         let splitViewController = NSSplitViewController()
         splitViewController.addSplitViewItem(layersItem)
+        splitViewController.addSplitViewItem(toolItem)
         splitViewController.addSplitViewItem(canvasItem)
         splitViewController.addSplitViewItem(inspectorItem)
         self.splitViewController = splitViewController
@@ -106,6 +121,7 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
             canvasViewController: canvas,
             commandTarget: self
         )
+        toolbarController.sidebar = toolSidebar.sidebar
         canvas.selectToolFromKeyboard = { [weak toolbarController] tool in
             toolbarController?.select(tool) ?? false
         }
@@ -165,6 +181,16 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
         DistortionCommands.resetSelected(in: state)
     }
 
+    @IBAction func addLayerTexture(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        TextureCommand.chooseTexture(in: state, host: window)
+    }
+
+    @IBAction func removeLayerTexture(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        if TextureCommand.removeTexture(in: state) != .removed { NSSound.beep() }
+    }
+
     @IBAction func toggleLayerComparison(_ sender: Any?) {
         guard canvasViewController?.toggleComparison() == false else { return }
         // Nichts zu vergleichen: kurz akustisch quittieren statt still nichts
@@ -220,6 +246,25 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
 
         if menuItem.action == #selector(selectDistortTool(_:)) {
             return (document as? AssemblageDocument)?.state.selectedLayer != nil
+        }
+
+        // Ausgrauen statt piepsen, wo sich der Zustand vorher sicher sagen
+        // lässt: Ein Befehl, der beim Klicken nur einen Ton macht, wirkt
+        // kaputt.
+        if menuItem.action == #selector(addLayerTexture(_:)) {
+            return (document as? AssemblageDocument)?.state.selectedLayer != nil
+        }
+
+        if menuItem.action == #selector(removeLayerTexture(_:)) {
+            return (document as? AssemblageDocument)?.state.selectedLayer?.texture != nil
+        }
+
+        if menuItem.action == #selector(toggleLayerComparison(_:)) {
+            guard let controller = canvasViewController else { return false }
+            // Während eines laufenden Vergleichs bleibt der Befehl wählbar —
+            // sonst käme man nicht mehr zurück.
+            return controller.isComparing
+                || (document as? AssemblageDocument)?.state.selectedLayer?.hasEdits == true
         }
 
         if menuItem.action == #selector(resetSelectedLayerDistortion(_:)) {

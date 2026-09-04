@@ -72,6 +72,15 @@ final class ToolbarController: NSObject, NSToolbarDelegate {
     private var selectedLayer: Layer?
     private var toolButtons: [CanvasTool: NSButton] = [:]
     private weak var removeSubjectButton: NSButton?
+    /// Die aufklappende Werkzeug-Seitenleiste, falls das Fenster eine hat.
+    /// Sie spiegelt denselben Zustand wie die Knöpfe oben — eine zweite
+    /// Zustandshaltung wäre genau die Art Dopplung, die auseinanderläuft.
+    weak var sidebar: ToolSidebarView? {
+        didSet {
+            sidebar?.onSelect = { [weak self] tool in self?.toggle(tool) }
+            updatePresentation()
+        }
+    }
 
     private var brush = MaskBrush(diameter: 60, hardness: 0.5, mode: .hide)
 
@@ -148,6 +157,15 @@ final class ToolbarController: NSObject, NSToolbarDelegate {
         for (tool, button) in toolButtons {
             button.isEnabled = ToolSelection.isAvailable(tool, forSelected: selectedLayer)
             button.state = tool == currentTool ? .on : .off
+        }
+
+        if let sidebar {
+            sidebar.selectedTool = currentTool
+            sidebar.availableTools = Set(
+                ToolSidebarView.allTools.filter {
+                    ToolSelection.isAvailable($0, forSelected: selectedLayer)
+                }
+            )
         }
 
         // Freistellen ist ein einmaliger Befehl und kein vierter Canvas-Modus.
