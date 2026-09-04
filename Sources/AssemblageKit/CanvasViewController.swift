@@ -208,6 +208,16 @@ extension CanvasViewController: CanvasInteractionDelegate, CanvasKeyboardCommand
         }
     }
 
+    func canvasView(_ canvasView: CanvasView, didFinishEditingTextOfLayerWithID id: UUID, text: String) {
+        state.owner?.modify("Text bearbeiten") {
+            try? $0.updateLayer(id: id) { ebene in
+                guard case .text(var inhalt) = ebene.content else { return }
+                inhalt.string = text
+                ebene.content = .text(inhalt)
+            }
+        }
+    }
+
     func canvasView(
         _ canvasView: CanvasView,
         didChangeDistortionOfLayerWithID id: UUID,

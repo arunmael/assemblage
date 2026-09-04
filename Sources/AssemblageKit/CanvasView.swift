@@ -84,6 +84,8 @@ final class CanvasView: NSView {
     private var distortDrag: DistortDrag?
     private var stroke: BrushStroke?
     private var trackingArea: NSTrackingArea?
+    private var textEditor: NSTextView?
+    private var editingTextLayerID: UUID?
 
     /// Die Ebene, deren Maske gerade mit dem Pinsel bearbeitet wird (Plan
     /// 5.4) — oder `nil`. Schliesst sich mit dem Zuschneiden-Modus aus:
@@ -242,6 +244,11 @@ final class CanvasView: NSView {
                 withoutAnimation {
                     renderer.apply(layer, to: rendered)
                     renderer.applyMask(layer, to: rendered)
+                    // Während der direkten Bearbeitung zeigt das NSTextView
+                    // denselben Inhalt. Die gerenderte Kopie bleibt deshalb
+                    // verborgen, damit Buchstaben nicht doppelt und dadurch
+                    // scheinbar fetter erscheinen.
+                    if layer.id == editingTextLayerID { rendered.isHidden = true }
                 }
             }
         }
@@ -260,6 +267,7 @@ final class CanvasView: NSView {
             // — und genau so erwartet Core Animation seine `sublayers`.
             for layer in document.layers {
                 let rendered = renderer.makeLayer(for: layer)
+                if layer.id == editingTextLayerID { rendered.isHidden = true }
                 renderedLayers[layer.id] = rendered
                 canvasLayer.addSublayer(rendered)
             }
@@ -285,6 +293,10 @@ final class CanvasView: NSView {
     var handleLayerForTesting: CAShapeLayer { handleShapes }
     var guideLayerForTesting: CAShapeLayer { guideShapes }
     var cropPreviewLayerForTesting: CALayer { cropPreviewLayer }
+    var textEditorForTesting: NSTextView? { textEditor }
+    func isRenderedLayerHiddenForTesting(_ id: UUID) -> Bool {
+        renderedLayers[id]?.isHidden ?? false
+    }
 
     // MARK: - Auswahlrahmen
 
@@ -413,6 +425,10 @@ final class CanvasView: NSView {
     /// Escape verlässt das Zuschneiden — der Weg, den man reflexhaft nimmt,
     /// wenn man nicht mehr weiterweiss.
     override func cancelOperation(_ sender: Any?) {
+        if textEditor != nil {
+            endTextEditing(committing: false)
+            return
+        }
         croppingLayerID = nil
         brushLayerID = nil
         distortingLayerID = nil
@@ -450,6 +466,13 @@ final class CanvasView: NSView {
     override func mouseDown(with event: NSEvent) {
         let punkt = canvasPoint(from: event)
 
+        // Erreicht ein Klick den Canvas statt des darüberliegenden Editors,
+        // liegt er ausserhalb des Eingabefelds und schliesst die Bearbeitung
+        // wie bei einem gewöhnlichen AppKit-Feld ab.
+        if textEditor != nil {
+            endTextEditing(committing: true)
+        }
+
         // Im Pinselmodus bedeutet Ziehen ausschliesslich Malen — kein
         // Verschieben, kein Skalieren. Sonst verschöbe der erste Strich die
         // Ebene, statt sie zu maskieren.
@@ -480,6 +503,13 @@ final class CanvasView: NSView {
                 selectedLayerID = getroffen.id
                 interactionDelegate?.canvasView(self, didSelectLayerWithID: getroffen.id)
                 croppingLayerID = (croppingLayerID == getroffen.id) ? nil : getroffen.id
+                return
+            }
+            if let getroffen, case .text = getroffen.content {
+                selectedLayerID = getroffen.id
+                interactionDelegate?.canvasView(self, didSelectLayerWithID: getroffen.id)
+                croppingLayerID = nil
+                beginTextEditing(layer: getroffen)
                 return
             }
             croppingLayerID = nil
@@ -526,6 +556,77 @@ final class CanvasView: NSView {
             contentSize: renderer.contentSize(of: getroffen.content),
             startPoint: punkt
         )
+    }
+
+    // MARK: - Text auf der Leinwand bearbeiten
+
+    private func beginTextEditing(layer: Layer) {
+        guard case .text(let inhalt) = layer.content else { return }
+
+        // Eine projektive Verzerrung hat keinen rechteckigen Ort mehr. Ein
+        // aufgesetztes Feld würde Text an einer anderen Stelle versprechen,
+        // als das fertige Objekt ihn zeigt; deshalb bleibt der Doppelklick
+        // bei solchen Ebenen eine reine Auswahl. Nach dem Rasterisieren als
+        // Objekt lässt sich die Verzerrung weiterhin bearbeiten.
+        guard layer.distortion == nil else { return }
+
+        let groesse = renderer.contentSize(of: layer.content)
+        let rahmen = layer.transform.unrotatedFrame(forContentSize: groesse)
+        let editor = NSTextView(frame: NSRect(
+            x: rahmen.x,
+            y: Double(bounds.height) - rahmen.y - rahmen.height,
+            width: max(rahmen.width, 1),
+            height: max(rahmen.height, 1)
+        ))
+
+        // Das Feld bleibt bei gedrehten Ebenen bewusst aufrecht und sitzt
+        // zentriert im ungedrehten Ebenenrahmen. Ein mitgedrehtes NSTextView
+        // hätte irreführende Cursor-, Auswahl- und Treffergeometrie. Skalierung
+        // wird dagegen ehrlich in Rahmen und Schriftgrösse übernommen; bei
+        // ungleichmässiger Skalierung folgt die Schrift der vertikalen Achse,
+        // während die Feldbreite der horizontalen Achse folgt.
+        let schriftgroesse = inhalt.fontSize * abs(layer.transform.scaleY)
+        editor.font = NSFont(name: inhalt.fontName, size: schriftgroesse)
+            ?? .systemFont(ofSize: schriftgroesse)
+        let farbe = RGBA(hex: inhalt.colorHex) ?? .black
+        editor.textColor = NSColor(cgColor: farbe.cgColor) ?? .black
+        editor.alignment = switch inhalt.alignment {
+        case .left: .left
+        case .center: .center
+        case .right: .right
+        }
+        editor.string = inhalt.string
+        editor.drawsBackground = false
+        editor.isRichText = false
+        editor.importsGraphics = false
+        editor.textContainerInset = .zero
+        editor.textContainer?.lineFragmentPadding = 0
+        editor.textContainer?.maximumNumberOfLines = 1
+        editor.textContainer?.lineBreakMode = .byClipping
+        editor.delegate = self
+
+        textEditor = editor
+        editingTextLayerID = layer.id
+        addSubview(editor)
+        withoutAnimation { renderedLayers[layer.id]?.isHidden = true }
+        window?.makeFirstResponder(editor)
+        editor.setSelectedRange(NSRange(location: editor.string.utf16.count, length: 0))
+    }
+
+    private func endTextEditing(committing: Bool) {
+        guard let editor = textEditor, let id = editingTextLayerID else { return }
+        let text = editor.string
+        textEditor = nil
+        editingTextLayerID = nil
+        editor.delegate = nil
+        editor.removeFromSuperview()
+
+        withoutAnimation {
+            renderedLayers[id]?.isHidden = !(document.layer(withID: id)?.isVisible ?? false)
+        }
+        if committing {
+            interactionDelegate?.canvasView(self, didFinishEditingTextOfLayerWithID: id, text: text)
+        }
     }
 
     /// Sitzt der Punkt auf einem Griff der ausgewählten Ebene?
@@ -838,6 +939,26 @@ final class CanvasView: NSView {
         guard scale != renderer.contentsScale else { return }
         renderer.contentsScale = scale
         rebuild()
+    }
+}
+
+extension CanvasView: NSTextViewDelegate {
+
+    /// Return schliesst die einzeilige Bearbeitung ab, Escape verwirft sie.
+    /// Die Befehle werden hier abgefangen, bevor NSTextView einen Zeilenumbruch
+    /// einfügt oder die Responder-Kette bis zu einem Werkzeug weiterläuft.
+    func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        switch commandSelector {
+        case #selector(NSResponder.insertNewline(_:)),
+             #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+            endTextEditing(committing: true)
+            return true
+        case #selector(NSResponder.cancelOperation(_:)):
+            endTextEditing(committing: false)
+            return true
+        default:
+            return false
+        }
     }
 }
 

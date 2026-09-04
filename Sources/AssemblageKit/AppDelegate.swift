@@ -185,6 +185,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         menu.addItem(.separator())
 
+        // „Rasterbild“ macht die Einbahnstrasse im Titel sichtbar. Eine
+        // Rückfrage bei jeder Umwandlung wäre unnötig bevormundend, weil der
+        // Vorgang vollständig widerrufbar ist.
+        menu.addItem(
+            withTitle: "In Objekt umwandeln (Rasterbild)",
+            action: #selector(DocumentWindowController.flattenSelectedLayer(_:)),
+            keyEquivalent: ""
+        )
+        menu.addItem(.separator())
+
         menu.addItem(withTitle: "Ebene nach oben", action: #selector(DocumentWindowController.moveSelectedLayerUp(_:)), keyEquivalent: "]")
         menu.addItem(withTitle: "Ebene nach unten", action: #selector(DocumentWindowController.moveSelectedLayerDown(_:)), keyEquivalent: "[")
 
