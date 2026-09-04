@@ -10,6 +10,7 @@ enum CanvasTool: Equatable {
     case select
     case crop
     case brush
+    case distort
 }
 
 /// Regeln der Werkzeugauswahl, getrennt von der AppKit-Darstellung.
@@ -24,6 +25,8 @@ struct ToolSelection {
         case .crop, .brush:
             guard let layer, case .image = layer.content else { return false }
             return true
+        case .distort:
+            return layer != nil
         }
     }
 
@@ -43,6 +46,7 @@ private extension NSToolbarItem.Identifier {
     static let selectTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Auswaehlen")
     static let cropTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Zuschneiden")
     static let brushTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Pinsel")
+    static let distortTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Verziehen")
     static let removeSubject = NSToolbarItem.Identifier("Assemblage.Werkzeug.Freistellen")
     static let insertText = NSToolbarItem.Identifier("Assemblage.Einfuegen.Text")
     static let insertShape = NSToolbarItem.Identifier("Assemblage.Einfuegen.Form")
@@ -114,6 +118,7 @@ final class ToolbarController: NSObject, NSToolbarDelegate {
     @objc private func selectTool(_ sender: Any?) { toggle(.select) }
     @objc private func cropTool(_ sender: Any?) { toggle(.crop) }
     @objc private func brushTool(_ sender: Any?) { toggle(.brush) }
+    @objc private func distortTool(_ sender: Any?) { toggle(.distort) }
 
     private func toggle(_ tool: CanvasTool) {
         guard ToolSelection.isAvailable(tool, forSelected: selectedLayer) else { return }
@@ -205,6 +210,7 @@ final class ToolbarController: NSObject, NSToolbarDelegate {
             .selectTool,
             .cropTool,
             .brushTool,
+            .distortTool,
             .removeSubject,
             .insertText,
             .insertShape,
@@ -246,6 +252,14 @@ final class ToolbarController: NSObject, NSToolbarDelegate {
                 label: "Pinsel-Maske",
                 symbolName: "paintbrush",
                 action: #selector(brushTool(_:))
+            )
+        case .distortTool:
+            return makeToolItem(
+                identifier: itemIdentifier,
+                tool: .distort,
+                label: "Verziehen",
+                symbolName: "skew",
+                action: #selector(distortTool(_:))
             )
         case .removeSubject:
             return makeRemoveSubjectItem(identifier: itemIdentifier)

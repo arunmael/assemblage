@@ -158,6 +158,13 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
     @IBAction func moveSelectedLayerToTop(_ sender: Any?) { moveSelectedLayer(.toTop) }
     @IBAction func moveSelectedLayerToBottom(_ sender: Any?) { moveSelectedLayer(.toBottom) }
 
+    @IBAction func selectDistortTool(_ sender: Any?) { _ = toolbarController?.select(.distort) }
+
+    @IBAction func resetSelectedLayerDistortion(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        DistortionCommands.resetSelected(in: state)
+    }
+
     private func moveSelectedLayer(_ command: LayerOrderCommand) {
         guard let state = (document as? AssemblageDocument)?.state else { return }
         LayerListEditing(state: state).moveSelected(command)
@@ -197,6 +204,14 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
         if menuItem.action == #selector(removeSubjectBackground(_:)) {
             guard let document = document as? AssemblageDocument else { return false }
             return ForegroundMaskingCommandController.canPerform(in: document)
+        }
+
+        if menuItem.action == #selector(selectDistortTool(_:)) {
+            return (document as? AssemblageDocument)?.state.selectedLayer != nil
+        }
+
+        if menuItem.action == #selector(resetSelectedLayerDistortion(_:)) {
+            return (document as? AssemblageDocument)?.state.selectedLayer?.distortion != nil
         }
 
         if let action = menuItem.action,

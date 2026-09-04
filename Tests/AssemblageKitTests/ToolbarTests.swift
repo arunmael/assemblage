@@ -30,6 +30,7 @@ final class ToolbarTests: XCTestCase {
         XCTAssertTrue(ToolSelection.isAvailable(.select, forSelected: nil))
         XCTAssertFalse(ToolSelection.isAvailable(.crop, forSelected: nil))
         XCTAssertFalse(ToolSelection.isAvailable(.brush, forSelected: nil))
+        XCTAssertFalse(ToolSelection.isAvailable(.distort, forSelected: nil))
     }
 
     func testImageToolsAreUnavailableForTextAndShapeLayers() {
@@ -37,11 +38,12 @@ final class ToolbarTests: XCTestCase {
             XCTAssertTrue(ToolSelection.isAvailable(.select, forSelected: layer))
             XCTAssertFalse(ToolSelection.isAvailable(.crop, forSelected: layer))
             XCTAssertFalse(ToolSelection.isAvailable(.brush, forSelected: layer))
+            XCTAssertTrue(ToolSelection.isAvailable(.distort, forSelected: layer))
         }
     }
 
     func testAllToolsAreAvailableForImageLayer() {
-        for tool in [CanvasTool.select, .crop, .brush] {
+        for tool in [CanvasTool.select, .crop, .brush, .distort] {
             XCTAssertTrue(ToolSelection.isAvailable(tool, forSelected: imageLayer))
         }
     }
@@ -49,6 +51,7 @@ final class ToolbarTests: XCTestCase {
     func testSecondClickOnActiveToolReturnsToSelect() {
         XCTAssertEqual(ToolSelection.toggled(.crop, current: .crop), .select)
         XCTAssertEqual(ToolSelection.toggled(.brush, current: .brush), .select)
+        XCTAssertEqual(ToolSelection.toggled(.distort, current: .distort), .select)
         XCTAssertEqual(ToolSelection.toggled(.select, current: .select), .select)
     }
 
@@ -56,6 +59,7 @@ final class ToolbarTests: XCTestCase {
         XCTAssertEqual(ToolSelection.toggled(.crop, current: .select), .crop)
         XCTAssertEqual(ToolSelection.toggled(.brush, current: .crop), .brush)
         XCTAssertEqual(ToolSelection.toggled(.select, current: .brush), .select)
+        XCTAssertEqual(ToolSelection.toggled(.distort, current: .crop), .distort)
     }
 
     func testBrushFallsBackToSelectWhenSelectionChangesToText() {
