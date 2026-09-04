@@ -6,7 +6,9 @@ Jedes Feature muss sich rechtfertigen. Lieber fünf Werkzeuge, die exzellent fun
 
 ## Status
 
-**Phasen 0 bis 3 der Roadmap stehen.** Die App importiert Fotos per Drag & Drop, ordnet sie frei an, maskiert sie von Hand oder automatisch, passt sie an und exportiert nach PNG, JPEG und PDF.
+**Alle vier Phasen der Roadmap stehen.** Die App importiert Fotos per Drag & Drop, ordnet sie frei an, maskiert sie von Hand oder automatisch, passt sie an und exportiert nach PNG, JPEG und PDF.
+
+Offen sind nur noch die im Plan als „ggf." markierten Punkte (iPad-Version, iCloud) sowie die Entscheidungen aus Plan §10 — Vertrieb, Preismodell und wie viele Collage-Vorlagen mitgeliefert werden sollen.
 
 | Phase | Inhalt | Stand |
 | --- | --- | --- |
@@ -14,6 +16,9 @@ Jedes Feature muss sich rechtfertigen. Lieber fünf Werkzeuge, die exzellent fun
 | 1 | Import, Anordnen, Zuschneiden, Ausrichtungshilfen, PNG/JPEG-Export | ✅ |
 | 2 | Bildanpassungen, Pinsel-Maske, automatisches Freistellen, Blend-Modi | ✅ |
 | 3 | Text, Formen, Collage-Vorlagen, PDF-Export | ✅ |
+| 4 | Tastenkürzel für Power-User | ✅ |
+
+Die nicht verhandelbaren Grundanforderungen aus Plan §2.1 sind ebenfalls abgedeckt: Autosave und Versionsverwaltung über `NSDocument`, asynchroner Export und asynchrones Freistellen, Fehlerbehandlung statt `try!`, automatisierte Tests der Kernpipeline samt Stresstest, und lokale Diagnoseberichte (siehe unten).
 | 4 | Politur: Tastenkürzel, Vorlagen-Bibliothek, optional iPad/iCloud | offen |
 
 Der vollständige Entwicklungsplan (Vision, Feature-Set, technische Architektur, Roadmap) liegt in [`docs/entwicklungsplan.md`](docs/entwicklungsplan.md), die Regeln für die Mitarbeit in [`agent-rules.md`](agent-rules.md).
