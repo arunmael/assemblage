@@ -12,6 +12,9 @@ public struct Layer: Codable, Equatable, Identifiable, Sendable {
     public var blendMode: BlendMode
     public var transform: Transform2D
     public var mask: LayerMask?
+    /// Freies Verziehen der vier Ecken (siehe `QuadDistortion`). `nil` heisst
+    /// unverzerrt — der Normalfall, und dann verhält sich alles wie bisher.
+    public var distortion: QuadDistortion?
     public var content: LayerContent
 
     public init(
@@ -22,6 +25,7 @@ public struct Layer: Codable, Equatable, Identifiable, Sendable {
         blendMode: BlendMode = .normal,
         transform: Transform2D = .identity,
         mask: LayerMask? = nil,
+        distortion: QuadDistortion? = nil,
         content: LayerContent
     ) {
         self.id = id
@@ -31,6 +35,7 @@ public struct Layer: Codable, Equatable, Identifiable, Sendable {
         self.blendMode = blendMode
         self.transform = transform
         self.mask = mask
+        self.distortion = distortion
         self.content = content
     }
 

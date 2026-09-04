@@ -40,7 +40,7 @@ extension Layer {
     // Muss ausgeschrieben werden: Ein eigenes `init(from:)` unterdrückt
     // auch die automatisch erzeugten CodingKeys.
     enum CodingKeys: String, CodingKey {
-        case id, name, isVisible, opacity, blendMode, transform, mask, content
+        case id, name, isVisible, opacity, blendMode, transform, mask, distortion, content
     }
 
     public init(from decoder: Decoder) throws {
@@ -53,6 +53,7 @@ extension Layer {
             blendMode: try container.value(.blendMode, or: .normal),
             transform: try container.value(.transform, or: .identity),
             mask: try container.decodeIfPresent(LayerMask.self, forKey: .mask),
+            distortion: try container.decodeIfPresent(QuadDistortion.self, forKey: .distortion),
             content: try container.decode(LayerContent.self, forKey: .content)
         )
     }
