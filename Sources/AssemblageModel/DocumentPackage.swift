@@ -42,6 +42,17 @@ public enum DocumentPackage {
     }
 
     public static func encode(_ document: Document) throws -> Data {
+        // Vor dem Kodieren bereinigen. Ein einziges `nan` — aus einer
+        // Division, einem abgerutschten Regler oder einem Dokument von einem
+        // anderen Programmstand — lässt `JSONEncoder` werfen, und der Nutzer
+        // kann seine Arbeit überhaupt nicht mehr sichern. Genau der
+        // Datenverlust, den Plan 2.1 ausschliesst.
+        //
+        // Lieber ein ersetzter Zahlenwert als ein unspeicherbares Dokument:
+        // Die Ersatzwerte sind so gewählt, dass die betroffene Ebene sichtbar
+        // und auffindbar bleibt (siehe `Sanitizing.swift`). Ein Dokument ohne
+        // kaputte Zahlen geht dabei unverändert durch.
+        let document = document.sanitized()
         let encoder = JSONEncoder()
         // Sortierte Schlüssel: sonst erzeugt jedes Speichern eine andere
         // Byte-Reihenfolge, was die Versionsverwaltung mit sinnlosen
