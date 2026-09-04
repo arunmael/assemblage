@@ -7,6 +7,13 @@ enum NewLayerKind: Equatable, CaseIterable {
     case rectangle
     case roundedRectangle
     case ellipse
+    case triangle
+    case pentagon
+    case hexagon
+    case star
+    case heart
+    case arrow
+    case speechBubble
 
     /// Beschriftung für Menü und Werkzeugleiste.
     var localizedName: String {
@@ -15,58 +22,78 @@ enum NewLayerKind: Equatable, CaseIterable {
         case .rectangle: "Rechteck"
         case .roundedRectangle: "Abgerundetes Rechteck"
         case .ellipse: "Ellipse"
+        case .triangle: "Dreieck"
+        case .pentagon: "Fünfeck"
+        case .hexagon: "Sechseck"
+        case .star: "Stern"
+        case .heart: "Herz"
+        case .arrow: "Pfeil"
+        case .speechBubble: "Sprechblase"
         }
     }
 
     /// Name des Undo-Schritts.
     var undoActionName: String { "\(localizedName) einfügen" }
+
+    /// Die Form hinter dieser Einfügeart — `nil` bei Text.
+    var shapeKind: ShapeKind? {
+        switch self {
+        case .text: nil
+        case .rectangle: .rectangle
+        case .roundedRectangle: .roundedRectangle
+        case .ellipse: .ellipse
+        case .triangle: .triangle
+        case .pentagon: .pentagon
+        case .hexagon: .hexagon
+        case .star: .star
+        case .heart: .heart
+        case .arrow: .arrow
+        case .speechBubble: .speechBubble
+        }
+    }
 }
 
 @MainActor
 enum LayerCreation {
 
-    /// Baut die neue Ebene, passend zur Leinwandgrösse und versetzt gegen
-    /// bereits vorhandene.
-    static func makeLayer(
-        _ kind: NewLayerKind,
-        canvas: CanvasSize,
-        existingLayers: [Layer]
-    ) -> Layer {
+    static func makeLayer(_ kind: NewLayerKind, canvas: CanvasSize, existingLayers: [Layer]) -> Layer {
         let transform = initialTransform(canvas: canvas, existingLayers: existingLayers)
 
         switch kind {
         case .text:
-            // Sechs Prozent der kurzen Leinwandseite bleiben auf kleinen
-            // Formaten handlich und sind auf einem A4-Poster noch gut sichtbar.
             let fontSize = max(min(canvas.width, canvas.height) * 0.06, 1)
             return Layer(
                 name: kind.localizedName,
                 transform: transform,
                 content: .text(TextLayerContent(
-                    string: "Text eingeben",
-                    fontSize: fontSize,
-                    colorHex: "#1F2937",
-                    alignment: .center
+                    string: "Text eingeben", fontSize: fontSize,
+                    colorHex: "#1F2937", alignment: .center
                 ))
             )
 
-        case .rectangle:
-            return makeShapeLayer(kind, shapeKind: .rectangle, canvas: canvas, transform: transform)
-        case .roundedRectangle:
-            return makeShapeLayer(kind, shapeKind: .roundedRectangle, canvas: canvas, transform: transform)
-        case .ellipse:
-            return makeShapeLayer(kind, shapeKind: .ellipse, canvas: canvas, transform: transform)
+        default:
+            // Falls kein gültiger ShapeKind ermittelt werden kann, weichen wir auf ein Rechteck aus.
+            let shape = kind.shapeKind ?? .rectangle
+            return makeShapeLayer(kind, shapeKind: shape, canvas: canvas, transform: transform)
         }
     }
 
     private static func makeShapeLayer(
-        _ kind: NewLayerKind,
-        shapeKind: ShapeKind,
-        canvas: CanvasSize,
-        transform: Transform2D
+        _ kind: NewLayerKind, shapeKind: ShapeKind, canvas: CanvasSize, transform: Transform2D
     ) -> Layer {
         let shortSide = max(min(canvas.width, canvas.height), 1)
-        let size = Size(width: shortSide * 0.4, height: shortSide * 0.24)
+        let size: Size
+
+        switch shapeKind {
+        case .triangle, .pentagon, .hexagon, .star, .heart:
+            // In ein breitgezogenes Rechteck gepresst wirken diese Formen verzerrt,
+            // weil sie um einen Mittelpunkt herum gedacht sind.
+            let side = shortSide * 0.32
+            size = Size(width: side, height: side)
+        default:
+            size = Size(width: shortSide * 0.4, height: shortSide * 0.24)
+        }
+
         return Layer(
             name: kind.localizedName,
             transform: transform,

@@ -248,3 +248,40 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
         ExportPanelController.present(for: assemblageDocument, host: window)
     }
 }
+
+extension DocumentWindowController {
+    @IBAction func insertTriangleLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.triangle, into: state)
+    }
+
+    @IBAction func insertPentagonLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.pentagon, into: state)
+    }
+
+    @IBAction func insertHexagonLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.hexagon, into: state)
+    }
+
+    @IBAction func insertStarLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.star, into: state)
+    }
+
+    @IBAction func insertHeartLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.heart, into: state)
+    }
+
+    @IBAction func insertArrowLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.arrow, into: state)
+    }
+
+    @IBAction func insertSpeechBubbleLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.speechBubble, into: state)
+    }
+}

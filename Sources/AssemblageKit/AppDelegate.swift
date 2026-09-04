@@ -111,6 +111,35 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         return menu
     }
 
+    private func shapeTemplateMenu() -> NSMenuItem {
+        let vorlagen = NSMenu(title: "Formvorlage")
+        vorlagen.addItem(withTitle: "Dreieck",
+                         action: #selector(DocumentWindowController.insertTriangleLayer(_:)),
+                         keyEquivalent: "")
+        vorlagen.addItem(withTitle: "Fünfeck",
+                         action: #selector(DocumentWindowController.insertPentagonLayer(_:)),
+                         keyEquivalent: "")
+        vorlagen.addItem(withTitle: "Sechseck",
+                         action: #selector(DocumentWindowController.insertHexagonLayer(_:)),
+                         keyEquivalent: "")
+        vorlagen.addItem(withTitle: "Stern",
+                         action: #selector(DocumentWindowController.insertStarLayer(_:)),
+                         keyEquivalent: "")
+        vorlagen.addItem(withTitle: "Herz",
+                         action: #selector(DocumentWindowController.insertHeartLayer(_:)),
+                         keyEquivalent: "")
+        vorlagen.addItem(withTitle: "Pfeil",
+                         action: #selector(DocumentWindowController.insertArrowLayer(_:)),
+                         keyEquivalent: "")
+        vorlagen.addItem(withTitle: "Sprechblase",
+                         action: #selector(DocumentWindowController.insertSpeechBubbleLayer(_:)),
+                         keyEquivalent: "")
+
+        let eintrag = NSMenuItem(title: "Formvorlage", action: nil, keyEquivalent: "")
+        eintrag.submenu = vorlagen
+        return eintrag
+    }
+
     private func insertMenu() -> NSMenu {
         let menu = NSMenu(title: "Einfügen")
         let text = NSMenuItem(
@@ -124,6 +153,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Rechteck", action: #selector(DocumentWindowController.insertRectangleLayer(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Abgerundetes Rechteck", action: #selector(DocumentWindowController.insertRoundedRectangleLayer(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Ellipse", action: #selector(DocumentWindowController.insertEllipseLayer(_:)), keyEquivalent: "")
+        menu.addItem(shapeTemplateMenu())
         menu.addItem(.separator())
 
         let templates = NSMenu(title: "Collage-Vorlage")
