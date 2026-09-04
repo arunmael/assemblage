@@ -92,6 +92,47 @@ final class ExportTests: XCTestCase {
         XCTAssertEqual(image.height, 321)
     }
 
+    func testExportStillDecodesLargeOriginalAtFullResolution() async throws {
+        let width = 8_192
+        let height = 8
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        for x in 0..<width {
+            context.setFillColor(x.isMultiple(of: 2) ? NSColor.black.cgColor : NSColor.white.cgColor)
+            context.fill(CGRect(x: x, y: 0, width: 1, height: height))
+        }
+        let png = try XCTUnwrap(
+            NSBitmapImageRep(cgImage: try XCTUnwrap(context.makeImage()))
+                .representation(using: .png, properties: [:])
+        )
+        let resources = DocumentResources()
+        let reference = resources.addOriginal(png, fileExtension: "png")
+        XCTAssertEqual(try XCTUnwrap(ImageStore(resources: resources).image(named: reference)).width, 4_096)
+
+        let document = AssemblageModel.Document(
+            canvas: CanvasSize(width: Double(width), height: Double(height)),
+            layers: [Layer(
+                name: "Feine Streifen",
+                transform: Transform2D(x: Double(width) / 2, y: Double(height) / 2),
+                content: .image(ImageLayerContent(originalFileReference: reference))
+            )]
+        )
+        let exported = try await DocumentExporter.image(
+            of: document,
+            resources: resources,
+            targetSize: CGSize(width: width, height: height)
+        )
+        let pixels = try rgbaContext(from: exported)
+        let links = try pixel(of: pixels, x: 4_000, y: 4)
+        let rechts = try pixel(of: pixels, x: 4_001, y: 4)
+
+        XCTAssertGreaterThan(abs(links.r - rechts.r), 200,
+                             "der Export muss einzelne Originalpixel behalten")
+    }
+
     func testExportScaleFactorHelperMultipliesCanvasSize() {
         let canvas = CanvasSize(width: 1080, height: 1080)
         let size = DocumentExporter.targetSize(forCanvas: canvas, scale: 2)

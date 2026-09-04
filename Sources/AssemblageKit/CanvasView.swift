@@ -394,7 +394,8 @@ final class CanvasView: NSView {
     private func updateCropPreview(for layer: Layer) {
         guard croppingLayerID == layer.id,
               case .image(let inhalt) = layer.content,
-              let bild = renderer.images.image(named: inhalt.originalFileReference)
+              let bild = renderer.images.image(named: inhalt.originalFileReference),
+              let pixelSize = renderer.images.pixelSize(named: inhalt.originalFileReference)
         else {
             withoutAnimation {
                 cropPreviewLayer.isHidden = true
@@ -403,7 +404,7 @@ final class CanvasView: NSView {
             return
         }
 
-        let bildGroesse = Size(width: Double(bild.width), height: Double(bild.height))
+        let bildGroesse = Size(pixelSize)
         // Die Transformation des *ganzen* Bildes ergibt sich, indem man die
         // Ebene auf das ganze Bild „zuschneidet" — dieselbe Rechnung, die
         // beim Zuschneiden das Bild an Ort und Stelle hält.
@@ -742,10 +743,11 @@ final class CanvasView: NSView {
         guard let id = croppingLayerID,
               let ebene = document.layer(withID: id),
               case .image(let inhalt) = ebene.content,
-              let bild = renderer.images.image(named: inhalt.originalFileReference)
+              renderer.images.image(named: inhalt.originalFileReference) != nil,
+              let pixelSize = renderer.images.pixelSize(named: inhalt.originalFileReference)
         else { return nil }
 
-        let bildGroesse = Size(width: Double(bild.width), height: Double(bild.height))
+        let bildGroesse = Size(pixelSize)
         let ausschnitt = ebene.effectiveCrop(imageSize: bildGroesse) ?? Rect(x: 0, y: 0, width: bildGroesse.width, height: bildGroesse.height)
 
         guard let griff = ebene.transform.handle(
@@ -768,10 +770,11 @@ final class CanvasView: NSView {
         guard let id = brushLayerID,
               let ebene = document.layer(withID: id),
               case .image(let inhalt) = ebene.content,
-              let bild = renderer.images.image(named: inhalt.originalFileReference)
+              renderer.images.image(named: inhalt.originalFileReference) != nil,
+              let pixelSize = renderer.images.pixelSize(named: inhalt.originalFileReference)
         else { return nil }
 
-        let groesse = Size(width: Double(bild.width), height: Double(bild.height))
+        let groesse = Size(pixelSize)
 
         // Auf der bestehenden Maske weitermalen, nicht bei null anfangen —
         // sonst wäre jeder Strich der erste und löschte den vorherigen.

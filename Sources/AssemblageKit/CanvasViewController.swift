@@ -209,10 +209,11 @@ extension CanvasViewController: CanvasInteractionDelegate, CanvasKeyboardCommand
     func canvasView(_ canvasView: CanvasView, didChangeCropOfLayerWithID id: UUID, to crop: Rect) {
         guard let ebene = state.document.layer(withID: id),
               case .image(let inhalt) = ebene.content,
-              let bild = state.images.image(named: inhalt.originalFileReference)
+              state.images.image(named: inhalt.originalFileReference) != nil,
+              let pixelSize = state.images.pixelSize(named: inhalt.originalFileReference)
         else { return }
 
-        let groesse = Size(width: Double(bild.width), height: Double(bild.height))
+        let groesse = Size(pixelSize)
         state.owner?.modify("Zuschneiden") {
             try? $0.updateLayer(id: id) { $0 = $0.cropped(to: crop, imageSize: groesse) }
         }

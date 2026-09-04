@@ -19,7 +19,7 @@ private final class CachedImage: Sendable {
     init(_ image: CGImage) { self.image = image }
 }
 
-/// Lädt die Originalbilder eines Dokuments und hält sie zwischengespeichert.
+/// Lädt Bildschirmfassungen der Originalbilder und hält sie zwischengespeichert.
 ///
 /// NSCache wird verwendet, weil das System diesen Speicher bei akutem Speicherdruck
 /// selbstständig freigeben kann. Ein manuell implementiertes LRU-Verfahren mit fester
@@ -27,8 +27,11 @@ private final class CachedImage: Sendable {
 @MainActor
 final class ImageStore {
 
+    private static let maximumPreviewPixelSize = 4_096
+
     let resources: DocumentResources
     private let cache = NSCache<NSString, CachedImage>()
+    private var pixelSizes: [String: CGSize] = [:]
 
     /// Verhindert, dass eine defekte Datei bei jedem Frame-Rendering-Versuch
     /// erneut geladen und dekodiert wird, was die Performance ruinieren würde.
@@ -65,8 +68,24 @@ final class ImageStore {
         guard !failed.contains(name) else { return nil }
 
         guard let data = resources.data(for: name),
-              let image = ImageDecoding.decode(data)
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0
         else {
+            failed.insert(name)
+            return nil
+        }
+        if let size = Self.pixelSize(from: source) {
+            pixelSizes[name] = size
+        }
+
+        // 4096 Pixel reichen für jeden Bildschirm samt beherzter Vergrösserung;
+        // mehr Bildpunkte wären auf dem Bildschirm ohnehin nicht zu sehen.
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: Self.maximumPreviewPixelSize,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
             failed.insert(name)
             return nil
         }
@@ -76,8 +95,41 @@ final class ImageStore {
         return image
     }
 
+    /// Die Pixelmasse des Originals — unabhängig davon, wie fein das Bild
+    /// gerade für den Bildschirm vorgehalten wird.
+    func pixelSize(named name: String) -> CGSize? {
+        if let cached = pixelSizes[name] { return cached }
+
+        guard let data = resources.data(for: name),
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0,
+              let size = Self.pixelSize(from: source)
+        else { return nil }
+
+        pixelSizes[name] = size
+        return size
+    }
+
+    private static func pixelSize(from source: CGImageSource) -> CGSize? {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+                as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue,
+              width > 0, height > 0
+        else { return nil }
+
+        let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+        let size = if (5...8).contains(orientation) {
+            CGSize(width: height, height: width)
+        } else {
+            CGSize(width: width, height: height)
+        }
+        return size
+    }
+
     func forget(_ name: String) {
         cache.removeObject(forKey: name as NSString)
+        pixelSizes.removeValue(forKey: name)
         failed.remove(name)
     }
 

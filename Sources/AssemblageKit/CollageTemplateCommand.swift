@@ -17,10 +17,12 @@ enum CollageTemplateCommand {
 
     static func apply(_ template: CollageTemplate, to state: DocumentState) {
         apply(template, to: state) { content in
-            guard let image = state.images.image(named: content.originalFileReference) else {
+            guard state.images.image(named: content.originalFileReference) != nil,
+                  let pixelSize = state.images.pixelSize(named: content.originalFileReference)
+            else {
                 return nil
             }
-            return Size(width: Double(image.width), height: Double(image.height))
+            return Size(pixelSize)
         }
     }
 
