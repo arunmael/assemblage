@@ -15,6 +15,10 @@ public struct Layer: Codable, Equatable, Identifiable, Sendable {
     /// Freies Verziehen der vier Ecken (siehe `QuadDistortion`). `nil` heisst
     /// unverzerrt — der Normalfall, und dann verhält sich alles wie bisher.
     public var distortion: QuadDistortion?
+    /// Leuchten und Schlagschatten. `nil` heisst: keine — der Normalfall.
+    public var effects: LayerEffects?
+    /// Eine über die Ebene gelegte Textur. `nil` heisst: keine.
+    public var texture: LayerTexture?
     public var content: LayerContent
 
     public init(
@@ -26,6 +30,8 @@ public struct Layer: Codable, Equatable, Identifiable, Sendable {
         transform: Transform2D = .identity,
         mask: LayerMask? = nil,
         distortion: QuadDistortion? = nil,
+        effects: LayerEffects? = nil,
+        texture: LayerTexture? = nil,
         content: LayerContent
     ) {
         self.id = id
@@ -36,6 +42,8 @@ public struct Layer: Codable, Equatable, Identifiable, Sendable {
         self.transform = transform
         self.mask = mask
         self.distortion = distortion
+        self.effects = effects
+        self.texture = texture
         self.content = content
     }
 

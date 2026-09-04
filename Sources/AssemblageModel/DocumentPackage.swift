@@ -95,6 +95,9 @@ extension Document {
             if let maskReference = layer.mask?.maskImageReference {
                 names.append(maskReference)
             }
+            if let texture = layer.texture {
+                names.append(texture.imageReference)
+            }
             return names
         }
     }
