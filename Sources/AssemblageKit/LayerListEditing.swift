@@ -1,6 +1,23 @@
 import Foundation
 import AssemblageModel
 
+/// Ziel eines Befehls, der die ausgewählte Ebene im Stapel verschiebt.
+enum LayerOrderCommand: CaseIterable {
+    case up
+    case down
+    case toTop
+    case toBottom
+
+    var actionName: String {
+        switch self {
+        case .up: "Ebene nach oben"
+        case .down: "Ebene nach unten"
+        case .toTop: "Ebene ganz nach oben"
+        case .toBottom: "Ebene ganz nach unten"
+        }
+    }
+}
+
 /// Kapselt Änderungen aus der Ebenenliste, damit Reihenfolge, Validierung
 /// und Undo-Verhalten unabhängig von der SwiftUI-Darstellung prüfbar sind.
 @MainActor
@@ -28,6 +45,31 @@ struct LayerListEditing {
     func delete(_ id: UUID) {
         state.owner?.modify("Ebene löschen") { document in
             _ = try? document.removeLayer(id: id)
+        }
+    }
+
+    /// Verschiebt die Auswahl in Modellreihenfolge: Index 0 liegt zuunterst,
+    /// deshalb bedeutet „nach oben“ ausdrücklich einen höheren Index.
+    func moveSelected(_ command: LayerOrderCommand) {
+        guard let id = state.selectedLayerID,
+              let currentIndex = state.document.index(ofLayerID: id)
+        else { return }
+
+        let targetIndex: Int
+        switch command {
+        case .up:
+            targetIndex = min(currentIndex + 1, state.document.layers.count - 1)
+        case .down:
+            targetIndex = max(currentIndex - 1, 0)
+        case .toTop:
+            targetIndex = state.document.layers.count - 1
+        case .toBottom:
+            targetIndex = 0
+        }
+        guard targetIndex != currentIndex else { return }
+
+        state.owner?.modify(command.actionName) { document in
+            try? document.moveLayer(id: id, toIndex: targetIndex)
         }
     }
 

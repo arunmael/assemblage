@@ -106,6 +106,9 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
             canvasViewController: canvas,
             commandTarget: self
         )
+        canvas.selectToolFromKeyboard = { [weak toolbarController] tool in
+            toolbarController?.select(tool) ?? false
+        }
         self.toolbarController = toolbarController
         if let window {
             toolbarController.install(on: window)
@@ -136,6 +139,30 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
     @IBAction func applyGrid3x3Template(_ sender: Any?) { applyTemplate(.grid3x3) }
     @IBAction func applyPolaroidStackTemplate(_ sender: Any?) { applyTemplate(.polaroidStack) }
 
+    @IBAction func toggleSelectedLayerVisibility(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state,
+              let id = state.selectedLayerID
+        else { return }
+        LayerListEditing(state: state).toggleVisibility(of: id)
+    }
+
+    @IBAction func deleteSelectedLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state,
+              let id = state.selectedLayerID
+        else { return }
+        LayerListEditing(state: state).delete(id)
+    }
+
+    @IBAction func moveSelectedLayerUp(_ sender: Any?) { moveSelectedLayer(.up) }
+    @IBAction func moveSelectedLayerDown(_ sender: Any?) { moveSelectedLayer(.down) }
+    @IBAction func moveSelectedLayerToTop(_ sender: Any?) { moveSelectedLayer(.toTop) }
+    @IBAction func moveSelectedLayerToBottom(_ sender: Any?) { moveSelectedLayer(.toBottom) }
+
+    private func moveSelectedLayer(_ command: LayerOrderCommand) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerListEditing(state: state).moveSelected(command)
+    }
+
     private func insertLayer(_ kind: NewLayerKind) {
         guard let state = (document as? AssemblageDocument)?.state else { return }
         LayerCreation.insert(kind, into: state)
@@ -155,6 +182,18 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if let action = menuItem.action,
+           [
+            #selector(toggleSelectedLayerVisibility(_:)),
+            #selector(deleteSelectedLayer(_:)),
+            #selector(moveSelectedLayerUp(_:)),
+            #selector(moveSelectedLayerDown(_:)),
+            #selector(moveSelectedLayerToTop(_:)),
+            #selector(moveSelectedLayerToBottom(_:))
+           ].contains(action) {
+            return (document as? AssemblageDocument)?.state.selectedLayer != nil
+        }
+
         if menuItem.action == #selector(removeSubjectBackground(_:)) {
             guard let document = document as? AssemblageDocument else { return false }
             return ForegroundMaskingCommandController.canPerform(in: document)
