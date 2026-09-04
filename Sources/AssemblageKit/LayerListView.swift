@@ -190,6 +190,22 @@ private struct LayerThumbnail: View {
         case .rectangle: Rectangle().fill(color).padding(4)
         case .roundedRectangle: RoundedRectangle(cornerRadius: 4).fill(color).padding(4)
         case .ellipse: Ellipse().fill(color).padding(4)
+        default:
+            // Vorlagen über denselben Pfadbau wie Leinwand und Export: Eine
+            // eigene SwiftUI-Nachbildung wäre eine zweite Wahrheit über die
+            // Form und liefe irgendwann auseinander.
+            TemplateShape(content: shape).fill(color).padding(4)
         }
+    }
+}
+
+
+/// Miniaturansicht einer Formvorlage in der Ebenenliste.
+private struct TemplateShape: Shape {
+    let content: ShapeLayerContent
+
+    func path(in rect: CGRect) -> Path {
+        guard let pfad = ShapePath.cgPath(for: content, in: rect) else { return Path() }
+        return Path(pfad)
     }
 }

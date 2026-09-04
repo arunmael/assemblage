@@ -334,24 +334,7 @@ struct LayerRenderer {
     }
 
     private func applyShape(_ content: ShapeLayerContent, to layer: CAShapeLayer) {
-        let bounds = CGRect(origin: .zero, size: content.size.cgSize)
-
-        layer.path = switch content.kind {
-        case .rectangle:
-            CGPath(rect: bounds, transform: nil)
-        case .roundedRectangle:
-            // Der Radius kann nicht grösser als die halbe kürzere Seite sein —
-            // sonst zeichnet Core Graphics gar nichts.
-            CGPath(
-                roundedRect: bounds,
-                cornerWidth: min(content.cornerRadius, bounds.width / 2),
-                cornerHeight: min(content.cornerRadius, bounds.height / 2),
-                transform: nil
-            )
-        case .ellipse:
-            CGPath(ellipseIn: bounds, transform: nil)
-        }
-
+        layer.path = ShapePath.cgPath(for: content, in: CGRect(origin: .zero, size: content.size.cgSize))
         layer.fillColor = (RGBA(hex: content.fillColorHex) ?? .white).cgColor
     }
 

@@ -119,22 +119,18 @@ enum LayerFlattening {
             NSGraphicsContext.restoreGraphicsState()
 
         case .shape(let shape):
-            context.setFillColor((RGBA(hex: shape.fillColorHex) ?? .white).cgColor)
-            let rechteck = CGRect(origin: .zero, size: size)
-            switch shape.kind {
-            case .rectangle:
-                context.fill(rechteck)
-            case .roundedRectangle:
-                let radius = min(CGFloat(shape.cornerRadius), size.width / 2, size.height / 2)
-                context.addPath(CGPath(
-                    roundedRect: rechteck,
-                    cornerWidth: radius,
-                    cornerHeight: radius,
-                    transform: nil
-                ))
+            // Über denselben Pfadbau wie Leinwand und Export. Solange es nur
+            // Rechteck, Ellipse und abgerundetes Rechteck gab, war eine eigene
+            // Nachbildung hier harmlos — alle drei sind senkrecht symmetrisch.
+            // Bei einem Dreieck oder Herz wäre sie es nicht mehr.
+            //
+            // Ungeflippt gezeichnet, aus demselben Grund wie beim Text darüber:
+            // Das entstehende Bild wird später beim Zeichnen lokal gespiegelt,
+            // die beiden Schritte heben sich auf.
+            if let pfad = ShapePath.cgPath(for: shape, in: CGRect(origin: .zero, size: size)) {
+                context.setFillColor((RGBA(hex: shape.fillColorHex) ?? .white).cgColor)
+                context.addPath(pfad)
                 context.fillPath()
-            case .ellipse:
-                context.fillEllipse(in: rechteck)
             }
 
         case .image:

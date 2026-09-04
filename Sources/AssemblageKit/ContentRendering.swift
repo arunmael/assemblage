@@ -50,6 +50,56 @@ enum ImageDecoding {
     }
 }
 
+/// Der Pfad einer Formebene (Plan 5.7 und die Vorlagen aus missing.md).
+///
+/// Eine Stelle für beide Renderwege, aus demselben Grund wie bei
+/// `ImageDecoding` und `TextLayout`: Zwei Kopien einer Formberechnung driften
+/// auseinander, und das fällt erst beim Exportieren auf.
+enum ShapePath {
+
+    /// `nil` nur bei einem Rechteck ohne Fläche — dann ist nichts zu zeichnen.
+    static func cgPath(for content: ShapeLayerContent, in rect: CGRect) -> CGPath? {
+        guard rect.width > 0, rect.height > 0 else { return nil }
+
+        // Die drei Grundformen kennt Core Graphics selbst und zeichnet sie
+        // dabei als echte Kurven. Ein Streckenzug wäre hier nicht nur Aufwand,
+        // sondern sichtbar kantiger.
+        switch content.kind {
+        case .rectangle:
+            return CGPath(rect: rect, transform: nil)
+        case .roundedRectangle:
+            return CGPath(
+                roundedRect: rect,
+                cornerWidth: min(content.cornerRadius, rect.width / 2),
+                cornerHeight: min(content.cornerRadius, rect.height / 2),
+                transform: nil
+            )
+        case .ellipse:
+            return CGPath(ellipseIn: rect, transform: nil)
+        default:
+            break
+        }
+
+        guard let vorlage = content.kind.template else { return nil }
+        let punkte = ShapeGeometry.outline(
+            of: vorlage,
+            size: Size(width: rect.width, height: rect.height),
+            pointCount: content.pointCount
+        )
+        guard punkte.count >= 3 else { return nil }
+
+        let pfad = CGMutablePath()
+        // `ShapeGeometry` liefert die Punkte relativ zum Ursprung des
+        // Rechtecks; hier auf dessen tatsächliche Lage verschieben.
+        pfad.move(to: CGPoint(x: rect.minX + punkte[0].x, y: rect.minY + punkte[0].y))
+        for punkt in punkte.dropFirst() {
+            pfad.addLine(to: CGPoint(x: rect.minX + punkt.x, y: rect.minY + punkt.y))
+        }
+        pfad.closeSubpath()
+        return pfad
+    }
+}
+
 /// Textsatz für Textebenen (Plan 5.6).
 enum TextLayout {
 

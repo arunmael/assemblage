@@ -158,7 +158,7 @@ extension ShapeLayerContent {
     // Muss ausgeschrieben werden: Ein eigenes `init(from:)` unterdrückt
     // auch die automatisch erzeugten CodingKeys.
     enum CodingKeys: String, CodingKey {
-        case kind, size, cornerRadius, fillColorHex
+        case kind, size, cornerRadius, fillColorHex, pointCount
     }
 
     public init(from decoder: Decoder) throws {
@@ -167,7 +167,8 @@ extension ShapeLayerContent {
             kind: try container.decode(ShapeKind.self, forKey: .kind),
             size: try container.decode(Size.self, forKey: .size),
             cornerRadius: try container.value(.cornerRadius, or: 0),
-            fillColorHex: try container.value(.fillColorHex, or: "#FFFFFF")
+            fillColorHex: try container.value(.fillColorHex, or: "#FFFFFF"),
+            pointCount: try container.value(.pointCount, or: 5)
         )
     }
 }

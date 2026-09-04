@@ -697,24 +697,25 @@ enum DocumentExporter {
     }
 
     private static func drawShape(_ content: ShapeLayerContent, in rect: CGRect, context: CGContext) {
-        let path: CGPath
-        switch content.kind {
-        case .rectangle:
-            path = CGPath(rect: rect, transform: nil)
-        case .roundedRectangle:
-            path = CGPath(
-                roundedRect: rect,
-                cornerWidth: min(content.cornerRadius, rect.width / 2),
-                cornerHeight: min(content.cornerRadius, rect.height / 2),
-                transform: nil
-            )
-        case .ellipse:
-            path = CGPath(ellipseIn: rect, transform: nil)
-        }
+        guard let path = ShapePath.cgPath(for: content, in: rect) else { return }
 
+        // Dieselbe lokale Spiegelung wie bei Bildinhalten und aus demselben
+        // Grund: `ShapePath` beschreibt die Form im Koordinatensystem des
+        // Modells (Ursprung oben links), der Export-Kontext zählt y aber nach
+        // oben.
+        //
+        // Bis zu den Formvorlagen fehlte das hier, ohne aufzufallen: Rechteck,
+        // abgerundetes Rechteck und Ellipse sind senkrecht symmetrisch, eine
+        // Spiegelung ist an ihnen nicht zu sehen. Ein Dreieck stand dagegen
+        // sofort auf dem Kopf.
+        context.saveGState()
+        context.translateBy(x: rect.midX, y: rect.midY)
+        context.scaleBy(x: 1, y: -1)
+        context.translateBy(x: -rect.midX, y: -rect.midY)
         context.addPath(path)
         context.setFillColor((RGBA(hex: content.fillColorHex) ?? .white).cgColor)
         context.fillPath()
+        context.restoreGState()
     }
 
     /// Sichtbarer Platzhalter für eine Ebene, deren Originaldatei fehlt —
