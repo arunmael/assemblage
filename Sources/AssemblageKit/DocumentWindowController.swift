@@ -165,6 +165,13 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
         DistortionCommands.resetSelected(in: state)
     }
 
+    @IBAction func toggleLayerComparison(_ sender: Any?) {
+        guard canvasViewController?.toggleComparison() == false else { return }
+        // Nichts zu vergleichen: kurz akustisch quittieren statt still nichts
+        // zu tun, damit der Befehl nicht kaputt wirkt.
+        NSSound.beep()
+    }
+
     @IBAction func flattenSelectedLayer(_ sender: Any?) {
         guard let state = (document as? AssemblageDocument)?.state else { return }
         _ = LayerFlattening.flattenSelected(in: state)

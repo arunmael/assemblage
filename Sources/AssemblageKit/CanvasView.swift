@@ -224,36 +224,55 @@ final class CanvasView: NSView {
         } else {
             // Häufigster Fall (ein Regler bewegt sich): nur Eigenschaften
             // auffrischen, kein Neuaufbau, keine neu dekodierten Bilder.
-            for layer in document.layers {
-                guard let rendered = renderedLayers[layer.id] else { continue }
-
-                // Wechselt die Ebenenart (oder taucht ein fehlendes Original
-                // wieder auf), braucht es eine andere Schichtklasse. Sonst
-                // wird der Inhalt in der bestehenden Schicht aufgefrischt —
-                // ein Neuaufbau würde bei Bildebenen jedes Foto erneut
-                // dekodieren.
-                guard renderer.canReuse(rendered, for: layer.content) else {
-                    let neu = renderer.makeLayer(for: layer)
-                    withoutAnimation {
-                        canvasLayer.replaceSublayer(rendered, with: neu)
-                    }
-                    renderedLayers[layer.id] = neu
-                    continue
-                }
-
-                withoutAnimation {
-                    renderer.apply(layer, to: rendered)
-                    renderer.applyMask(layer, to: rendered)
-                    // Während der direkten Bearbeitung zeigt das NSTextView
-                    // denselben Inhalt. Die gerenderte Kopie bleibt deshalb
-                    // verborgen, damit Buchstaben nicht doppelt und dadurch
-                    // scheinbar fetter erscheinen.
-                    if layer.id == editingTextLayerID { rendered.isHidden = true }
-                }
-            }
+            //
+            // Wechselt dabei die Ebenenart (oder taucht ein fehlendes Original
+            // wieder auf), tauscht `refreshRenderedLayers` die Schichtklasse;
+            // während der direkten Textbearbeitung bleibt die gerenderte Kopie
+            // verborgen, damit Buchstaben nicht doppelt erscheinen.
+            refreshRenderedLayers()
         }
 
         updateSelectionOutline()
+    }
+
+    /// Die Ebene, die gerade **ohne** ihre Bearbeitungen gezeigt wird
+    /// (Vorher/Nachher-Vergleich, aus missing.md).
+    ///
+    /// Bewusst nur ein Anzeigezustand und keine Dokumentänderung: Ein
+    /// Vergleich darf weder einen Undo-Schritt erzeugen noch das Dokument als
+    /// geändert markieren. Er verändert nichts, er zeigt nur etwas anderes.
+    var comparisonLayerID: UUID? {
+        didSet {
+            guard comparisonLayerID != oldValue else { return }
+            // Der Inhalt bleibt derselbe, nur seine Darstellung wechselt —
+            // deshalb genügt ein Auffrischen ohne Neuaufbau der Struktur.
+            refreshRenderedLayers()
+        }
+    }
+
+    /// Wie eine Ebene gerade dargestellt werden soll.
+    private func displayed(_ layer: Layer) -> Layer {
+        layer.id == comparisonLayerID ? layer.withoutEdits() : layer
+    }
+
+    /// Frischt alle Schichten aus dem aktuellen Dokument auf, ohne den
+    /// Schichtbaum neu zu bauen.
+    private func refreshRenderedLayers() {
+        withoutAnimation {
+            for layer in document.layers {
+                guard let rendered = renderedLayers[layer.id] else { continue }
+                let anzeige = displayed(layer)
+                guard renderer.canReuse(rendered, for: anzeige.content) else {
+                    let neu = renderer.makeLayer(for: anzeige)
+                    canvasLayer.replaceSublayer(rendered, with: neu)
+                    renderedLayers[layer.id] = neu
+                    continue
+                }
+                renderer.apply(anzeige, to: rendered)
+                renderer.applyMask(anzeige, to: rendered)
+                if layer.id == editingTextLayerID { rendered.isHidden = true }
+            }
+        }
     }
 
     private func rebuild() {
@@ -266,7 +285,7 @@ final class CanvasView: NSView {
             // Reihenfolge im Modell = Kompositing-Reihenfolge, Index 0 zuunterst
             // — und genau so erwartet Core Animation seine `sublayers`.
             for layer in document.layers {
-                let rendered = renderer.makeLayer(for: layer)
+                let rendered = renderer.makeLayer(for: displayed(layer))
                 if layer.id == editingTextLayerID { rendered.isHidden = true }
                 renderedLayers[layer.id] = rendered
                 canvasLayer.addSublayer(rendered)
@@ -289,6 +308,7 @@ final class CanvasView: NSView {
     // Benannt statt über die Position im Schichtbaum: Sonst brechen Tests,
     // sobald eine weitere Schicht dazwischenkommt — genau das ist beim
     // Zuschneiden-Modus passiert.
+    var documentForTesting: AssemblageModel.Document { document }
     var selectionOutlineLayerForTesting: CAShapeLayer { selectionOutline }
     var handleLayerForTesting: CAShapeLayer { handleShapes }
     var guideLayerForTesting: CAShapeLayer { guideShapes }
@@ -396,6 +416,26 @@ final class CanvasView: NSView {
     // MARK: - Maus
 
     override var acceptsFirstResponder: Bool { true }
+
+    /// ⌘Y als zweites Kürzel für „Wiederholen" (aus missing.md).
+    ///
+    /// Im Menü steht das übliche ⇧⌘Z. Ein zweiter Menüeintrag nur für ⌘Y
+    /// wäre eine verwirrende Doppelzeile, und ein *versteckter* Eintrag
+    /// bekommt von AppKit keine Tastenkürzel mehr. Deshalb hier: Ein
+    /// `performKeyEquivalent` erreicht den ganzen Ansichtsbaum, unabhängig
+    /// davon, wer gerade Erstempfänger ist — ⌘Y wirkt also auch, während der
+    /// Fokus in Ebenenliste oder Inspector liegt.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+              event.charactersIgnoringModifiers?.lowercased() == "y",
+              // Beim Tippen in ein Textfeld gehört ⌘Y nicht uns.
+              !(window?.firstResponder is NSText),
+              let undoManager, undoManager.canRedo
+        else { return super.performKeyEquivalent(with: event) }
+
+        undoManager.redo()
+        return true
+    }
 
     override func keyDown(with event: NSEvent) {
         // Regulär erhält der Canvas nur Tasten, wenn er selbst Erstempfänger

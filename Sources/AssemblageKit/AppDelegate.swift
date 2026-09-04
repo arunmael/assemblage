@@ -201,6 +201,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(delete)
         menu.addItem(.separator())
 
+        let vergleich = NSMenuItem(
+            title: "Vorher/Nachher vergleichen",
+            action: #selector(DocumentWindowController.toggleLayerComparison(_:)),
+            keyEquivalent: "\\"
+        )
+        vergleich.keyEquivalentModifierMask = [.command]
+        menu.addItem(vergleich)
+        menu.addItem(.separator())
+
         let distort = NSMenuItem(
             title: "Verziehen",
             action: #selector(DocumentWindowController.selectDistortTool(_:)),

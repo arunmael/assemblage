@@ -77,7 +77,14 @@ final class CanvasViewController: NSViewController {
         // mitziehen — sonst zeigen Liste und Leinwand Verschiedenes.
         state.$selectedLayerID
             .sink { [weak self] id in
-                DispatchQueue.main.async { self?.canvasView.selectedLayerID = id }
+                DispatchQueue.main.async {
+                    self?.canvasView.selectedLayerID = id
+                    // Ein laufender Vorher/Nachher-Vergleich endet mit der
+                    // Auswahl: Sonst bliebe eine Ebene unbearbeitet stehen,
+                    // ohne dass noch etwas darauf hinweist, und man hielte
+                    // den Vergleichszustand für das Ergebnis.
+                    self?.endComparisonIfNeeded()
+                }
             }
             .store(in: &observations)
     }
@@ -292,3 +299,42 @@ extension CanvasViewController: CanvasInteractionDelegate, CanvasKeyboardCommand
         }
     }
 }
+
+extension CanvasViewController {
+
+    /// Zeigt die ausgewählte Ebene ohne ihre Bearbeitungen — oder wieder mit
+    /// (Vorher/Nachher-Vergleich, aus missing.md).
+    ///
+    /// Ein Umschalter und kein gehaltener Knopf: Zum Vergleichen will man
+    /// hin- und herschauen, oft mehrfach, und dabei nicht die ganze Zeit eine
+    /// Taste festhalten müssen.
+    ///
+    /// `false` heisst „es gab nichts zu vergleichen" — der Aufrufer kann den
+    /// Befehl dann ausgrauen, statt einen Umschalter anzubieten, der nichts tut.
+    @discardableResult
+    func toggleComparison() -> Bool {
+        if canvasView.comparisonLayerID != nil {
+            canvasView.comparisonLayerID = nil
+            return true
+        }
+
+        guard let id = state.selectedLayerID,
+              let layer = state.document.layer(withID: id),
+              layer.hasEdits
+        else { return false }
+
+        canvasView.comparisonLayerID = id
+        return true
+    }
+
+    var isComparing: Bool { canvasView.comparisonLayerID != nil }
+
+    /// Der Vergleich endet, sobald eine andere Ebene gewählt wird — sonst
+    /// zeigte die Leinwand eine Ebene unbearbeitet, ohne dass noch etwas
+    /// darauf hinweist.
+    func endComparisonIfNeeded() {
+        guard let id = canvasView.comparisonLayerID, id != state.selectedLayerID else { return }
+        canvasView.comparisonLayerID = nil
+    }
+}
+

@@ -55,3 +55,39 @@ public struct Layer: Codable, Equatable, Identifiable, Sendable {
         return copy
     }
 }
+
+extension Layer {
+
+    /// Diese Ebene ohne alles, was nachträglich an ihr eingestellt wurde:
+    /// ohne Anpassungen, Maske, Verzerrung, Effekte und Textur.
+    ///
+    /// Grundlage für den Vorher/Nachher-Vergleich (aus missing.md). Lage,
+    /// Grösse, Drehung und Zuschnitt bleiben absichtlich erhalten — sonst
+    /// spränge die Ebene beim Vergleichen an eine andere Stelle, und man
+    /// vergliche zwei Bilder, die nebeneinander gar nicht deckungsgleich sind.
+    ///
+    /// Auch Deckkraft und Blend-Modus bleiben: Sie beschreiben, wie die Ebene
+    /// zu den anderen steht, nicht wie sie selbst bearbeitet wurde.
+    public func withoutEdits() -> Layer {
+        var ergebnis = self
+        ergebnis.mask = nil
+        ergebnis.distortion = nil
+        ergebnis.effects = nil
+        ergebnis.texture = nil
+
+        if case .image(var inhalt) = content {
+            inhalt.adjustments = .neutral
+            ergebnis.content = .image(inhalt)
+        }
+
+        return ergebnis
+    }
+
+    /// Ob es überhaupt etwas zu vergleichen gibt. Ohne diese Prüfung böte die
+    /// App einen Vergleich an, der nichts zeigt.
+    public var hasEdits: Bool {
+        if mask != nil || distortion != nil || effects != nil || texture != nil { return true }
+        if case .image(let inhalt) = content, inhalt.adjustments != .neutral { return true }
+        return false
+    }
+}
