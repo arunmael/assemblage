@@ -232,12 +232,14 @@ struct LayerRenderer {
             if let crop = image.cropRect {
                 return Size(width: crop.width, height: crop.height)
             }
-            guard let loaded = images.image(named: image.originalFileReference) else {
+            guard images.image(named: image.originalFileReference) != nil,
+                  let pixelSize = images.pixelSize(named: image.originalFileReference)
+            else {
                 // Fehlendes Original: feste Platzhaltergrösse, damit die Ebene
                 // in der Liste und auf dem Canvas auffindbar bleibt.
                 return Size(width: 320, height: 320)
             }
-            return Size(width: Double(loaded.width), height: Double(loaded.height))
+            return Size(pixelSize)
 
         case .text(let text):
             return Size(TextLayout.naturalSize(of: text))
@@ -272,14 +274,18 @@ struct LayerRenderer {
 
         case .image(let image):
             guard !(renderedLayer is CATextLayer), !(renderedLayer is CAShapeLayer) else { return }
-            guard let bild = images.image(named: image.originalFileReference) else { return }
+            guard let bild = images.image(named: image.originalFileReference),
+                  let pixelSize = images.pixelSize(named: image.originalFileReference)
+            else { return }
             renderedLayer.contents = bild
-            applyCrop(image.cropRect, imageWidth: bild.width, imageHeight: bild.height, to: renderedLayer)
+            applyCrop(image.cropRect, imageSize: pixelSize, to: renderedLayer)
         }
     }
 
     private func makeImageLayer(_ content: ImageLayerContent) -> CALayer {
-        guard let image = images.image(named: content.originalFileReference) else {
+        guard let image = images.image(named: content.originalFileReference),
+              let pixelSize = images.pixelSize(named: content.originalFileReference)
+        else {
             return Self.makePlaceholderLayer()
         }
 
@@ -291,22 +297,22 @@ struct LayerRenderer {
         layer.contentsGravity = .resize
         layer.magnificationFilter = .trilinear
         layer.minificationFilter = .trilinear
-        applyCrop(content.cropRect, imageWidth: image.width, imageHeight: image.height, to: layer)
+        applyCrop(content.cropRect, imageSize: pixelSize, to: layer)
         return layer
     }
 
     /// Zuschnitt nicht-destruktiv (Plan 5.3): Core Animation zeigt einen
     /// Ausschnitt der Bitmap, das Original bleibt ganz.
-    private func applyCrop(_ crop: Rect?, imageWidth: Int, imageHeight: Int, to layer: CALayer) {
-        guard let crop, imageWidth > 0, imageHeight > 0 else {
+    private func applyCrop(_ crop: Rect?, imageSize: CGSize, to layer: CALayer) {
+        guard let crop, imageSize.width > 0, imageSize.height > 0 else {
             layer.contentsRect = CGRect(x: 0, y: 0, width: 1, height: 1)
             return
         }
         layer.contentsRect = CGRect(
-            x: crop.x / Double(imageWidth),
-            y: crop.y / Double(imageHeight),
-            width: crop.width / Double(imageWidth),
-            height: crop.height / Double(imageHeight)
+            x: crop.x / imageSize.width,
+            y: crop.y / imageSize.height,
+            width: crop.width / imageSize.width,
+            height: crop.height / imageSize.height
         )
     }
 

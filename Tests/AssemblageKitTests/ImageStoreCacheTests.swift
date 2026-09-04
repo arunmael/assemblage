@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import ImageIO
 @testable import AssemblageKit
 
 /// Der Bild-Zwischenspeicher darf nicht unbegrenzt wachsen.
@@ -14,6 +15,15 @@ import AppKit
 /// verworfenes Bild folgenlos neu entsteht.
 @MainActor
 final class ImageStoreCacheTests: XCTestCase {
+
+    private func bildDaten(width: Int, height: Int) throws -> Data {
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let bild = try XCTUnwrap(context.makeImage())
+        return try XCTUnwrap(NSBitmapImageRep(cgImage: bild).representation(using: .png, properties: [:]))
+    }
 
     private func speicherMitBild() throws -> (ImageStore, String) {
         let context = try XCTUnwrap(CGContext(
@@ -47,6 +57,44 @@ final class ImageStoreCacheTests: XCTestCase {
         let erstes = try XCTUnwrap(speicher.image(named: referenz))
         let zweites = try XCTUnwrap(speicher.image(named: referenz))
         XCTAssertTrue(erstes === zweites, "der zweite Aufruf müsste aus dem Zwischenspeicher kommen")
+        XCTAssertEqual(erstes.width, 8, "kleine Bilder dürfen nicht verkleinert werden")
+        XCTAssertEqual(erstes.height, 8, "kleine Bilder dürfen nicht verkleinert werden")
+    }
+
+    func testLargeImageIsDownsampledButReportsOriginalPixelSize() throws {
+        let ressourcen = DocumentResources()
+        let referenz = ressourcen.addOriginal(
+            try bildDaten(width: 8_192, height: 16),
+            fileExtension: "png"
+        )
+        let speicher = ImageStore(resources: ressourcen)
+
+        let bild = try XCTUnwrap(speicher.image(named: referenz))
+        XCTAssertEqual(bild.width, 4_096)
+        XCTAssertEqual(bild.height, 8)
+        XCTAssertEqual(speicher.pixelSize(named: referenz), CGSize(width: 8_192, height: 16))
+    }
+
+    func testPixelSizeAccountsForExifOrientation() throws {
+        let sourceData = try bildDaten(width: 30, height: 20)
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(sourceData as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let orientedData = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(
+            orientedData, "public.jpeg" as CFString, 1, nil
+        ))
+        CGImageDestinationAddImage(destination, image, [
+            kCGImagePropertyOrientation: 6
+        ] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+
+        let ressourcen = DocumentResources()
+        let referenz = ressourcen.addOriginal(orientedData as Data, fileExtension: "jpg")
+        let speicher = ImageStore(resources: ressourcen)
+
+        XCTAssertEqual(speicher.pixelSize(named: referenz), CGSize(width: 20, height: 30))
+        let bild = try XCTUnwrap(speicher.image(named: referenz))
+        XCTAssertEqual(CGSize(width: bild.width, height: bild.height), CGSize(width: 20, height: 30))
     }
 
     /// Der entscheidende Punkt: Gibt der Zwischenspeicher ein Bild frei, darf
@@ -96,5 +144,21 @@ final class ImageStoreCacheTests: XCTestCase {
         XCTAssertNil(speicher.image(named: referenz), "ohne forget bleibt der Vermerk")
         speicher.forget(referenz)
         XCTAssertNotNil(speicher.image(named: referenz))
+    }
+
+    func testForgetClearsRememberedPixelSize() throws {
+        let ressourcen = DocumentResources()
+        let referenz = ressourcen.addOriginal(
+            try bildDaten(width: 12, height: 8),
+            fileExtension: "png"
+        )
+        let speicher = ImageStore(resources: ressourcen)
+        XCTAssertEqual(speicher.pixelSize(named: referenz), CGSize(width: 12, height: 8))
+
+        ressourcen.replace(referenz, with: try bildDaten(width: 7, height: 5))
+        XCTAssertEqual(speicher.pixelSize(named: referenz), CGSize(width: 12, height: 8))
+
+        speicher.forget(referenz)
+        XCTAssertEqual(speicher.pixelSize(named: referenz), CGSize(width: 7, height: 5))
     }
 }

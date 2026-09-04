@@ -174,6 +174,38 @@ final class ContentUpdateTests: XCTestCase {
         XCTAssertEqual(schicht.contentsRect.width, 0.5, accuracy: 0.01, "der Zuschnitt muss ankommen")
     }
 
+    func testLargeImageKeepsOriginalLayerSizeAndCropGeometry() throws {
+        let ctx = try XCTUnwrap(CGContext(
+            data: nil, width: 8_192, height: 16, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let png = try XCTUnwrap(
+            NSBitmapImageRep(cgImage: try XCTUnwrap(ctx.makeImage()))
+                .representation(using: .png, properties: [:])
+        )
+        let resources = DocumentResources()
+        let referenz = resources.addOriginal(png, fileExtension: "png")
+        let store = ImageStore(resources: resources)
+        let renderer = LayerRenderer(images: store)
+        let content = ImageLayerContent(originalFileReference: referenz)
+
+        XCTAssertEqual(try XCTUnwrap(store.image(named: referenz)).width, 4_096)
+        let ganzeEbene = renderer.makeLayer(for: Layer(name: "Foto", content: .image(content)))
+        XCTAssertEqual(ganzeEbene.bounds.size, CGSize(width: 8_192, height: 16))
+
+        let crop = Rect(x: 2_048, y: 4, width: 4_096, height: 8)
+        let zugeschnitten = renderer.makeLayer(for: Layer(
+            name: "Foto",
+            content: .image(ImageLayerContent(originalFileReference: referenz, cropRect: crop))
+        ))
+        XCTAssertEqual(zugeschnitten.bounds.size, CGSize(width: 4_096, height: 8))
+        XCTAssertEqual(zugeschnitten.contentsRect.origin.x, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(zugeschnitten.contentsRect.origin.y, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(zugeschnitten.contentsRect.width, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(zugeschnitten.contentsRect.height, 0.5, accuracy: 0.0001)
+    }
+
     // MARK: - Keine unnötigen Neuaufbauten
 
     /// Die Gegenprobe: Eine reine Layout-Änderung darf die Schicht **nicht**
