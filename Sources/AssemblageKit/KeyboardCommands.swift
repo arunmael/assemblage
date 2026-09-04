@@ -87,7 +87,7 @@ enum KeyboardCommands {
         case .nudge(let dx, let dy):
             // Zusammengefasst, damit zehn Tastendrücke nicht zehn
             // Undo-Schritte ergeben.
-            document.modifyCoalescing("Ebene bewegen") {
+            document.modifyCoalescing("Ebene bewegen", targetID: id) {
                 try? $0.updateLayer(id: id) { ebene in
                     ebene.transform.x += dx
                     ebene.transform.y += dy

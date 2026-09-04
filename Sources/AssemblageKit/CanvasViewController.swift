@@ -166,6 +166,9 @@ final class CanvasViewController: NSViewController {
     @objc func zoomOut() {
         scrollView.magnification = max(scrollView.magnification / 1.5, scrollView.minMagnification)
     }
+
+    var canZoomIn: Bool { scrollView.magnification < scrollView.maxMagnification }
+    var canZoomOut: Bool { scrollView.magnification > scrollView.minMagnification }
 }
 
 
@@ -337,4 +340,3 @@ extension CanvasViewController {
         canvasView.comparisonLayerID = nil
     }
 }
-

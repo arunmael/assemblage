@@ -77,6 +77,12 @@ extension AssemblageDocument {
     /// Undo-Stack mit Einzeloperationen wäre komplizierter und würde genau
     /// diese Garantie aufgeben.
     func modify(_ actionName: String, _ body: (inout AssemblageModel.Document) -> Void) {
+        if let laufenderName = coalescingActionName, laufenderName != actionName {
+            // Ein anderer Befehl darf nicht in den noch offenen Schritt einer
+            // Tastenwiederholung geraten und dessen Undo-Beschriftung erben.
+            endCoalescingInteraction(actionName: laufenderName)
+        }
+
         let before = state.document
         var updated = before
         body(&updated)
@@ -149,18 +155,21 @@ extension AssemblageDocument {
     /// Test auf echte Zeit zu warten.
     func modifyCoalescing(
         _ actionName: String,
+        targetID: UUID? = nil,
         at time: Date = Date(),
         within interval: TimeInterval = 0.7,
         _ body: (inout AssemblageModel.Document) -> Void
     ) {
         let passt = isInteracting
             && coalescingActionName == actionName
+            && coalescingTargetID == targetID
             && time.timeIntervalSince(lastCoalescedAt ?? .distantPast) <= interval
 
         if !passt {
             endInteraction(actionName: coalescingActionName ?? actionName)
             beginInteraction()
             coalescingActionName = actionName
+            coalescingTargetID = targetID
         }
         lastCoalescedAt = time
 
@@ -178,7 +187,19 @@ extension AssemblageDocument {
                 guard let self else { return }
                 self.endInteraction(actionName: self.coalescingActionName ?? "Ändern")
                 self.coalescingActionName = nil
+                self.coalescingTargetID = nil
+                self.lastCoalescedAt = nil
             }
         }
+    }
+
+    func endCoalescingInteraction(actionName: String? = nil) {
+        guard let laufenderName = coalescingActionName else { return }
+        coalescingTimer?.invalidate()
+        coalescingTimer = nil
+        endInteraction(actionName: actionName ?? laufenderName)
+        coalescingActionName = nil
+        coalescingTargetID = nil
+        lastCoalescedAt = nil
     }
 }

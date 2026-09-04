@@ -31,7 +31,7 @@ enum TextureCommand {
         }
 
         // Einlesen der Datei; schlägt dies fehl, wird die Operation ohne Seiteneffekte abgebrochen.
-        guard let data = try? Data(contentsOf: url) else {
+        guard let data = try? Data(contentsOf: url), ImageDecoding.decode(data) != nil else {
             return .unreadableFile
         }
 
@@ -108,7 +108,7 @@ enum TextureCommand {
             if outcome == .unreadableFile {
                 let alert = NSAlert()
                 alert.messageText = "Fehler beim Laden"
-                alert.informativeText = "Die ausgewählte Bilddatei konnte nicht gelesen werden."
+                alert.informativeText = "Die ausgewählte Datei konnte nicht als Bild gelesen werden. Wähle eine andere Bilddatei."
                 alert.alertStyle = .warning
                 alert.addButton(withTitle: "OK")
                 

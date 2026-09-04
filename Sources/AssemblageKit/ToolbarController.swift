@@ -59,7 +59,7 @@ private extension NSToolbarItem.Identifier {
 /// Der Controller besitzt keinen Dokumentzustand neben `DocumentState`: Er
 /// übersetzt nur Auswahl und Bedienung in die bereits vorhandenen Canvas-Modi.
 @MainActor
-final class ToolbarController: NSObject, NSToolbarDelegate {
+final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation {
 
     let toolbar: NSToolbar
 
@@ -139,7 +139,7 @@ final class ToolbarController: NSObject, NSToolbarDelegate {
     /// Wählt ein Werkzeug direkt über die Tastatur. Anders als ein erneuter
     /// Klick auf den aktiven Knopf schaltet derselbe Befehl nicht zurück.
     func select(_ tool: CanvasTool) -> Bool {
-        guard ToolSelection.isAvailable(tool, forSelected: selectedLayer) else { return true }
+        guard ToolSelection.isAvailable(tool, forSelected: selectedLayer) else { return false }
         currentTool = tool
         applyCurrentToolToCanvas()
         updatePresentation()
@@ -220,6 +220,16 @@ final class ToolbarController: NSObject, NSToolbarDelegate {
     @objc private func zoomToActualSize(_ sender: Any?) { canvasViewController?.zoomToActualSize() }
     @objc private func zoomIn(_ sender: Any?) { canvasViewController?.zoomIn() }
     @objc private func zoomOut(_ sender: Any?) { canvasViewController?.zoomOut() }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(zoomIn(_:)) {
+            return canvasViewController?.canZoomIn == true
+        }
+        if menuItem.action == #selector(zoomOut(_:)) {
+            return canvasViewController?.canZoomOut == true
+        }
+        return true
+    }
 
     // MARK: - NSToolbarDelegate
 

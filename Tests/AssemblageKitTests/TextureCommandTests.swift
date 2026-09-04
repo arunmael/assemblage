@@ -112,6 +112,18 @@ final class TextureCommandTests: XCTestCase {
         XCTAssertEqual(document.state.document, vorher)
     }
 
+    func testCorruptImageIsReportedInsteadOfSilentlyAttached() throws {
+        let (document, id) = dokumentMitEbene()
+        let url = ordner.appendingPathComponent("kaputt.png")
+        try Data("kein Bild".utf8).write(to: url)
+
+        let ergebnis = TextureCommand.applyTexture(from: url, in: document.state)
+
+        XCTAssertEqual(ergebnis, .unreadableFile)
+        XCTAssertNil(document.state.document.layer(withID: id)?.texture)
+        XCTAssertFalse(document.undoManager?.canUndo ?? true)
+    }
+
     // MARK: - Entfernen
 
     func testRemovingTakesTheTextureAway() throws {

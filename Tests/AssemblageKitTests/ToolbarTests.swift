@@ -84,4 +84,36 @@ final class ToolbarTests: XCTestCase {
             .brush
         )
     }
+
+    func testUnavailableKeyboardToolIsNotReportedAsHandled() {
+        let document = AssemblageDocument()
+        let canvas = CanvasViewController(state: document.state)
+        let windowController = DocumentWindowController()
+        let toolbar = ToolbarController(
+            state: document.state,
+            canvasViewController: canvas,
+            commandTarget: windowController
+        )
+
+        XCTAssertFalse(toolbar.select(.brush))
+    }
+
+    func testToolbarZoomMenuDisablesCommandsAtLimits() {
+        let document = AssemblageDocument()
+        let canvas = CanvasViewController(state: document.state)
+        let toolbar = ToolbarController(
+            state: document.state,
+            canvasViewController: canvas,
+            commandTarget: DocumentWindowController()
+        )
+
+        for _ in 0..<20 { canvas.zoomIn() }
+        XCTAssertFalse(toolbar.validateMenuItem(NSMenuItem(
+            title: "Vergrössern", action: NSSelectorFromString("zoomIn:"), keyEquivalent: ""
+        )))
+        for _ in 0..<40 { canvas.zoomOut() }
+        XCTAssertFalse(toolbar.validateMenuItem(NSMenuItem(
+            title: "Verkleinern", action: NSSelectorFromString("zoomOut:"), keyEquivalent: ""
+        )))
+    }
 }

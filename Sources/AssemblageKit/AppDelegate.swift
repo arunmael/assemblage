@@ -87,7 +87,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func editMenu() -> NSMenu {
         let menu = NSMenu(title: "Bearbeiten")
-        menu.addItem(withTitle: "Widerrufen", action: Selector(("undo:")), keyEquivalent: "z")
+        menu.addItem(withTitle: "Widerrufen", action: #selector(DocumentWindowController.undo(_:)), keyEquivalent: "z")
 
         let redo = NSMenuItem(title: "Wiederholen", action: Selector(("redo:")), keyEquivalent: "z")
         redo.keyEquivalentModifierMask = [.command, .shift]
