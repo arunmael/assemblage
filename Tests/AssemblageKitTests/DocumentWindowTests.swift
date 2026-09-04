@@ -79,6 +79,28 @@ final class DocumentWindowTests: XCTestCase {
 
         XCTAssertNotNil(canvas.view as? NSScrollView)
     }
+
+    func testZoomMenuDisablesCommandsAtMagnificationLimits() throws {
+        let controller = try makeWindowController(for: AssemblageDocument())
+        let split = try XCTUnwrap(controller.contentViewController as? NSSplitViewController)
+        let canvas = try XCTUnwrap(
+            split.splitViewItems.compactMap { $0.viewController as? CanvasViewController }.first
+        )
+
+        for _ in 0..<20 { canvas.zoomIn() }
+        XCTAssertFalse(controller.validateMenuItem(NSMenuItem(
+            title: "Einzoomen",
+            action: #selector(DocumentWindowController.zoomIn(_:)),
+            keyEquivalent: ""
+        )))
+
+        for _ in 0..<40 { canvas.zoomOut() }
+        XCTAssertFalse(controller.validateMenuItem(NSMenuItem(
+            title: "Auszoomen",
+            action: #selector(DocumentWindowController.zoomOut(_:)),
+            keyEquivalent: ""
+        )))
+    }
 }
 
 /// Das Dokumentfenster darf nicht auf nichts zusammenfallen können.
@@ -133,5 +155,118 @@ final class WindowMinimumSizeTests: XCTestCase {
             "ein zusammengefallen gesicherter Rahmen muss sich wieder aufrichten"
         )
         XCTAssertGreaterThanOrEqual(w.frame.width, w.contentMinSize.width)
+    }
+}
+
+/// ⌘Z am Fenstercontroller.
+///
+/// Anlass: Der Befehl schliesst seit Neuestem zuerst eine laufende
+/// Tastenwiederholung ab, damit ⌘Z direkt nach einer Pfeilbewegung wirkt.
+/// Dieser Eingriff sitzt aber im Weg jedes anderen Widerrufens — auch dessen
+/// beim Tippen in ein Textfeld, das denselben Undo-Manager benutzt.
+@MainActor
+final class UndoCommandRoutingTests: XCTestCase {
+
+    private func fenster(mitEbene ebene: Layer) throws -> (AssemblageDocument, DocumentWindowController) {
+        let document = AssemblageDocument()
+        document.undoManager = UndoManager()
+        document.modify("Vorbereiten") {
+            $0.canvas = CanvasSize(width: 400, height: 300)
+            $0.layers = [ebene]
+        }
+        document.state.selectedLayerID = ebene.id
+        document.undoManager?.removeAllActions()
+
+        let controller = DocumentWindowController()
+        document.addWindowController(controller)
+        return (document, controller)
+    }
+
+    private var formebene: Layer {
+        Layer(name: "Form", transform: Transform2D(x: 100, y: 100),
+              content: .shape(ShapeLayerContent(
+                kind: .rectangle, size: Size(width: 20, height: 20))))
+    }
+
+    func testUndoRevertsAnOrdinaryChange() throws {
+        let (document, controller) = try fenster(mitEbene: formebene)
+        let id = try XCTUnwrap(document.state.selectedLayerID)
+
+        document.modify("Verschieben") { try? $0.updateLayer(id: id) { $0.transform.x = 250 } }
+        XCTAssertEqual(document.state.document.layers[0].transform.x, 250)
+
+        controller.undo(nil)
+        XCTAssertEqual(document.state.document.layers[0].transform.x, 100)
+    }
+
+    /// Der eigentliche Punkt: Eine Pfeilbewegung wartet kurz auf einen
+    /// Folgedruck. Ohne den Abschluss davor liefe ⌘Z ins Leere — man drückt
+    /// und nichts passiert.
+    func testUndoWorksImmediatelyAfterANudge() throws {
+        let (document, controller) = try fenster(mitEbene: formebene)
+        let id = try XCTUnwrap(document.state.selectedLayerID)
+
+        document.modifyCoalescing("Ebene bewegen", targetID: id) {
+            try? $0.updateLayer(id: id) { $0.transform.x += 10 }
+        }
+        XCTAssertEqual(document.state.document.layers[0].transform.x, 110)
+
+        controller.undo(nil)
+        XCTAssertEqual(document.state.document.layers[0].transform.x, 100,
+                       "⌘Z direkt nach einer Pfeilbewegung müsste sie zurücknehmen")
+    }
+
+    /// Widerrufen darf nicht angeboten werden, wenn es nichts zu widerrufen
+    /// gibt — aber sehr wohl, solange eine Tastenwiederholung noch offen ist.
+    func testUndoIsOfferedOnlyWhenThereIsSomething() throws {
+        let (document, controller) = try fenster(mitEbene: formebene)
+        let id = try XCTUnwrap(document.state.selectedLayerID)
+
+        let eintrag = NSMenuItem(title: "Widerrufen",
+                                 action: #selector(DocumentWindowController.undo(_:)),
+                                 keyEquivalent: "z")
+        XCTAssertFalse(controller.validateMenuItem(eintrag), "frisch geöffnet gibt es nichts")
+
+        document.modifyCoalescing("Ebene bewegen", targetID: id) {
+            try? $0.updateLayer(id: id) { $0.transform.x += 5 }
+        }
+        XCTAssertTrue(controller.validateMenuItem(eintrag),
+                      "eine noch offene Tastenwiederholung zählt bereits")
+    }
+
+    /// Ein zweites Widerrufen nach dem ersten darf nicht doppelt zurückgehen,
+    /// nur weil der Abschluss der Wiederholung dazwischenliegt.
+    func testTwoUndoStepsGoBackOneAtATime() throws {
+        let (document, controller) = try fenster(mitEbene: formebene)
+        let id = try XCTUnwrap(document.state.selectedLayerID)
+
+        // Ohne das hier ist der Test wertlos: `NSUndoManager` fasst mit
+        // `groupsByEvent` alles zusammen, was innerhalb **eines** Ereignisses
+        // registriert wird — und eine synchrone Testmethode ist genau ein
+        // solches Ereignis. Beide Änderungen landeten sonst in einem Schritt,
+        // und ein einziges Widerrufen ginge scheinbar zweimal zurück.
+        // Dieselbe Falle hat dieses Projekt schon zweimal getroffen.
+        // Ohne das hier wäre der Test wertlos, und ohne die ausdrückliche
+        // Gruppierung darunter liefe er in einen Zustandsfehler: `NSUndoManager`
+        // fasst mit `groupsByEvent` alles zusammen, was innerhalb **eines**
+        // Ereignisses registriert wird — und eine synchrone Testmethode ist
+        // genau ein solches Ereignis. Beide Änderungen landeten sonst in einem
+        // Schritt, und ein einziges Widerrufen ginge scheinbar zweimal zurück.
+        // Dieselbe Falle hat dieses Projekt schon zweimal getroffen.
+        let undo = try XCTUnwrap(document.undoManager)
+        undo.groupsByEvent = false
+
+        undo.beginUndoGrouping()
+        document.modify("Erste") { try? $0.updateLayer(id: id) { $0.transform.x = 150 } }
+        undo.endUndoGrouping()
+
+        undo.beginUndoGrouping()
+        document.modify("Zweite") { try? $0.updateLayer(id: id) { $0.transform.x = 200 } }
+        undo.endUndoGrouping()
+
+        controller.undo(nil)
+        XCTAssertEqual(document.state.document.layers[0].transform.x, 150)
+        controller.undo(nil)
+        XCTAssertEqual(document.state.document.layers[0].transform.x, 100)
     }
 }

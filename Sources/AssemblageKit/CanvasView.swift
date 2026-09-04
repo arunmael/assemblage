@@ -213,6 +213,15 @@ final class CanvasView: NSView {
     func update(to newDocument: AssemblageModel.Document) {
         let canvasChanged = newDocument.canvas != document.canvas
         let structureChanged = newDocument.layers.map(\.id) != document.layers.map(\.id)
+        if let id = editingTextLayerID,
+           newDocument.layer(withID: id).map({ layer in
+               if case .text = layer.content { return false }
+               return true
+           }) ?? true {
+            // Ein Editor ohne zugehörige Textebene darf nach Löschen oder Undo
+            // nicht als scheinbar weiter bearbeitbarer Text stehen bleiben.
+            endTextEditing(committing: false)
+        }
         document = newDocument
 
         if canvasChanged {
@@ -469,6 +478,9 @@ final class CanvasView: NSView {
             endTextEditing(committing: false)
             return
         }
+        if croppingLayerID != nil || brushLayerID != nil || distortingLayerID != nil {
+            _ = keyboardCommandDelegate?.canvasView(self, perform: .selectTool(.select))
+        }
         croppingLayerID = nil
         brushLayerID = nil
         distortingLayerID = nil
@@ -542,7 +554,10 @@ final class CanvasView: NSView {
             if let getroffen, case .image = getroffen.content {
                 selectedLayerID = getroffen.id
                 interactionDelegate?.canvasView(self, didSelectLayerWithID: getroffen.id)
-                croppingLayerID = (croppingLayerID == getroffen.id) ? nil : getroffen.id
+                let tool: CanvasTool = croppingLayerID == getroffen.id ? .select : .crop
+                if keyboardCommandDelegate?.canvasView(self, perform: .selectTool(tool)) != true {
+                    croppingLayerID = tool == .crop ? getroffen.id : nil
+                }
                 return
             }
             if let getroffen, case .text = getroffen.content {

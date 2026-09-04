@@ -146,6 +146,14 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
     @IBAction func zoomIn(_ sender: Any?) { canvasViewController?.zoomIn() }
     @IBAction func zoomOut(_ sender: Any?) { canvasViewController?.zoomOut() }
 
+    @IBAction func undo(_ sender: Any?) {
+        guard let document = document as? AssemblageDocument else { return }
+        // Tastenwiederholungen warten kurz auf einen möglichen Folgedruck.
+        // Vor ⌘Z muss ihr Schritt trotzdem bereits im Undo-Manager stehen.
+        document.endCoalescingInteraction()
+        document.undoManager?.undo()
+    }
+
     @IBAction func insertTextLayer(_ sender: Any?) { insertLayer(.text) }
     @IBAction func insertRectangleLayer(_ sender: Any?) { insertLayer(.rectangle) }
     @IBAction func insertRoundedRectangleLayer(_ sender: Any?) { insertLayer(.roundedRectangle) }
@@ -227,16 +235,48 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(undo(_:)) {
+            guard let document = document as? AssemblageDocument else { return false }
+            return document.coalescingActionName != nil || document.undoManager?.canUndo == true
+        }
+
+        if menuItem.action == #selector(zoomIn(_:)) {
+            return canvasViewController?.canZoomIn == true
+        }
+        if menuItem.action == #selector(zoomOut(_:)) {
+            return canvasViewController?.canZoomOut == true
+        }
+
         if let action = menuItem.action,
            [
             #selector(toggleSelectedLayerVisibility(_:)),
-            #selector(deleteSelectedLayer(_:)),
-            #selector(moveSelectedLayerUp(_:)),
-            #selector(moveSelectedLayerDown(_:)),
-            #selector(moveSelectedLayerToTop(_:)),
-            #selector(moveSelectedLayerToBottom(_:))
+            #selector(deleteSelectedLayer(_:))
            ].contains(action) {
             return (document as? AssemblageDocument)?.state.selectedLayer != nil
+        }
+
+        if let action = menuItem.action,
+           let state = (document as? AssemblageDocument)?.state,
+           let id = state.selectedLayerID,
+           let index = state.document.index(ofLayerID: id) {
+            // Ein aktiver Befehl an einer Stapelgrenze würde beim Anklicken
+            // garantiert nichts tun und deshalb wie ein Defekt wirken.
+            switch action {
+            case #selector(moveSelectedLayerUp(_:)), #selector(moveSelectedLayerToTop(_:)):
+                return index < state.document.layers.count - 1
+            case #selector(moveSelectedLayerDown(_:)), #selector(moveSelectedLayerToBottom(_:)):
+                return index > 0
+            default:
+                break
+            }
+        } else if let action = menuItem.action,
+                  [
+                    #selector(moveSelectedLayerUp(_:)),
+                    #selector(moveSelectedLayerDown(_:)),
+                    #selector(moveSelectedLayerToTop(_:)),
+                    #selector(moveSelectedLayerToBottom(_:))
+                  ].contains(action) {
+            return false
         }
 
         if menuItem.action == #selector(removeSubjectBackground(_:)) {

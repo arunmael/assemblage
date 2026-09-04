@@ -30,6 +30,7 @@ final class AssemblageDocument: NSDocument {
 
     /// Zustand für `modifyCoalescing(_:at:within:_:)`.
     var coalescingActionName: String?
+    var coalescingTargetID: UUID?
     var lastCoalescedAt: Date?
     var coalescingTimer: Timer?
 

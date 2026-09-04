@@ -244,6 +244,48 @@ final class LayerOrderCommandsTests: XCTestCase {
         }
     }
 
+    func testReihenfolgebefehleSindAnDenStapelgrenzenDeaktiviert() throws {
+        let unten = ebene("Unten")
+        let oben = ebene("Oben")
+        let (document, _, _) = dokument(mit: [unten, oben], auswahl: oben.id)
+        document.makeWindowControllers()
+        let controller = try XCTUnwrap(document.windowControllers.first as? DocumentWindowController)
+
+        XCTAssertFalse(controller.validateMenuItem(NSMenuItem(
+            title: "Ebene nach oben",
+            action: #selector(DocumentWindowController.moveSelectedLayerUp(_:)),
+            keyEquivalent: ""
+        )))
+        XCTAssertFalse(controller.validateMenuItem(NSMenuItem(
+            title: "Ebene ganz nach oben",
+            action: #selector(DocumentWindowController.moveSelectedLayerToTop(_:)),
+            keyEquivalent: ""
+        )))
+        XCTAssertTrue(controller.validateMenuItem(NSMenuItem(
+            title: "Ebene nach unten",
+            action: #selector(DocumentWindowController.moveSelectedLayerDown(_:)),
+            keyEquivalent: ""
+        )))
+
+        document.state.selectedLayerID = unten.id
+
+        XCTAssertFalse(controller.validateMenuItem(NSMenuItem(
+            title: "Ebene nach unten",
+            action: #selector(DocumentWindowController.moveSelectedLayerDown(_:)),
+            keyEquivalent: ""
+        )))
+        XCTAssertFalse(controller.validateMenuItem(NSMenuItem(
+            title: "Ebene ganz nach unten",
+            action: #selector(DocumentWindowController.moveSelectedLayerToBottom(_:)),
+            keyEquivalent: ""
+        )))
+        XCTAssertTrue(controller.validateMenuItem(NSMenuItem(
+            title: "Ebene nach oben",
+            action: #selector(DocumentWindowController.moveSelectedLayerUp(_:)),
+            keyEquivalent: ""
+        )))
+    }
+
     private func tastenEreignis(
         _ characters: String,
         keyCode: UInt16,

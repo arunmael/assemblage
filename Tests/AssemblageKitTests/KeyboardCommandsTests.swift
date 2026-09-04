@@ -186,4 +186,53 @@ final class KeyboardCommandsTests: XCTestCase {
         )
         XCTAssertEqual(document.state.document.layer(withID: id)?.transform.x, 115)
     }
+
+    func testOpacityAfterNudgeStartsASeparateUndoStep() {
+        let (document, id, undoManager) = dokumentMitEbene()
+
+        KeyboardCommands.perform(.nudge(dx: 1, dy: 0), in: document.state)
+        KeyboardCommands.perform(.setOpacity(0.5), in: document.state)
+
+        XCTAssertNil(document.interactionSnapshot)
+        XCTAssertEqual(undoManager.undoActionName, "Deckkraft ändern")
+        XCTAssertEqual(document.state.document.layer(withID: id)?.transform.x, 101)
+        XCTAssertEqual(document.state.document.layer(withID: id)?.opacity, 0.5)
+    }
+
+    func testNudgesOfDifferentLayersDoNotMerge() throws {
+        let (document, firstID, _) = dokumentMitEbene()
+        let second = Layer(
+            name: "Zweite Ebene",
+            transform: Transform2D(x: 200, y: 100),
+            content: .shape(ShapeLayerContent(kind: .rectangle, size: Size(width: 50, height: 50)))
+        )
+        document.modify("Zweite Ebene anlegen") { try? $0.addLayer(second) }
+        document.undoManager?.removeAllActions()
+
+        KeyboardCommands.perform(.nudge(dx: 1, dy: 0), in: document.state)
+        document.state.selectedLayerID = second.id
+        KeyboardCommands.perform(.nudge(dx: 1, dy: 0), in: document.state)
+
+        let zweiterSchnappschuss = try XCTUnwrap(document.interactionSnapshot)
+        XCTAssertEqual(zweiterSchnappschuss.layer(withID: firstID)?.transform.x, 101)
+        XCTAssertEqual(zweiterSchnappschuss.layer(withID: second.id)?.transform.x, 200)
+    }
+
+    func testImmediateUndoAfterNudgeUndoesThatNudge() {
+        let (document, id, _) = dokumentMitEbene()
+        let controller = DocumentWindowController()
+        controller.document = document
+
+        KeyboardCommands.perform(.nudge(dx: 1, dy: 0), in: document.state)
+
+        let menuItem = NSMenuItem(
+            title: "Widerrufen",
+            action: #selector(DocumentWindowController.undo(_:)),
+            keyEquivalent: ""
+        )
+        XCTAssertTrue(controller.validateMenuItem(menuItem))
+        controller.undo(nil)
+        XCTAssertEqual(document.state.document.layer(withID: id)?.transform.x, 100)
+        XCTAssertTrue(document.undoManager?.canRedo == true)
+    }
 }

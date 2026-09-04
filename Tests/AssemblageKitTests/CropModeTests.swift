@@ -12,6 +12,14 @@ import AppKit
 @MainActor
 final class CropModeTests: XCTestCase {
 
+    private final class Werkzeugprotokoll: CanvasKeyboardCommandDelegate {
+        var befehle: [KeyboardCommand] = []
+        func canvasView(_ canvasView: CanvasView, perform command: KeyboardCommand) -> Bool {
+            befehle.append(command)
+            return true
+        }
+    }
+
     private final class Protokoll: CanvasInteractionDelegate {
         var zuschnitte: [(id: UUID, crop: Rect)] = []
         var aenderungen: [(id: UUID, transform: Transform2D)] = []
@@ -127,6 +135,17 @@ final class CropModeTests: XCTestCase {
         canvas.cancelOperation(nil)
 
         XCTAssertNil(canvas.croppingLayerID)
+    }
+
+    func testDoubleClickAndEscapeKeepToolbarToolInSync() throws {
+        let werkzeuge = Werkzeugprotokoll()
+        canvas.keyboardCommandDelegate = werkzeuge
+
+        canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 200, y: 200, klicks: 2))
+        canvas.croppingLayerID = bildID
+        canvas.cancelOperation(nil)
+
+        XCTAssertEqual(werkzeuge.befehle, [.selectTool(.crop), .selectTool(.select)])
     }
 
     /// Wer eine andere Ebene anfasst, ist mit dem Zuschneiden fertig.

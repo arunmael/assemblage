@@ -213,4 +213,15 @@ final class CanvasTextEditingTests: XCTestCase {
 
         XCTAssertNil(canvas.textEditorForTesting, "ein rechteckiges Feld kann eine projektive Verzerrung nicht ehrlich abbilden")
     }
+
+    func testDeletingEditedLayerClosesEditorWithoutCommitting() throws {
+        try doppelklickAufText()
+        canvas.textEditorForTesting?.string = "Darf nicht zurückbleiben"
+        document.modify("Ebene löschen") { _ = try? $0.removeLayer(id: self.textID) }
+
+        canvas.update(to: document.state.document)
+
+        XCTAssertNil(canvas.textEditorForTesting)
+        XCTAssertTrue(protokoll.abgeschlosseneTexte.isEmpty)
+    }
 }
