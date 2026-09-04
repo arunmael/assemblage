@@ -91,6 +91,17 @@ final class TextureRenderingTests: XCTestCase {
             for: texture(referenz), size: CGSize(width: 10, height: -3), resources: ressourcen))
     }
 
+    func testNonFiniteSizeYieldsNoImageInsteadOfTrappingDuringIntegerConversion() throws {
+        let bild = try makeImage(width: 4, height: 4) { _ in }
+        let (ressourcen, referenz) = try resources(with: bild)
+
+        XCTAssertNil(TextureRendering.tiledImage(
+            for: texture(referenz),
+            size: CGSize(width: CGFloat.infinity, height: 10),
+            resources: ressourcen
+        ))
+    }
+
     func testMissingFileYieldsNoImage() {
         XCTAssertNil(TextureRendering.tiledImage(
             for: texture("originals/gibtsnicht.png"),

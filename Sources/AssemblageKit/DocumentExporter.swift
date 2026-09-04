@@ -135,7 +135,8 @@ enum DocumentExporter {
         resources: DocumentResources,
         targetSize: CGSize
     ) throws -> CGImage {
-        guard targetSize.width > 0, targetSize.height > 0 else {
+        guard targetSize.width.isFinite, targetSize.height.isFinite,
+              targetSize.width > 0, targetSize.height > 0 else {
             throw ExportError.invalidTargetSize
         }
         guard let context = makeTransparentContext(size: targetSize) else {
@@ -239,7 +240,8 @@ enum DocumentExporter {
         resources: DocumentResources,
         pageSize: CGSize
     ) throws -> Data {
-        guard pageSize.width > 0, pageSize.height > 0 else {
+        guard pageSize.width.isFinite, pageSize.height.isFinite,
+              pageSize.width > 0, pageSize.height > 0 else {
             throw ExportError.invalidTargetSize
         }
 
@@ -406,9 +408,10 @@ enum DocumentExporter {
         )
         let contentWidth = contentSize.width * rasterScale
         let contentHeight = contentSize.height * rasterScale
-        let width = Int(contentWidth.rounded(.up))
-        let height = Int(contentHeight.rounded(.up))
-        guard width > 0, height > 0,
+        guard contentWidth.isFinite, contentHeight.isFinite,
+              let width = Int(exactly: contentWidth.rounded(.up)),
+              let height = Int(exactly: contentHeight.rounded(.up)),
+              width > 0, height > 0,
               let sourceContext = makeTransparentContext(size: CGSize(width: width, height: height))
         else { return }
 
@@ -743,10 +746,16 @@ enum DocumentExporter {
     // MARK: - Hilfskontext
 
     private static func makeTransparentContext(size: CGSize) -> CGContext? {
-        CGContext(
+        guard size.width.isFinite, size.height.isFinite,
+              let width = Int(exactly: size.width.rounded()),
+              let height = Int(exactly: size.height.rounded()),
+              width > 0, height > 0
+        else { return nil }
+
+        return CGContext(
             data: nil,
-            width: Int(size.width.rounded()),
-            height: Int(size.height.rounded()),
+            width: width,
+            height: height,
             bitsPerComponent: 8,
             bytesPerRow: 0,
             space: CGColorSpaceCreateDeviceRGB(),

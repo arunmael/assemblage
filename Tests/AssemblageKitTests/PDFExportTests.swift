@@ -10,6 +10,21 @@ import CoreGraphics
 @MainActor
 final class PDFExportTests: XCTestCase {
 
+    func testNonFinitePageSizeIsRejected() async {
+        let document = AssemblageModel.Document(canvas: CanvasSize(width: 100, height: 100))
+
+        do {
+            _ = try await DocumentExporter.pdfData(
+                of: document,
+                resources: DocumentResources(),
+                pageSize: CGSize(width: CGFloat.infinity, height: 100)
+            )
+            XCTFail("Eine unendliche Seitengrösse muss abgelehnt werden")
+        } catch {
+            XCTAssertEqual(error as? DocumentExporter.ExportError, .invalidTargetSize)
+        }
+    }
+
     private func pdfDocument(from data: Data) throws -> CGPDFDocument {
         let provider = try XCTUnwrap(CGDataProvider(data: data as CFData))
         return try XCTUnwrap(CGPDFDocument(provider))

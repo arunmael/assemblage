@@ -98,6 +98,50 @@ final class ExportTests: XCTestCase {
         XCTAssertEqual(size, CGSize(width: 2160, height: 2160))
     }
 
+    func testNonFiniteTargetSizeIsRejectedInsteadOfTrappingDuringIntegerConversion() async {
+        let document = AssemblageModel.Document(canvas: CanvasSize(width: 100, height: 100))
+
+        do {
+            _ = try await DocumentExporter.image(
+                of: document,
+                resources: DocumentResources(),
+                targetSize: CGSize(width: CGFloat.infinity, height: 100)
+            )
+            XCTFail("Eine unendliche Zielgrösse muss abgelehnt werden")
+        } catch {
+            XCTAssertEqual(error as? DocumentExporter.ExportError, .invalidTargetSize)
+        }
+    }
+
+    func testDistortedLayerWithUnrepresentableRasterSizeIsSkippedInsteadOfTrapping() async throws {
+        let layer = Layer(
+            name: "Ungültig skalierte Form",
+            transform: Transform2D(x: 50, y: 50, scaleX: Double.greatestFiniteMagnitude),
+            distortion: QuadDistortion(
+                topLeft: Point(x: 1, y: 0), topRight: .zero,
+                bottomRight: .zero, bottomLeft: .zero
+            ),
+            content: .shape(ShapeLayerContent(
+                kind: .rectangle,
+                size: Size(width: 100, height: 100),
+                fillColorHex: "#FF0000"
+            ))
+        )
+        let document = AssemblageModel.Document(
+            canvas: CanvasSize(width: 100, height: 100),
+            layers: [layer]
+        )
+
+        let image = try await DocumentExporter.image(
+            of: document,
+            resources: DocumentResources(),
+            targetSize: CGSize(width: 100, height: 100)
+        )
+
+        XCTAssertEqual(image.width, 100)
+        XCTAssertEqual(image.height, 100)
+    }
+
     // MARK: - Leeres Dokument
 
     /// Ein Dokument ohne Ebenen darf den Export nicht scheitern lassen —

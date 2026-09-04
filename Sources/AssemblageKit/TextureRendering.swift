@@ -49,7 +49,8 @@ enum TextureRendering {
         size: CGSize,
         resources: DocumentResources
     ) -> CGImage? {
-        guard size.width > 0, size.height > 0 else { return nil }
+        guard size.width.isFinite, size.height.isFinite,
+              size.width > 0, size.height > 0 else { return nil }
 
         let werte = texture.clamped()
         guard let daten = resources.data(for: werte.imageReference),
@@ -58,8 +59,11 @@ enum TextureRendering {
 
         // Mindestens ein Pixel: Eine Ebene, die schmaler als ein halber Punkt
         // ist, soll eine (winzige) Textur bekommen statt gar keine.
-        let breite = max(1, Int(size.width.rounded()))
-        let hoehe = max(1, Int(size.height.rounded()))
+        guard let gerundeteBreite = Int(exactly: size.width.rounded()),
+              let gerundeteHoehe = Int(exactly: size.height.rounded())
+        else { return nil }
+        let breite = max(1, gerundeteBreite)
+        let hoehe = max(1, gerundeteHoehe)
 
         guard let context = CGContext(
             data: nil,
