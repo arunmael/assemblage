@@ -81,6 +81,59 @@ struct LayerRenderer {
         }
     }
 
+    /// Name der Texturschicht. Sie wird über den Namen wiedergefunden statt
+    /// über einen Index: Die Maskenschicht und künftige Zusätze hängen an
+    /// derselben Schicht, und ein Index würde beim nächsten Zusatz stillschweigend
+    /// auf das Falsche zeigen.
+    static let textureLayerName = "assemblage.textur"
+
+    /// Legt die Textur als Unterschicht über den Ebeneninhalt (aus missing.md).
+    ///
+    /// Als Unterschicht und nicht als eigene Ebene: Eine Textur gehört zu dem,
+    /// was sie überzieht. So wird sie von Verschieben, Drehen, Skalieren und
+    /// der Ebenenmaske automatisch mitgenommen — die Maske der Elternschicht
+    /// wirkt auch auf deren Unterschichten.
+    ///
+    /// Beschnitten wird sie zusätzlich auf die **Silhouette** des Inhalts:
+    /// Ohne das liefe die Textur bei einem freigestellten Motiv über dessen
+    /// Rand hinaus in den leeren Rahmen. Im Export leistet dasselbe
+    /// `DocumentExporter.drawTexture`.
+    func applyTexture(_ layer: Layer, to renderedLayer: CALayer) {
+        let vorhandene = renderedLayer.sublayers?.first { $0.name == Self.textureLayerName }
+
+        guard let textur = layer.texture?.clamped(), textur.opacity > 0,
+              renderedLayer.bounds.width > 0, renderedLayer.bounds.height > 0,
+              let gekachelt = TextureRendering.tiledImage(
+                  for: textur,
+                  size: renderedLayer.bounds.size,
+                  resources: images.resources
+              )
+        else {
+            vorhandene?.removeFromSuperlayer()
+            return
+        }
+
+        let schicht = vorhandene ?? {
+            let neu = CALayer()
+            neu.name = Self.textureLayerName
+            renderedLayer.addSublayer(neu)
+            return neu
+        }()
+
+        schicht.contents = gekachelt
+        schicht.contentsGravity = .resize
+        schicht.frame = CGRect(origin: .zero, size: renderedLayer.bounds.size)
+        schicht.opacity = Float(textur.opacity)
+        schicht.compositingFilter = textur.blendMode.compositingFilterName
+
+        // Die Silhouette entsteht aus einer zweiten Ausfertigung des Inhalts.
+        // Bei Bildebenen zeigt sie auf dasselbe zwischengespeicherte `CGImage`,
+        // kostet also keinen zweiten Dekodiervorgang.
+        let silhouette = makeContentLayer(for: layer.content)
+        silhouette.frame = CGRect(origin: .zero, size: renderedLayer.bounds.size)
+        schicht.mask = silhouette
+    }
+
     /// Hängt die Ebenenmaske als `CALayer.mask` an (Plan 5.4).
     ///
     /// Core Animation wendet sie damit auf der GPU an — dasselbe Vorgehen wie
@@ -151,6 +204,7 @@ struct LayerRenderer {
         }
 
         applyEffects(layer.effects, to: renderedLayer)
+        applyTexture(layer, to: renderedLayer)
         renderedLayer.isHidden = !layer.isVisible
         renderedLayer.opacity = Float(layer.opacity.clamped(to: 0...1))
         renderedLayer.compositingFilter = layer.blendMode.compositingFilterName

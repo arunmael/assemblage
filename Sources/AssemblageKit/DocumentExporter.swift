@@ -380,7 +380,8 @@ enum DocumentExporter {
             width: contentSize.width,
             height: contentSize.height
         )
-        drawContent(layer.content, in: rect, resources: resources, context: context, mask: maskImage(for: layer, resources: resources))
+        drawContent(layer.content, texture: layer.texture, in: rect, resources: resources,
+                    context: context, mask: maskImage(for: layer, resources: resources))
 
         context.restoreGState()
     }
@@ -415,6 +416,7 @@ enum DocumentExporter {
         let sourceRect = CGRect(origin: .zero, size: contentSize)
         drawContent(
             layer.content,
+            texture: layer.texture,
             in: sourceRect,
             resources: resources,
             context: sourceContext,
@@ -545,7 +547,14 @@ enum DocumentExporter {
         return MaskRendering.grayMaskImage(for: layer, cropRect: ausschnitt, resources: resources)
     }
 
-    private static func drawContent(_ content: LayerContent, in rect: CGRect, resources: DocumentResources, context: CGContext, mask: CGImage?) {
+    private static func drawContent(
+        _ content: LayerContent,
+        texture: LayerTexture? = nil,
+        in rect: CGRect,
+        resources: DocumentResources,
+        context: CGContext,
+        mask: CGImage?
+    ) {
         // Maske als Beschnitt des Zeichenbereichs: `CGContext.clip(to:mask:)`
         // nimmt die Graustufen der Maske als Deckung — genau die Wirkung, die
         // Plan 7.3 mit CIBlendWithMask beschreibt, nur ohne für jede Ebene ein
@@ -564,6 +573,68 @@ enum DocumentExporter {
         case .shape(let shape):
             drawShape(shape, in: rect, context: context)
         }
+
+        if let texture {
+            drawTexture(texture, over: content, in: rect, resources: resources, context: context)
+        }
+    }
+
+    /// Legt die Textur über den bereits gezeichneten Inhalt.
+    ///
+    /// Hier und nicht weiter aussen, aus drei Gründen: Die Textur landet damit
+    /// innerhalb des Maskenbeschnitts, eine maskierte Ebene bekommt also auch
+    /// eine maskierte Textur; eine verzogene Ebene rastert über denselben Weg,
+    /// die Textur verzieht sich also mit; und es braucht keine Zwischenfläche
+    /// in Leinwandgrösse.
+    private static func drawTexture(
+        _ texture: LayerTexture,
+        over content: LayerContent,
+        in rect: CGRect,
+        resources: DocumentResources,
+        context: CGContext
+    ) {
+        let werte = texture.clamped()
+        guard werte.opacity > 0,
+              let gekachelt = TextureRendering.tiledImage(
+                  for: werte, size: rect.size, resources: resources)
+        else { return }
+
+        context.saveGState()
+        defer { context.restoreGState() }
+
+        // Auf die Silhouette des Inhalts beschneiden: Bei einem freigestellten
+        // Motiv darf die Textur nicht über dessen Rand hinaus in den leeren
+        // Rahmen laufen. Auf dem Bildschirm leistet dasselbe die Maske der
+        // Texturschicht in `LayerRenderer.applyTexture`.
+        if let silhouette = silhouetteMask(of: content, size: rect.size, resources: resources) {
+            context.clip(to: rect, mask: silhouette)
+        }
+
+        context.setBlendMode(werte.blendMode.cgBlendMode)
+        context.setAlpha(CGFloat(werte.opacity))
+        context.interpolationQuality = .high
+
+        // Dieselbe lokale Spiegelung wie bei Bildinhalten — aus demselben
+        // Grund, siehe `drawImage(_:in:resources:context:)`.
+        context.translateBy(x: rect.midX, y: rect.midY)
+        context.scaleBy(x: 1, y: -1)
+        context.translateBy(x: -rect.midX, y: -rect.midY)
+        context.draw(gekachelt, in: rect)
+    }
+
+    /// Der Inhalt allein, als Graustufenbild seiner Deckung — die Form, auf die
+    /// die Textur beschnitten wird.
+    private static func silhouetteMask(
+        of content: LayerContent,
+        size: CGSize,
+        resources: DocumentResources
+    ) -> CGImage? {
+        guard let zwischen = makeTransparentContext(size: size) else { return nil }
+        // Ohne Textur und ohne Maske: Gefragt ist nur die Form des Inhalts.
+        drawContent(content, in: CGRect(origin: .zero, size: size),
+                    resources: resources, context: zwischen, mask: nil)
+        guard let gezeichnet = zwischen.makeImage() else { return nil }
+        return TextureRendering.grayMask(fromAlphaOf: gezeichnet)
     }
 
     private static func drawImage(_ content: ImageLayerContent, in rect: CGRect, resources: DocumentResources, context: CGContext) {
