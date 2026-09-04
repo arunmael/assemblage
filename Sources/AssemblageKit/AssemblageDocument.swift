@@ -28,6 +28,11 @@ final class AssemblageDocument: NSDocument {
     /// `nil`, solange keine läuft — siehe `beginInteraction()`.
     var interactionSnapshot: AssemblageModel.Document?
 
+    /// Zustand für `modifyCoalescing(_:at:within:_:)`.
+    var coalescingActionName: String?
+    var lastCoalescedAt: Date?
+    var coalescingTimer: Timer?
+
     // MARK: - Verhalten
 
     /// Schaltet Autosave, Absturz-Wiederherstellung und die Versionsverwaltung

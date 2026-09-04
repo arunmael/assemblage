@@ -134,3 +134,51 @@ extension AssemblageDocument {
 
     var isInteracting: Bool { interactionSnapshot != nil }
 }
+
+extension AssemblageDocument {
+
+    /// Fasst schnell aufeinanderfolgende Änderungen zu **einem** Undo-Schritt
+    /// zusammen.
+    ///
+    /// Gedacht für wiederholte Tastendrücke: Zehnmal die Pfeiltaste zu
+    /// drücken soll einmal zu widerrufen sein, nicht zehnmal. Nach einer
+    /// Pause beginnt ein neuer Schritt — sonst liesse sich eine halbe Stunde
+    /// Arbeit nur am Stück zurücknehmen.
+    ///
+    /// `at` ist einreichbar, damit sich das Verhalten prüfen lässt, ohne im
+    /// Test auf echte Zeit zu warten.
+    func modifyCoalescing(
+        _ actionName: String,
+        at time: Date = Date(),
+        within interval: TimeInterval = 0.7,
+        _ body: (inout AssemblageModel.Document) -> Void
+    ) {
+        let passt = isInteracting
+            && coalescingActionName == actionName
+            && time.timeIntervalSince(lastCoalescedAt ?? .distantPast) <= interval
+
+        if !passt {
+            endInteraction(actionName: coalescingActionName ?? actionName)
+            beginInteraction()
+            coalescingActionName = actionName
+        }
+        lastCoalescedAt = time
+
+        modify(actionName, body)
+        scheduleCoalescingEnd(after: interval)
+    }
+
+    /// Schliesst den zusammengefassten Schritt ab, wenn nichts mehr kommt.
+    /// Ohne das bliebe die Undo-Klammer offen, bis zufällig etwas anderes
+    /// passiert — und der Schritt fehlte so lange im Menü.
+    private func scheduleCoalescingEnd(after interval: TimeInterval) {
+        coalescingTimer?.invalidate()
+        coalescingTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.endInteraction(actionName: self.coalescingActionName ?? "Ändern")
+                self.coalescingActionName = nil
+            }
+        }
+    }
+}
