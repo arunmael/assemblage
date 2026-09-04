@@ -123,8 +123,10 @@ enum ExportPanelLogic {
     /// „2160 × 2160 Pixel").
     static func formattedPixelSize(canvas: CanvasSize, scale: Double) -> String {
         let size = pixelSize(canvas: canvas, scale: scale)
-        let width = Int(size.width.rounded())
-        let height = Int(size.height.rounded())
+        guard size.width.isFinite, size.height.isFinite,
+              let width = Int(exactly: size.width.rounded()),
+              let height = Int(exactly: size.height.rounded())
+        else { return "Ungültige Grösse" }
         return "\(width) × \(height) Pixel"
     }
 
@@ -135,7 +137,11 @@ enum ExportPanelLogic {
     static func formattedSize(canvas: CanvasSize, scale: Double, format: ExportFormat) -> String {
         guard format == .pdf else { return formattedPixelSize(canvas: canvas, scale: scale) }
         let size = pixelSize(canvas: canvas, scale: scale)
-        return "\(Int(size.width.rounded())) × \(Int(size.height.rounded())) Punkte"
+        guard size.width.isFinite, size.height.isFinite,
+              let width = Int(exactly: size.width.rounded()),
+              let height = Int(exactly: size.height.rounded())
+        else { return "Ungültige Grösse" }
+        return "\(width) × \(height) Punkte"
     }
 
     /// Rendert und schreibt die Export-Datei. Läuft komplett asynchron

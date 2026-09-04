@@ -81,6 +81,19 @@ final class ExportPanelTests: XCTestCase {
         )
     }
 
+    func testUnrepresentableSizeIsExplainedInsteadOfTrappingWhileOpeningExportPanel() {
+        let canvas = CanvasSize(width: Double.greatestFiniteMagnitude, height: 100)
+
+        XCTAssertEqual(
+            ExportPanelLogic.formattedPixelSize(canvas: canvas, scale: ExportScaleOption.x3.factor),
+            "Ungültige Grösse"
+        )
+        XCTAssertEqual(
+            ExportPanelLogic.formattedSize(canvas: canvas, scale: ExportScaleOption.x3.factor, format: .pdf),
+            "Ungültige Grösse"
+        )
+    }
+
     // MARK: - Export: Fehler beim Schreiben
 
     func testExportReportsErrorWhenWriteFails() async throws {
