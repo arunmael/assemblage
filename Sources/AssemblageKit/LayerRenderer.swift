@@ -46,6 +46,41 @@ struct LayerRenderer {
         }
     }
 
+    /// Hängt Schlagschatten und Leuchten an die Schicht.
+    ///
+    /// Core Animation bildet den Schatten aus dem **Alphakanal** der Schicht,
+    /// er folgt also der Form der Ebene und nicht ihrem Rahmen — bei einem
+    /// freigestellten Foto genau das Gewollte.
+    ///
+    /// Eine Schicht kann allerdings nur **einen** Schatten tragen. Sind
+    /// Leuchten und Schlagschatten zugleich eingestellt, gewinnt hier der
+    /// Schlagschatten, und das Leuchten kommt erst im Export vollständig zur
+    /// Geltung. Das ist eine bewusste Einschränkung der Vorschau: Zwei
+    /// Schichten übereinanderzulegen, nur um beide Effekte zu zeigen, würde
+    /// den Schichtbaum verdoppeln und jede Trefferprüfung verkomplizieren.
+    func applyEffects(_ effects: LayerEffects?, to renderedLayer: CALayer) {
+        guard let effects, effects.isActive else {
+            renderedLayer.shadowOpacity = 0
+            renderedLayer.shadowRadius = 0
+            renderedLayer.shadowOffset = .zero
+            return
+        }
+
+        let werte = effects.clamped()
+        if let schatten = werte.shadow, schatten.isActive {
+            renderedLayer.shadowColor = (RGBA(hex: schatten.colorHex) ?? .black).cgColor
+            renderedLayer.shadowOffset = CGSize(width: schatten.offsetX, height: schatten.offsetY)
+            renderedLayer.shadowRadius = schatten.radius
+            renderedLayer.shadowOpacity = Float(schatten.opacity)
+        } else if let leuchten = werte.glow, leuchten.isActive {
+            renderedLayer.shadowColor = (RGBA(hex: leuchten.colorHex) ?? .white).cgColor
+            // Ein Leuchten ist ein Schatten ohne Versatz.
+            renderedLayer.shadowOffset = .zero
+            renderedLayer.shadowRadius = leuchten.radius
+            renderedLayer.shadowOpacity = Float(leuchten.intensity)
+        }
+    }
+
     /// Hängt die Ebenenmaske als `CALayer.mask` an (Plan 5.4).
     ///
     /// Core Animation wendet sie damit auf der GPU an — dasselbe Vorgehen wie
@@ -115,6 +150,7 @@ struct LayerRenderer {
         case .text, .shape: contentsScale * max(abs(layer.transform.scaleX), abs(layer.transform.scaleY), 1)
         }
 
+        applyEffects(layer.effects, to: renderedLayer)
         renderedLayer.isHidden = !layer.isVisible
         renderedLayer.opacity = Float(layer.opacity.clamped(to: 0...1))
         renderedLayer.compositingFilter = layer.blendMode.compositingFilterName

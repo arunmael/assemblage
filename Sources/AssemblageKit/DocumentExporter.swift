@@ -170,14 +170,27 @@ enum DocumentExporter {
                 context.saveGState()
                 context.setAlpha(CGFloat(layer.opacity.clamped(to: 0...1)))
                 context.setBlendMode(layer.blendMode.cgBlendMode)
-                draw(
-                    layer,
-                    canvasHeight: document.canvas.height,
-                    targetSize: targetSize,
-                    exportScale: exportScale,
-                    resources: resources,
-                    into: context
-                )
+
+                if let effekte = layer.effects, effekte.isActive {
+                    drawWithEffects(
+                        layer,
+                        effects: effekte,
+                        canvasHeight: document.canvas.height,
+                        targetSize: targetSize,
+                        exportScale: exportScale,
+                        resources: resources,
+                        into: context
+                    )
+                } else {
+                    draw(
+                        layer,
+                        canvasHeight: document.canvas.height,
+                        targetSize: targetSize,
+                        exportScale: exportScale,
+                        resources: resources,
+                        into: context
+                    )
+                }
                 context.restoreGState()
             }
         }
@@ -267,6 +280,56 @@ enum DocumentExporter {
     /// `drawImage(_:in:resources:context:)` lokal wieder aus, statt es hier
     /// pauschal für alle Inhaltstypen zu tun (Formen und Text bräuchten den
     /// Ausgleich nicht und würden durch ihn verkehrt herum landen).
+    /// Zeichnet eine Ebene samt Leuchten und Schlagschatten.
+    ///
+    /// Beide brauchen die **Silhouette** der fertigen Ebene, nicht ihren
+    /// rechteckigen Rahmen — sonst bekäme ein freigestelltes Foto einen
+    /// rechteckigen Schatten. Deshalb wird die Ebene erst allein in eine
+    /// durchsichtige Fläche gezeichnet, daraus der Effekt gebildet und das
+    /// Ganze anschliessend eingesetzt.
+    ///
+    /// Das kostet eine Zwischenfläche in Zielgrösse. Vertretbar, weil es nur
+    /// Ebenen mit tatsächlich wirksamen Effekten trifft — `isActive` filtert
+    /// vorher.
+    private static func drawWithEffects(
+        _ layer: Layer,
+        effects: LayerEffects,
+        canvasHeight: Double,
+        targetSize: CGSize,
+        exportScale: CGSize,
+        resources: DocumentResources,
+        into context: CGContext
+    ) {
+        guard let zwischen = makeTransparentContext(size: targetSize) else {
+            // Reicht der Speicher nicht, lieber die Ebene ohne Effekt zeigen
+            // als den ganzen Export scheitern zu lassen (Plan 2.1).
+            draw(layer, canvasHeight: canvasHeight, targetSize: targetSize,
+                 exportScale: exportScale, resources: resources, into: context)
+            return
+        }
+
+        draw(layer, canvasHeight: canvasHeight, targetSize: targetSize,
+             exportScale: exportScale, resources: resources, into: zwischen)
+
+        guard let roh = zwischen.makeImage() else { return }
+        let mitEffekt = EffectsRendering.apply(effects, to: CIImage(cgImage: roh))
+
+        guard let fertig = RenderContext.shared.createCGImage(
+            mitEffekt,
+            from: CGRect(origin: .zero, size: targetSize)
+        ) else { return }
+
+        // Wie bei den anderen Core-Image-Ergebnissen: Das Zeichnen in einen
+        // ungeflippten Quartz-Kontext kippt das Bild, deshalb lokal
+        // gegenspiegeln. (Dieselbe Falle wie bei Bildern, Text und Verziehen.)
+        let ziel = CGRect(origin: .zero, size: targetSize)
+        context.saveGState()
+        context.translateBy(x: 0, y: targetSize.height)
+        context.scaleBy(x: 1, y: -1)
+        context.draw(fertig, in: ziel)
+        context.restoreGState()
+    }
+
     private static func draw(
         _ layer: Layer,
         canvasHeight: Double,
