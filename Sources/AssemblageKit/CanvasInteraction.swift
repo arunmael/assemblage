@@ -29,6 +29,13 @@ protocol CanvasInteractionDelegate: AnyObject {
     /// Neuer Zuschnitt für eine Bildebene (Plan 5.3), in Bildkoordinaten.
     func canvasView(_ canvasView: CanvasView, didChangeCropOfLayerWithID id: UUID, to crop: Rect)
 
+    /// Neue projektive Verzerrung einer Ebene. `nil` bedeutet unverzerrt.
+    func canvasView(
+        _ canvasView: CanvasView,
+        didChangeDistortionOfLayerWithID id: UUID,
+        to distortion: QuadDistortion?
+    )
+
     /// Ein fertig gemalter Pinselstrich (Plan 5.4), als PNG in Bildauflösung.
     ///
     /// Gemeldet wird erst beim Loslassen, nicht während des Malens: Die
@@ -36,6 +43,16 @@ protocol CanvasInteractionDelegate: AnyObject {
     /// das Dokument anzufassen. Sonst entstünde pro Mausmeldung eine
     /// Maskendatei.
     func canvasView(_ canvasView: CanvasView, didPaintMaskForLayerWithID id: UUID, pngData: Data)
+}
+
+extension CanvasInteractionDelegate {
+    /// Bestehende Testdelegaten und Einbettungen müssen das neue Werkzeug
+    /// nicht behandeln, solange sie es nicht aktivieren.
+    func canvasView(
+        _ canvasView: CanvasView,
+        didChangeDistortionOfLayerWithID id: UUID,
+        to distortion: QuadDistortion?
+    ) {}
 }
 
 /// Ein laufender Pinselstrich (Plan 5.4).
@@ -169,5 +186,36 @@ struct CropDrag {
             hasPassedThreshold = true
         }
         return startCrop.adjusted(handle: handle, to: imagePoint)
+    }
+}
+
+/// Ein laufender Zug an einer Ecke des verzogenen Vierecks.
+struct DistortDrag {
+    let layerID: UUID
+    let corner: QuadCorner
+    let startDistortion: QuadDistortion
+    let startTransform: Transform2D
+    let startPoint: Point
+    private(set) var hasPassedThreshold = false
+
+    mutating func distortion(draggedTo point: Point, movesAll: Bool) -> QuadDistortion? {
+        let dx = point.x - startPoint.x
+        let dy = point.y - startPoint.y
+        if !hasPassedThreshold {
+            guard (dx * dx + dy * dy).squareRoot() >= CanvasDrag.threshold else { return nil }
+            hasPassedThreshold = true
+        }
+
+        let start = startTransform.pointInLayerSpace(startPoint)
+        let current = startTransform.pointInLayerSpace(point)
+        let scaleX = max(abs(startTransform.scaleX), .leastNormalMagnitude)
+        let scaleY = max(abs(startTransform.scaleY), .leastNormalMagnitude)
+        let delta = Point(
+            x: (current.x - start.x) / scaleX,
+            y: (current.y - start.y) / scaleY
+        )
+        return movesAll
+            ? startDistortion.movingAll(by: delta)
+            : startDistortion.moving(corner, by: delta)
     }
 }

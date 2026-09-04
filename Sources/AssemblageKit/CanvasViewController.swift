@@ -109,12 +109,19 @@ final class CanvasViewController: NSViewController {
         case .select:
             canvasView.croppingLayerID = nil
             canvasView.brushLayerID = nil
+            canvasView.distortingLayerID = nil
         case .crop:
             canvasView.brushLayerID = nil
+            canvasView.distortingLayerID = nil
             canvasView.croppingLayerID = imageLayerID
         case .brush:
             canvasView.croppingLayerID = nil
+            canvasView.distortingLayerID = nil
             canvasView.brushLayerID = imageLayerID
+        case .distort:
+            canvasView.croppingLayerID = nil
+            canvasView.brushLayerID = nil
+            canvasView.distortingLayerID = layer?.id
         }
     }
 
@@ -198,6 +205,16 @@ extension CanvasViewController: CanvasInteractionDelegate, CanvasKeyboardCommand
         let groesse = Size(width: Double(bild.width), height: Double(bild.height))
         state.owner?.modify("Zuschneiden") {
             try? $0.updateLayer(id: id) { $0 = $0.cropped(to: crop, imageSize: groesse) }
+        }
+    }
+
+    func canvasView(
+        _ canvasView: CanvasView,
+        didChangeDistortionOfLayerWithID id: UUID,
+        to distortion: QuadDistortion?
+    ) {
+        state.owner?.modify("Ebene verziehen") {
+            try? $0.updateLayer(id: id) { $0.distortion = distortion }
         }
     }
 

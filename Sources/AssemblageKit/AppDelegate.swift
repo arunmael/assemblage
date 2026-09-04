@@ -171,6 +171,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(delete)
         menu.addItem(.separator())
 
+        let distort = NSMenuItem(
+            title: "Verziehen",
+            action: #selector(DocumentWindowController.selectDistortTool(_:)),
+            keyEquivalent: "d"
+        )
+        distort.keyEquivalentModifierMask = [.command, .option]
+        menu.addItem(distort)
+        menu.addItem(
+            withTitle: "Verzerrung zurücksetzen",
+            action: #selector(DocumentWindowController.resetSelectedLayerDistortion(_:)),
+            keyEquivalent: ""
+        )
+        menu.addItem(.separator())
+
         menu.addItem(withTitle: "Ebene nach oben", action: #selector(DocumentWindowController.moveSelectedLayerUp(_:)), keyEquivalent: "]")
         menu.addItem(withTitle: "Ebene nach unten", action: #selector(DocumentWindowController.moveSelectedLayerDown(_:)), keyEquivalent: "[")
 

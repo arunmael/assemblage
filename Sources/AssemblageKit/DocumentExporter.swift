@@ -24,6 +24,10 @@ import AssemblageModel
 /// verlagern die Arbeit explizit auf einen Hintergrund-Task.
 enum DocumentExporter {
 
+    /// Nur als Ausweichweg, falls der systemweite GPU-Kontext die projektive
+    /// Abbildung nicht bereitstellen kann (etwa ohne WindowServer).
+    private static let softwareRenderContext = CIContext(options: [.useSoftwareRenderer: true])
+
     // MARK: - Fehler
 
     /// Eigener Fehlertyp statt `try!`/erzwungenem Auspacken (Plan 2.1).
@@ -166,7 +170,14 @@ enum DocumentExporter {
                 context.saveGState()
                 context.setAlpha(CGFloat(layer.opacity.clamped(to: 0...1)))
                 context.setBlendMode(layer.blendMode.cgBlendMode)
-                draw(layer, canvasHeight: document.canvas.height, exportScale: exportScale, resources: resources, into: context)
+                draw(
+                    layer,
+                    canvasHeight: document.canvas.height,
+                    targetSize: targetSize,
+                    exportScale: exportScale,
+                    resources: resources,
+                    into: context
+                )
                 context.restoreGState()
             }
         }
@@ -259,12 +270,30 @@ enum DocumentExporter {
     private static func draw(
         _ layer: Layer,
         canvasHeight: Double,
+        targetSize: CGSize,
         exportScale: CGSize,
         resources: DocumentResources,
         into context: CGContext
     ) {
         let contentSize = self.contentSize(of: layer.content, resources: resources)
         guard contentSize.width > 0, contentSize.height > 0 else { return }
+
+        // Projektives Zeichnen arbeitet auf einem Bild. Das Zwischenbild ist
+        // absichtlich nur für echte Verzerrungen nötig; der häufige Normalfall
+        // bleibt auf dem bisherigen direkten Vektor-/Bildpfad.
+        if let distortion = layer.distortion, !distortion.isIdentity {
+            drawDistorted(
+               layer,
+               distortion: distortion,
+               contentSize: contentSize,
+               canvasHeight: canvasHeight,
+               targetSize: targetSize,
+               exportScale: exportScale,
+               resources: resources,
+               into: context
+            )
+            return
+        }
 
         let centreX = CGFloat(layer.transform.x) * exportScale.width
         let centreY = CGFloat(canvasHeight - layer.transform.y) * exportScale.height
@@ -290,6 +319,123 @@ enum DocumentExporter {
         )
         drawContent(layer.content, in: rect, resources: resources, context: context, mask: maskImage(for: layer, resources: resources))
 
+        context.restoreGState()
+    }
+
+    /// Rendert jeden Inhaltstyp zuerst in eine transparente Bitmap und legt
+    /// diese danach mit Core Images projektiver Abbildung auf die vier
+    /// Modellecken. Damit folgen Bild, Text und Form exakt derselben Geometrie.
+    private static func drawDistorted(
+        _ layer: Layer,
+        distortion: QuadDistortion,
+        contentSize: CGSize,
+        canvasHeight: Double,
+        targetSize: CGSize,
+        exportScale: CGSize,
+        resources: DocumentResources,
+        into context: CGContext
+    ) {
+        let rasterScale = max(
+            abs(layer.transform.scaleX) * exportScale.width,
+            abs(layer.transform.scaleY) * exportScale.height,
+            1
+        )
+        let contentWidth = contentSize.width * rasterScale
+        let contentHeight = contentSize.height * rasterScale
+        let width = Int(contentWidth.rounded(.up))
+        let height = Int(contentHeight.rounded(.up))
+        guard width > 0, height > 0,
+              let sourceContext = makeTransparentContext(size: CGSize(width: width, height: height))
+        else { return }
+
+        sourceContext.scaleBy(x: rasterScale, y: rasterScale)
+        let sourceRect = CGRect(origin: .zero, size: contentSize)
+        drawContent(
+            layer.content,
+            in: sourceRect,
+            resources: resources,
+            context: sourceContext,
+            mask: maskImage(for: layer, resources: resources)
+        )
+        guard let sourceImage = sourceContext.makeImage() else { return }
+
+        let modelCorners = layer.transform.corners(
+            contentSize: Size(contentSize),
+            distortion: distortion
+        )
+        guard modelCorners.count == 4 else { return }
+        let corners = modelCorners.map {
+            CGPoint(
+                x: $0.x * exportScale.width,
+                y: (canvasHeight - $0.y) * exportScale.height
+            )
+        }
+        let destinationIndices: [Int]
+        switch (layer.transform.scaleX < 0, layer.transform.scaleY < 0) {
+        case (false, false): destinationIndices = [0, 1, 2, 3]
+        case (true, false): destinationIndices = [1, 0, 3, 2]
+        case (false, true): destinationIndices = [3, 2, 1, 0]
+        case (true, true): destinationIndices = [2, 3, 0, 1]
+        }
+
+        drawPerspectiveImage(
+            sourceImage,
+            corners: destinationIndices.map { corners[$0] },
+            targetSize: targetSize,
+            into: context
+        )
+    }
+
+    /// Zeichnet ein Bild über genau denselben projektiven Pfad, den der
+    /// Export für verzogene Ebenen verwendet. Die interne Sichtbarkeit hält
+    /// den Identitätstest unabhängig von einer Modellverzerrung: Im normalen
+    /// Export wird dieser teurere Pfad weiterhin nur bei echter Verzerrung
+    /// aufgerufen.
+    static func drawPerspectiveImage(
+        _ sourceImage: CGImage,
+        corners: [CGPoint],
+        targetSize: CGSize,
+        into context: CGContext
+    ) {
+        guard corners.count == 4 else { return }
+        let warped = CIImage(cgImage: sourceImage).applyingFilter(
+            "CIPerspectiveTransform",
+            parameters: [
+                "inputTopLeft": CIVector(cgPoint: corners[0]),
+                "inputTopRight": CIVector(cgPoint: corners[1]),
+                "inputBottomRight": CIVector(cgPoint: corners[2]),
+                "inputBottomLeft": CIVector(cgPoint: corners[3])
+            ]
+        )
+        // Ein PDF-Kontext meldet für `width`/`height` null; die vom Aufrufer
+        // bekannte Zielgrösse funktioniert für Bitmap und PDF gleichermassen.
+        let targetBounds = CGRect(origin: .zero, size: targetSize)
+        let extent = warped.extent.intersection(targetBounds).integral
+        guard !extent.isNull, !extent.isEmpty,
+              let output = RenderContext.shared.createCGImage(warped, from: extent)
+                ?? softwareRenderContext.createCGImage(warped, from: extent)
+        else { return }
+
+        context.interpolationQuality = .high
+        // `CIContext.createCGImage` liefert wie ein dekodiertes `CGImage`
+        // Zeilen in Bildkoordinaten. Direkt in den ungeflippten Quartz-
+        // Kontext gezeichnet würde das verzogene Viereck innerhalb seiner
+        // Umschliessenden vertikal gespiegelt. Zusätzlich liegt `extent` in
+        // Core-Image-Koordinaten: Seine untere y-Kante muss deshalb aus der
+        // oberen Kante in Quartz-Koordinaten berechnet werden. Bei einem
+        // asymmetrischen Viereck sind `extent.minY` und diese Zielposition
+        // verschieden; dieselbe Zahl für beide verschob den Export sichtbar.
+        let drawingRect = CGRect(
+            x: extent.minX,
+            y: targetSize.height - extent.maxY,
+            width: extent.width,
+            height: extent.height
+        )
+        context.saveGState()
+        context.translateBy(x: drawingRect.midX, y: drawingRect.midY)
+        context.scaleBy(x: 1, y: -1)
+        context.translateBy(x: -drawingRect.midX, y: -drawingRect.midY)
+        context.draw(output, in: drawingRect)
         context.restoreGState()
     }
 

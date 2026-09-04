@@ -81,7 +81,9 @@ final class CanvasView: NSView {
 
     private var drag: CanvasDrag?
     private var cropDrag: CropDrag?
+    private var distortDrag: DistortDrag?
     private var stroke: BrushStroke?
+    private var trackingArea: NSTrackingArea?
 
     /// Die Ebene, deren Maske gerade mit dem Pinsel bearbeitet wird (Plan
     /// 5.4) — oder `nil`. Schliesst sich mit dem Zuschneiden-Modus aus:
@@ -89,7 +91,10 @@ final class CanvasView: NSView {
     var brushLayerID: UUID? {
         didSet {
             guard brushLayerID != oldValue else { return }
-            if brushLayerID != nil { croppingLayerID = nil }
+            if brushLayerID != nil {
+                croppingLayerID = nil
+                distortingLayerID = nil
+            }
         }
     }
 
@@ -104,6 +109,25 @@ final class CanvasView: NSView {
     var croppingLayerID: UUID? {
         didSet {
             guard croppingLayerID != oldValue else { return }
+            if croppingLayerID != nil {
+                brushLayerID = nil
+                distortingLayerID = nil
+            }
+            updateSelectionOutline()
+        }
+    }
+
+    /// Die Ebene, deren vier Ecken gerade frei verschoben werden.
+    var distortingLayerID: UUID? {
+        didSet {
+            guard distortingLayerID != oldValue else { return }
+            if distortingLayerID != nil {
+                croppingLayerID = nil
+                brushLayerID = nil
+            } else {
+                NSCursor.arrow.set()
+            }
+            window?.invalidateCursorRects(for: self)
             updateSelectionOutline()
         }
     }
@@ -163,6 +187,19 @@ final class CanvasView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) wird nicht verwendet") }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .inVisibleRect, .mouseMoved, .mouseEnteredAndExited, .cursorUpdate],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
 
     // Bewusst *kein* `isFlipped = true`: eine geflippte NSView flippt bereits
     // ihre Trägerschicht, und zusammen mit `canvasLayer.isGeometryFlipped`
@@ -259,7 +296,7 @@ final class CanvasView: NSView {
         }
 
         let groesse = renderer.contentSize(of: layer.content)
-        let ecken = layer.transform.corners(contentSize: groesse)
+        let ecken = layer.transform.corners(contentSize: groesse, distortion: layer.distortion)
 
         let rahmen = CGMutablePath()
         rahmen.addLines(between: ecken.map { CGPoint(x: $0.x, y: $0.y) })
@@ -270,28 +307,36 @@ final class CanvasView: NSView {
         // 8-fachem Zoom ein Klotz und bei 10 % nicht mehr zu treffen.
         let seite = Self.handleSide / zoomScale
         let griffe = CGMutablePath()
-        for griff in ResizeHandle.allCases {
-            let mitte = layer.transform.position(of: griff, contentSize: groesse)
+        let griffMittelpunkte: [Point]
+        if distortingLayerID == layer.id {
+            griffMittelpunkte = ecken
+        } else {
+            griffMittelpunkte = ResizeHandle.allCases.map {
+                layer.transform.position(of: $0, contentSize: groesse)
+            }
+        }
+        for mitte in griffMittelpunkte {
             griffe.addRect(CGRect(
                 x: mitte.x - seite / 2, y: mitte.y - seite / 2,
                 width: seite, height: seite
             ))
         }
 
-        // Der Drehgriff rund, damit er sich ohne Hinsehen von den eckigen
-        // Skaliergriffen unterscheidet.
-        let dreh = layer.transform.rotationHandlePosition(
-            contentSize: groesse,
-            distance: Self.rotationHandleDistance / zoomScale
-        )
-        griffe.addEllipse(in: CGRect(
-            x: dreh.x - seite / 2, y: dreh.y - seite / 2,
-            width: seite, height: seite
-        ))
-        // Verbindungsstrich zur Ebene, sonst schwebt der Griff ohne Bezug.
-        let oben = layer.transform.position(of: .top, contentSize: groesse)
-        griffe.move(to: CGPoint(x: oben.x, y: oben.y))
-        griffe.addLine(to: CGPoint(x: dreh.x, y: dreh.y))
+        if distortingLayerID != layer.id {
+            // Der Drehgriff rund, damit er sich ohne Hinsehen von den eckigen
+            // Skaliergriffen unterscheidet.
+            let dreh = layer.transform.rotationHandlePosition(
+                contentSize: groesse,
+                distance: Self.rotationHandleDistance / zoomScale
+            )
+            griffe.addEllipse(in: CGRect(
+                x: dreh.x - seite / 2, y: dreh.y - seite / 2,
+                width: seite, height: seite
+            ))
+            let oben = layer.transform.position(of: .top, contentSize: groesse)
+            griffe.move(to: CGPoint(x: oben.x, y: oben.y))
+            griffe.addLine(to: CGPoint(x: dreh.x, y: dreh.y))
+        }
 
         withoutAnimation {
             selectionOutline.path = rahmen
@@ -370,6 +415,24 @@ final class CanvasView: NSView {
     override func cancelOperation(_ sender: Any?) {
         croppingLayerID = nil
         brushLayerID = nil
+        distortingLayerID = nil
+    }
+
+    override func cursorUpdate(with event: NSEvent) { updateCursor(for: event) }
+    override func mouseMoved(with event: NSEvent) { updateCursor(for: event) }
+    override func mouseExited(with event: NSEvent) {
+        (distortDrag == nil ? NSCursor.arrow : NSCursor.crosshair).set()
+    }
+
+    private func updateCursor(for event: NSEvent) {
+        // Das Fadenkreuz passt, weil eine Ecke frei in zwei Richtungen und
+        // punktgenau platziert wird; ein diagonaler Skalierzeiger würde eine
+        // feste Achse und Grössenänderung suggerieren.
+        if distortDrag != nil || distortCorner(at: canvasPoint(from: event)) != nil {
+            NSCursor.crosshair.set()
+        } else {
+            NSCursor.arrow.set()
+        }
     }
 
     /// Rechnet einen Punkt aus der Ansicht in Leinwandkoordinaten um.
@@ -397,8 +460,22 @@ final class CanvasView: NSView {
             return
         }
 
+        if let (corner, ebene) = distortCorner(at: punkt) {
+            distortDrag = DistortDrag(
+                layerID: ebene.id,
+                corner: corner,
+                startDistortion: ebene.distortion ?? .identity,
+                startTransform: ebene.transform,
+                startPoint: punkt
+            )
+            drag = nil
+            cropDrag = nil
+            NSCursor.crosshair.set()
+            return
+        }
+
         if event.clickCount == 2 {
-            let getroffen = document.topmostLayer(at: punkt) { renderer.contentSize(of: $0.content) }
+            let getroffen = topmostLayer(at: punkt)
             if let getroffen, case .image = getroffen.content {
                 selectedLayerID = getroffen.id
                 interactionDelegate?.canvasView(self, didSelectLayerWithID: getroffen.id)
@@ -428,9 +505,7 @@ final class CanvasView: NSView {
             return
         }
 
-        let getroffen = document.topmostLayer(at: punkt) { layer in
-            renderer.contentSize(of: layer.content)
-        }
+        let getroffen = topmostLayer(at: punkt)
 
         // Wer eine andere Ebene anfasst, ist mit dem Zuschneiden fertig.
         if getroffen?.id != croppingLayerID {
@@ -455,6 +530,7 @@ final class CanvasView: NSView {
 
     /// Sitzt der Punkt auf einem Griff der ausgewählten Ebene?
     private func handleDrag(at punkt: Point) -> (CanvasDrag.Kind, Layer)? {
+        guard distortingLayerID == nil else { return nil }
         guard let id = selectedLayerID, let ebene = document.layer(withID: id) else { return nil }
         let groesse = renderer.contentSize(of: ebene.content)
 
@@ -473,6 +549,34 @@ final class CanvasView: NSView {
 
         if let griff = ebene.transform.handle(at: punkt, contentSize: groesse, tolerance: toleranz) {
             return (.resize(griff), ebene)
+        }
+        return nil
+    }
+
+    private func topmostLayer(at point: Point) -> Layer? {
+        document.layers.reversed().first { layer in
+            layer.isVisible && layer.transform.contains(
+                point,
+                contentSize: renderer.contentSize(of: layer.content),
+                distortion: layer.distortion
+            )
+        }
+    }
+
+    private func distortCorner(at punkt: Point) -> (QuadCorner, Layer)? {
+        guard let id = distortingLayerID,
+              let ebene = document.layer(withID: id)
+        else { return nil }
+        let corners = ebene.transform.corners(
+            contentSize: renderer.contentSize(of: ebene.content),
+            distortion: ebene.distortion
+        )
+        let tolerance = Self.handleHitRadius / zoomScale
+        for (index, corner) in QuadCorner.allCases.enumerated() where index < corners.count {
+            let target = corners[index]
+            if abs(target.x - punkt.x) <= tolerance, abs(target.y - punkt.y) <= tolerance {
+                return (corner, ebene)
+            }
         }
         return nil
     }
@@ -571,6 +675,23 @@ final class CanvasView: NSView {
             dragCrop(to: canvasPoint(from: event))
             return
         }
+        if var running = distortDrag {
+            let wasDragging = running.hasPassedThreshold
+            let newValue = running.distortion(
+                draggedTo: canvasPoint(from: event),
+                movesAll: event.modifierFlags.contains(.option)
+            )
+            distortDrag = running
+            guard let newValue else { return }
+            if !wasDragging { interactionDelegate?.canvasViewDidBeginInteraction(self) }
+            interactionDelegate?.canvasView(
+                self,
+                didChangeDistortionOfLayerWithID: running.layerID,
+                to: newValue.isIdentity ? nil : newValue
+            )
+            NSCursor.crosshair.set()
+            return
+        }
         guard var laufend = drag else { return }
         let warSchonAmZiehen = laufend.hasPassedThreshold
 
@@ -601,13 +722,22 @@ final class CanvasView: NSView {
 
     /// Wendet die Ausrichtungshilfen aus Plan 5.3 an und zeigt ihre Linien.
     private func einrasten(_ transform: Transform2D, of laufend: CanvasDrag) -> Transform2D {
-        let gezogen = transform.boundingFrame(contentSize: laufend.contentSize)
+        let distortion = document.layer(withID: laufend.layerID)?.distortion
+        let gezogen = transform.boundingFrame(
+            contentSize: laufend.contentSize,
+            distortion: distortion
+        )
 
         // Unsichtbare Ebenen zählen nicht: An etwas auszurichten, das man
         // nicht sieht, wäre nicht nachvollziehbar.
         let andere = document.layers
             .filter { $0.id != laufend.layerID && $0.isVisible }
-            .map { $0.transform.boundingFrame(contentSize: renderer.contentSize(of: $0.content)) }
+            .map {
+                $0.transform.boundingFrame(
+                    contentSize: renderer.contentSize(of: $0.content),
+                    distortion: $0.distortion
+                )
+            }
 
         let ergebnis = AlignmentGuides.snap(
             draggedFrame: gezogen,
@@ -679,6 +809,14 @@ final class CanvasView: NSView {
             if laufend.hasPassedThreshold {
                 interactionDelegate?.canvasView(self, didEndInteractionNamed: "Zuschneiden")
             }
+            return
+        }
+        if let running = distortDrag {
+            distortDrag = nil
+            if running.hasPassedThreshold {
+                interactionDelegate?.canvasView(self, didEndInteractionNamed: "Ebene verziehen")
+            }
+            updateCursor(for: event)
             return
         }
 

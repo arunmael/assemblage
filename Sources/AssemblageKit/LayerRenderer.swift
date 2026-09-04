@@ -100,7 +100,12 @@ struct LayerRenderer {
         // ist `frame` nicht mehr sinnvoll beschreibbar.
         renderedLayer.bounds = CGRect(origin: .zero, size: contentSize.cgSize)
         renderedLayer.position = CGPoint(x: layer.transform.x, y: layer.transform.y)
-        renderedLayer.transform = layer.transform.renderTransform
+        // Der Normalfall bleibt ohne Zusatzrechnung auf dem bisherigen Pfad.
+        // Nur eine echte Verzerrung benötigt die projektive Matrix.
+        renderedLayer.transform = layer.transform.renderTransform(
+            contentSize: contentSize,
+            distortion: layer.distortion
+        ) ?? layer.transform.renderTransform
 
         // Vektorinhalte bei starker Vergrösserung feiner rastern, sonst wird
         // eine hochskalierte Schrift sichtbar unscharf. Bei Bildern bringt das
