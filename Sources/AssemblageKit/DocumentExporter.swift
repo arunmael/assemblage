@@ -24,6 +24,11 @@ import AssemblageModel
 /// verlagern die Arbeit explizit auf einen Hintergrund-Task.
 enum DocumentExporter {
 
+    enum EffectSurfaceMode {
+        case bounded
+        case fullCanvas
+    }
+
     /// Nur als Ausweichweg, falls der systemweite GPU-Kontext die projektive
     /// Abbildung nicht bereitstellen kann (etwa ohne WindowServer).
     private static let softwareRenderContext = CIContext(options: [.useSoftwareRenderer: true])
@@ -133,7 +138,9 @@ enum DocumentExporter {
     static func renderedImage(
         of document: AssemblageModel.Document,
         resources: DocumentResources,
-        targetSize: CGSize
+        targetSize: CGSize,
+        effectSurfaceMode: EffectSurfaceMode = .bounded,
+        effectRenderContext: CIContext = RenderContext.shared
     ) throws -> CGImage {
         guard targetSize.width.isFinite, targetSize.height.isFinite,
               targetSize.width > 0, targetSize.height > 0 else {
@@ -143,7 +150,14 @@ enum DocumentExporter {
             throw ExportError.renderingFailed
         }
 
-        drawDocument(document, resources: resources, targetSize: targetSize, into: context)
+        drawDocument(
+            document,
+            resources: resources,
+            targetSize: targetSize,
+            effectSurfaceMode: effectSurfaceMode,
+            effectRenderContext: effectRenderContext,
+            into: context
+        )
 
         guard let image = context.makeImage() else { throw ExportError.renderingFailed }
         return image
@@ -155,6 +169,8 @@ enum DocumentExporter {
         _ document: AssemblageModel.Document,
         resources: DocumentResources,
         targetSize: CGSize,
+        effectSurfaceMode: EffectSurfaceMode = .bounded,
+        effectRenderContext: CIContext = RenderContext.shared,
         into context: CGContext
     ) {
         // Eine Leinwand mit Grösse null hat kein sinnvolles Koordinatensystem.
@@ -168,31 +184,37 @@ enum DocumentExporter {
             // Reihenfolge im Modell = Kompositing-Reihenfolge, Index 0
             // zuunterst — dieselbe Regel wie bei `CanvasView.rebuild()`.
             for layer in document.layers where layer.isVisible {
-                context.saveGState()
-                context.setAlpha(CGFloat(layer.opacity.clamped(to: 0...1)))
-                context.setBlendMode(layer.blendMode.cgBlendMode)
+                // AppKit und Core Image legen Hilfsobjekte verzögert frei; der
+                // Pool verhindert, dass sie sich über alle Ebenen aufsummieren.
+                autoreleasepool {
+                    context.saveGState()
+                    defer { context.restoreGState() }
+                    context.setAlpha(CGFloat(layer.opacity.clamped(to: 0...1)))
+                    context.setBlendMode(layer.blendMode.cgBlendMode)
 
-                if let effekte = layer.effects, effekte.isActive {
-                    drawWithEffects(
-                        layer,
-                        effects: effekte,
-                        canvasHeight: document.canvas.height,
-                        targetSize: targetSize,
-                        exportScale: exportScale,
-                        resources: resources,
-                        into: context
-                    )
-                } else {
-                    draw(
-                        layer,
-                        canvasHeight: document.canvas.height,
-                        targetSize: targetSize,
-                        exportScale: exportScale,
-                        resources: resources,
-                        into: context
-                    )
+                    if let effekte = layer.effects, effekte.isActive {
+                        drawWithEffects(
+                            layer,
+                            effects: effekte,
+                            canvasHeight: document.canvas.height,
+                            targetSize: targetSize,
+                            exportScale: exportScale,
+                            resources: resources,
+                            surfaceMode: effectSurfaceMode,
+                            renderContext: effectRenderContext,
+                            into: context
+                        )
+                    } else {
+                        draw(
+                            layer,
+                            canvasHeight: document.canvas.height,
+                            targetSize: targetSize,
+                            exportScale: exportScale,
+                            resources: resources,
+                            into: context
+                        )
+                    }
                 }
-                context.restoreGState()
             }
         }
     }
@@ -290,9 +312,6 @@ enum DocumentExporter {
     /// durchsichtige Fläche gezeichnet, daraus der Effekt gebildet und das
     /// Ganze anschliessend eingesetzt.
     ///
-    /// Das kostet eine Zwischenfläche in Zielgrösse. Vertretbar, weil es nur
-    /// Ebenen mit tatsächlich wirksamen Effekten trifft — `isActive` filtert
-    /// vorher.
     private static func drawWithEffects(
         _ layer: Layer,
         effects: LayerEffects,
@@ -300,9 +319,29 @@ enum DocumentExporter {
         targetSize: CGSize,
         exportScale: CGSize,
         resources: DocumentResources,
+        surfaceMode: EffectSurfaceMode,
+        renderContext: CIContext,
         into context: CGContext
     ) {
-        guard let zwischen = makeTransparentContext(size: targetSize) else {
+        let contentSize = self.contentSize(of: layer.content, resources: resources)
+        let canvasRect = CGRect(origin: .zero, size: targetSize)
+        let surfaceRect: CGRect
+        switch surfaceMode {
+        case .bounded:
+            guard let rect = effectSurfaceRect(
+                for: layer,
+                effects: effects,
+                contentSize: contentSize,
+                canvasHeight: canvasHeight,
+                targetSize: targetSize,
+                exportScale: exportScale
+            ) else { return }
+            surfaceRect = rect
+        case .fullCanvas:
+            surfaceRect = canvasRect
+        }
+
+        guard let zwischen = makeTransparentContext(size: surfaceRect.size) else {
             // Reicht der Speicher nicht, lieber die Ebene ohne Effekt zeigen
             // als den ganzen Export scheitern zu lassen (Plan 2.1).
             draw(layer, canvasHeight: canvasHeight, targetSize: targetSize,
@@ -310,6 +349,9 @@ enum DocumentExporter {
             return
         }
 
+        // Die Ebene rechnet weiterhin in globalen Exportkoordinaten; nur der
+        // Ursprung der kleineren Bitmap wird unter sie geschoben.
+        zwischen.translateBy(x: -surfaceRect.minX, y: -surfaceRect.minY)
         draw(layer, canvasHeight: canvasHeight, targetSize: targetSize,
              exportScale: exportScale, resources: resources, into: zwischen)
 
@@ -323,11 +365,26 @@ enum DocumentExporter {
                  exportScale: exportScale, resources: resources, into: context)
             return
         }
-        let mitEffekt = EffectsRendering.apply(effects, to: CIImage(cgImage: roh))
+        let effektQuelle: CIImage
+        switch surfaceMode {
+        case .bounded:
+            let globalPositioniert = CIImage(cgImage: roh).transformed(
+                by: CGAffineTransform(translationX: surfaceRect.minX, y: surfaceRect.minY)
+            )
+            // Derselbe globale Extent hält Core Images Filterraster stabil;
+            // die transparente Leinwand bleibt lazy und belegt keine Vollbitmap.
+            let transparenteLeinwand = CIImage(
+                color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)
+            ).cropped(to: canvasRect)
+            effektQuelle = globalPositioniert.composited(over: transparenteLeinwand)
+        case .fullCanvas:
+            effektQuelle = CIImage(cgImage: roh)
+        }
+        let mitEffekt = EffectsRendering.apply(effects, to: effektQuelle)
 
-        guard let fertig = RenderContext.shared.createCGImage(
+        guard let fertig = renderContext.createCGImage(
             mitEffekt,
-            from: CGRect(origin: .zero, size: targetSize)
+            from: surfaceRect
         ) else {
             draw(layer, canvasHeight: canvasHeight, targetSize: targetSize,
                  exportScale: exportScale, resources: resources, into: context)
@@ -337,12 +394,69 @@ enum DocumentExporter {
         // Wie bei den anderen Core-Image-Ergebnissen: Das Zeichnen in einen
         // ungeflippten Quartz-Kontext kippt das Bild, deshalb lokal
         // gegenspiegeln. (Dieselbe Falle wie bei Bildern, Text und Verziehen.)
-        let ziel = CGRect(origin: .zero, size: targetSize)
         context.saveGState()
         context.translateBy(x: 0, y: targetSize.height)
         context.scaleBy(x: 1, y: -1)
-        context.draw(fertig, in: ziel)
+        context.draw(fertig, in: surfaceRect)
         context.restoreGState()
+    }
+
+    static func effectSurfaceRect(
+        for layer: Layer,
+        effects: LayerEffects,
+        contentSize: CGSize,
+        canvasHeight: Double,
+        targetSize: CGSize,
+        exportScale: CGSize
+    ) -> CGRect? {
+        guard contentSize.width > 0, contentSize.height > 0 else { return nil }
+
+        let modell = layer.transform.boundingFrame(
+            contentSize: Size(contentSize),
+            distortion: layer.distortion
+        )
+        let canvasRect = CGRect(origin: .zero, size: targetSize)
+        let layerRect = CGRect(
+            x: modell.x * exportScale.width,
+            y: CGFloat(canvasHeight - modell.y - modell.height) * exportScale.height,
+            width: modell.width * exportScale.width,
+            height: modell.height * exportScale.height
+        ).standardized.intersection(canvasRect)
+        guard !layerRect.isNull, !layerRect.isEmpty else { return nil }
+
+        let werte = effects.clamped()
+        var links: CGFloat = 1
+        var rechts: CGFloat = 1
+        var unten: CGFloat = 1
+        var oben: CGFloat = 1
+
+        if let glow = werte.glow, glow.isActive {
+            let reichweite = CGFloat(glow.radius * 3)
+            links = max(links, reichweite)
+            rechts = max(rechts, reichweite)
+            unten = max(unten, reichweite)
+            oben = max(oben, reichweite)
+        }
+        if let shadow = werte.shadow, shadow.isActive {
+            let reichweite = CGFloat(shadow.radius * 3)
+            let dx = CGFloat(shadow.offsetX)
+            let dy = CGFloat(-shadow.offsetY)
+            links = max(links, reichweite - dx)
+            rechts = max(rechts, reichweite + dx)
+            unten = max(unten, reichweite - dy)
+            oben = max(oben, reichweite + dy)
+        }
+
+        // Ein transparenter Pixel verhindert, dass `clampedToExtent` die
+        // Silhouette an einer knapp gerundeten Ebenenkante fortschreibt.
+        let erweitert = CGRect(
+            x: layerRect.minX - max(1, links),
+            y: layerRect.minY - max(1, unten),
+            width: layerRect.width + max(1, links) + max(1, rechts),
+            height: layerRect.height + max(1, unten) + max(1, oben)
+        ).integral.intersection(canvasRect)
+        guard !erweitert.isNull, !erweitert.isEmpty else { return nil }
+        return erweitert
     }
 
     private static func draw(
