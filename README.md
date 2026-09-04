@@ -31,6 +31,19 @@ open .build/Assemblage.app
 swift test                   # Modell + Rendering-Pipeline
 ```
 
+## Diagnoseberichte
+
+Assemblage legt von macOS über MetricKit gelieferte Absturz-, Hänger- und
+Schreibdiagnosen ausschliesslich lokal unter `~/Library/Logs/Assemblage/` ab.
+Der Ordner lässt sich über „Hilfe › Diagnoseberichte anzeigen“ öffnen. Es wird
+nichts übertragen. Berichte werden nach 90 Tagen gelöscht; zusätzlich bleiben
+höchstens die 50 neuesten erhalten.
+
+MetricKit liefert diese Diagnosen auf macOS nachträglich und nicht garantiert,
+typischerweise ungefähr einmal täglich bei laufender App. Die lokalen Dateien
+sind deshalb eine Hilfe für die Fehlersuche, aber kein lückenloses oder
+unmittelbares Absturzprotokoll.
+
 ## Aufbau
 
 | Ziel | Inhalt |

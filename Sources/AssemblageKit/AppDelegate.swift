@@ -7,10 +7,13 @@ import AppKit
 /// dokumentbasierte App nicht optional.
 public final class AppDelegate: NSObject, NSApplicationDelegate {
 
+    private let crashReporter = CrashReporter()
+
     public override init() { super.init() }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = makeMainMenu()
+        crashReporter.start()
     }
 
     /// Beim Klick aufs Dock-Symbol ohne offenes Fenster: leeres Dokument
@@ -23,7 +26,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func makeMainMenu() -> NSMenu {
         let mainMenu = NSMenu()
-        for menu in [appMenu(), fileMenu(), editMenu(), layerMenu(), insertMenu(), viewMenu(), windowMenu()] {
+        for menu in [appMenu(), fileMenu(), editMenu(), layerMenu(), insertMenu(), viewMenu(), windowMenu(), helpMenu()] {
             let item = NSMenuItem()
             item.submenu = menu
             mainMenu.addItem(item)
@@ -208,5 +211,44 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Alle nach vorne bringen", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         NSApp.windowsMenu = menu
         return menu
+    }
+
+    private func helpMenu() -> NSMenu {
+        let menu = NSMenu(title: "Hilfe")
+        let reports = NSMenuItem(
+            title: "Diagnoseberichte anzeigen",
+            action: #selector(showDiagnosticsReports(_:)),
+            keyEquivalent: ""
+        )
+        reports.target = self
+        menu.addItem(reports)
+        NSApp.helpMenu = menu
+        return menu
+    }
+
+    @objc private func showDiagnosticsReports(_ sender: Any?) {
+        do {
+            try FileManager.default.createDirectory(
+                at: CrashReporter.diagnosticsDirectory,
+                withIntermediateDirectories: true
+            )
+            guard NSWorkspace.shared.open(CrashReporter.diagnosticsDirectory) else {
+                throw DiagnosticsFolderError.couldNotOpen
+            }
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+}
+
+enum DiagnosticsFolderError: LocalizedError {
+    case couldNotOpen
+
+    var errorDescription: String? {
+        "Der Ordner mit den Diagnoseberichten konnte nicht geöffnet werden."
+    }
+
+    var recoverySuggestion: String? {
+        "Die Berichte liegen unter ~/Library/Logs/Assemblage/."
     }
 }
