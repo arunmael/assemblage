@@ -313,13 +313,26 @@ enum DocumentExporter {
         draw(layer, canvasHeight: canvasHeight, targetSize: targetSize,
              exportScale: exportScale, resources: resources, into: zwischen)
 
-        guard let roh = zwischen.makeImage() else { return }
+        // Scheitert eines der beiden Zwischenergebnisse, wird die Ebene ohne
+        // Effekt gezeichnet statt gar nicht. Vorher verschwand sie an dieser
+        // Stelle vollständig aus dem Export — ein stiller Datenverlust, den
+        // man erst an der fertigen Datei bemerkt, und das Gegenteil dessen,
+        // was Plan 2.1 verlangt.
+        guard let roh = zwischen.makeImage() else {
+            draw(layer, canvasHeight: canvasHeight, targetSize: targetSize,
+                 exportScale: exportScale, resources: resources, into: context)
+            return
+        }
         let mitEffekt = EffectsRendering.apply(effects, to: CIImage(cgImage: roh))
 
         guard let fertig = RenderContext.shared.createCGImage(
             mitEffekt,
             from: CGRect(origin: .zero, size: targetSize)
-        ) else { return }
+        ) else {
+            draw(layer, canvasHeight: canvasHeight, targetSize: targetSize,
+                 exportScale: exportScale, resources: resources, into: context)
+            return
+        }
 
         // Wie bei den anderen Core-Image-Ergebnissen: Das Zeichnen in einen
         // ungeflippten Quartz-Kontext kippt das Bild, deshalb lokal
