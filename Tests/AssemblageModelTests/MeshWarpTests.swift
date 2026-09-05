@@ -181,6 +181,75 @@ final class MeshWarpTests: XCTestCase {
         assertNear(gitter[4][0], Point(x: -halfWidth + distortion.bottomLeft.x, y: halfHeight + distortion.bottomLeft.y))
     }
 
+    // MARK: - Transform2D.meshCorners
+
+    /// Bei `resolution == 1` ist das Gitter nur die vier Ecken — es muss
+    /// exakt dasselbe liefern wie die bestehende, unabhängig getestete
+    /// Vier-Ecken-Abbildung. Sonst wäre `meshCorners` eine zweite,
+    /// möglicherweise abweichende Wahrheit über dieselbe Geometrie.
+    func testMeshCornersAtResolutionOneMatchTheExistingFourCornerMapping() {
+        let transform = Transform2D(x: 150, y: 220, scaleX: 1.4, scaleY: -0.8, rotationDegrees: 33)
+        let groesse = Size(width: 120, height: 90)
+        let distortion = QuadDistortion(
+            topLeft: Point(x: 5, y: -3), topRight: Point(x: -2, y: 6),
+            bottomRight: Point(x: 4, y: 2), bottomLeft: Point(x: -6, y: -4)
+        )
+
+        let alt = transform.corners(contentSize: groesse, distortion: distortion)
+        let neu = transform.meshCorners(contentSize: groesse, distortion: distortion, resolution: 1)
+
+        XCTAssertEqual(neu.count, 2)
+        XCTAssertEqual(neu[0].count, 2)
+        let flach = [neu[0][0], neu[0][1], neu[1][1], neu[1][0]]
+        for (a, b) in zip(alt, flach) { assertNear(a, b, accuracy: 1e-6) }
+    }
+
+    /// Dieselbe Äquivalenz auch mit echter Krümmung an den Kantenmitten,
+    /// solange nur an den vier Eckknoten (ξ,η ∈ {-1,1}) verglichen wird —
+    /// dort ist die Fläche unabhängig von der Krümmung exakt festgelegt.
+    func testMeshCornersCornerNodesMatchRegardlessOfEdgeCurvature() {
+        let transform = Transform2D(x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDegrees: 0)
+        let groesse = Size(width: 100, height: 100)
+        let flach = QuadDistortion(topLeft: Point(x: 10, y: 5))
+        let gekruemmt = QuadDistortion(topLeft: Point(x: 10, y: 5), topMid: Point(x: 0, y: -50))
+
+        let gitterFlach = transform.meshCorners(contentSize: groesse, distortion: flach, resolution: 4)
+        let gitterGekruemmt = transform.meshCorners(contentSize: groesse, distortion: gekruemmt, resolution: 4)
+
+        assertNear(gitterFlach[0][0], gitterGekruemmt[0][0], "gemeinsame Ecke bleibt gleich")
+        XCTAssertNotEqual(gitterFlach[0][2].y, gitterGekruemmt[0][2].y, "obere Kantenmitte muss sich unterscheiden")
+    }
+
+    // MARK: - Trefferprüfung und Umschliessende bei echter Krümmung
+
+    func testContainsHitsThePointsInsideACurvedBulge() {
+        let transform = Transform2D(x: 100, y: 100)
+        let groesse = Size(width: 100, height: 100)
+        // Obere Kante deutlich nach oben (auf der Leinwand: kleineres y)
+        // gewölbt.
+        let distortion = QuadDistortion(topMid: Point(x: 0, y: -40))
+        XCTAssertTrue(distortion.hasCurvedEdges)
+
+        // Direkt unter der gewölbten Kantenmitte, innerhalb der Wölbung,
+        // aber ausserhalb des ungekrümmten Rechtecks.
+        XCTAssertTrue(transform.contains(Point(x: 100, y: 35), contentSize: groesse, distortion: distortion))
+        // Weit ausserhalb bleibt weiterhin kein Treffer.
+        XCTAssertFalse(transform.contains(Point(x: 100, y: 0), contentSize: groesse, distortion: distortion))
+        // Die Mitte der Fläche trifft weiterhin.
+        XCTAssertTrue(transform.contains(Point(x: 100, y: 100), contentSize: groesse, distortion: distortion))
+    }
+
+    func testBoundingFrameEnclosesTheCurvedBulgeNotJustTheFourCorners() {
+        let transform = Transform2D(x: 100, y: 100)
+        let groesse = Size(width: 100, height: 100)
+        let distortion = QuadDistortion(topMid: Point(x: 0, y: -40))
+
+        let rahmen = transform.boundingFrame(contentSize: groesse, distortion: distortion)
+        // Ohne die Erweiterung läge die obere Kante bei y = 50 (100 - 50) —
+        // die Wölbung reicht deutlich darüber hinaus.
+        XCTAssertLessThan(rahmen.y, 20, "muss die Wölbung mit einschliessen")
+    }
+
     func testGridWithCurvedEdgeIsMonotonicAlongTheBulgingEdge() {
         // Eine nach oben gewölbte Kante darf beim Durchlaufen von links nach
         // rechts nicht "einknicken" — y muss erst fallen (nach oben, da y

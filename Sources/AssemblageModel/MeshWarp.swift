@@ -26,6 +26,12 @@ import Foundation
 /// auf dieses eine Modul beschränkt.
 public enum MeshWarp {
 
+    /// Auflösung für Trefferprüfung/Umschliessende — grob genug, um billig
+    /// zu bleiben (Klick-/Ausrichtungsrechnungen laufen bei jeder
+    /// Mausbewegung), fein genug, dass eine deutliche Wölbung nicht wie ein
+    /// gerades Viereck behandelt wird.
+    public static let hitTestResolution = 6
+
     /// Position eines Punkts der Ebene (im ungedrehten, aber skalierten
     /// Inhaltskoordinatensystem, Ursprung in der Mitte) bei den natürlichen
     /// Koordinaten `xi`/`eta` ∈ [-1, 1] — dieselben Achsen wie

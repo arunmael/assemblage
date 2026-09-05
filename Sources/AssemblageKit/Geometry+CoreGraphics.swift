@@ -103,6 +103,7 @@ extension CATransform3D {
     /// Homographie vom Rechteck auf ein Viereck. Core Animation teilt nach
     /// der Multiplikation durch `w`; deshalb liegen die beiden projektiven
     /// Koeffizienten in `m14` und `m24`.
+    ///
     fileprivate static func projectiveTransform(from rect: CGRect, to corners: [CGPoint]) -> CATransform3D? {
         guard rect.width > 0, rect.height > 0, corners.count == 4 else { return nil }
         let p0 = corners[0], p1 = corners[1], p2 = corners[2], p3 = corners[3]

@@ -169,6 +169,21 @@ extension QuadDistortion {
         case .leftMid: return leftMid
         }
     }
+
+    /// Alle acht Versätze mit je einem Faktor skaliert — dieselbe Regel wie
+    /// in `Transform2D.corners(contentSize:distortion:)`: Der Versatz gilt
+    /// im Inhaltsmass und wächst deshalb mit der Skalierung der Ebene mit.
+    func scaled(x factorX: Double, y factorY: Double) -> QuadDistortion {
+        func skaliert(_ punkt: Point) -> Point {
+            Point(x: punkt.x * factorX, y: punkt.y * factorY)
+        }
+        return QuadDistortion(
+            topLeft: skaliert(topLeft), topRight: skaliert(topRight),
+            bottomRight: skaliert(bottomRight), bottomLeft: skaliert(bottomLeft),
+            topMid: skaliert(topMid), rightMid: skaliert(rightMid),
+            bottomMid: skaliert(bottomMid), leftMid: skaliert(leftMid)
+        )
+    }
 }
 
 extension Transform2D {
@@ -198,12 +213,50 @@ extension Transform2D {
         }
     }
 
+    /// Die Fläche als Gitter aus `resolution × resolution` Feldern, in
+    /// Leinwandkoordinaten — Grundlage für das Rendern einer echten Krümmung
+    /// (aus Anpassungen.md: „8 Punkte"), die eine einzelne projektive
+    /// Abbildung nicht mehr darstellen kann (siehe `MeshWarp`).
+    ///
+    /// Bei `resolution == 1` liefert das exakt dieselben vier Punkte wie
+    /// `corners(contentSize:distortion:)` (mit
+    /// `MeshWarpTests.testMeshCornersAtResolutionOneMatchTheExistingFourCornerMapping`
+    /// nachgewiesen) — die Gitterdarstellung ist also eine echte Erweiterung,
+    /// keine Nebenrechnung mit eigenem, potenziell abweichendem Ergebnis.
+    public func meshCorners(contentSize: Size, distortion: QuadDistortion, resolution: Int) -> [[Point]] {
+        let halfWidth = contentSize.width * abs(scaleX) / 2
+        let halfHeight = contentSize.height * abs(scaleY) / 2
+        // Derselbe Grund wie in `corners(contentSize:distortion:)`: Der
+        // Versatz gilt im Inhaltsmass und wächst mit der Skalierung mit.
+        let skaliert = distortion.scaled(x: abs(scaleX), y: abs(scaleY))
+        let gitter = MeshWarp.grid(
+            resolution: resolution, halfWidth: halfWidth, halfHeight: halfHeight, distortion: skaliert
+        )
+        return gitter.map { zeile in zeile.map(pointOnCanvas) }
+    }
+
     /// Trefferprüfung für eine verzogene Ebene.
     public func contains(_ point: Point, contentSize: Size, distortion: QuadDistortion?) -> Bool {
         guard let distortion, !distortion.isIdentity else {
             return contains(point, contentSize: contentSize)
         }
-        return Geometry.quadContains(corners(contentSize: contentSize, distortion: distortion), point)
+        guard distortion.hasCurvedEdges else {
+            return Geometry.quadContains(corners(contentSize: contentSize, distortion: distortion), point)
+        }
+        // Eine gekrümmte Fläche ist kein einzelnes Viereck mehr — jedes
+        // Gitterfeld aber schon. Ein Treffer in irgendeinem Feld zählt als
+        // Treffer auf der Ebene.
+        let gitter = meshCorners(contentSize: contentSize, distortion: distortion, resolution: MeshWarp.hitTestResolution)
+        for zeile in 0..<(gitter.count - 1) {
+            for spalte in 0..<(gitter[zeile].count - 1) {
+                let feld = [
+                    gitter[zeile][spalte], gitter[zeile][spalte + 1],
+                    gitter[zeile + 1][spalte + 1], gitter[zeile + 1][spalte]
+                ]
+                if Geometry.quadContains(feld, point) { return true }
+            }
+        }
+        return false
     }
 
     /// Achsenparallele Umschliessende einer verzogenen Ebene — die
@@ -213,7 +266,13 @@ extension Transform2D {
             return boundingFrame(contentSize: contentSize)
         }
 
-        let ecken = corners(contentSize: contentSize, distortion: distortion)
+        // Bei einer echten Krümmung wölbt sich eine Kante über die vier
+        // Ecken hinaus — ihre Umschliessende muss deshalb das ganze Gitter
+        // einschliessen, nicht nur die vier Ecken.
+        let ecken = distortion.hasCurvedEdges
+            ? meshCorners(contentSize: contentSize, distortion: distortion, resolution: MeshWarp.hitTestResolution)
+                .flatMap { $0 }
+            : corners(contentSize: contentSize, distortion: distortion)
         let xs = ecken.map(\.x)
         let ys = ecken.map(\.y)
         let minX = xs.min() ?? x
