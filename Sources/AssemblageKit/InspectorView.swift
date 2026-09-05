@@ -41,7 +41,7 @@ struct InspectorView: View {
                     paintSpecification
                 }
             case .distort:
-                toolSection(title: "Verziehen", hint: "Ziehe eine Ecke, um die Ebene zu verzerren.") {
+                toolSection(title: "Verziehen", hint: "Ziehe eine Ecke oder Kantenmitte, um die Ebene zu verzerren — Kantenmitten können die Fläche auch krümmen.") {
                     distortSpecification
                 }
             }
