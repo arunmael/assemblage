@@ -144,6 +144,46 @@ final class LayerFlatteningTests: XCTestCase {
         return kontext
     }
 
+    private func pixel(_ context: CGContext, x: Int, y: Int) throws -> (r: Int, g: Int, b: Int, a: Int) {
+        let daten = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
+        let offset = y * context.bytesPerRow + x * 4
+        return (Int(daten[offset]), Int(daten[offset + 1]), Int(daten[offset + 2]), Int(daten[offset + 3]))
+    }
+
+    func testFlattenedShapeContainsStrokeAndFillColours() throws {
+        let layer = Layer(
+            name: "Form mit Rand",
+            content: .shape(ShapeLayerContent(
+                kind: .rectangle,
+                size: Size(width: 80, height: 80),
+                fillColorHex: "#FF0000",
+                strokeColorHex: "#0000FF",
+                strokeWidth: 10
+            ))
+        )
+        let (document, _) = dokument(mit: layer)
+
+        XCTAssertTrue(LayerFlattening.flattenSelected(in: document.state))
+
+        let ergebnis = try XCTUnwrap(document.state.document.layer(withID: layer.id))
+        guard case .image(let bild) = ergebnis.content else { return XCTFail("keine Bildebene") }
+        let daten = try XCTUnwrap(document.state.resources.data(for: bild.originalFileReference))
+        let rasterbild = try XCTUnwrap(ImageDecoding.decode(daten))
+        let context = try rgbaContext(rasterbild)
+
+        let rand = try pixel(context, x: 2, y: 40)
+        XCTAssertEqual(rand.r, 0, accuracy: 2, "Rand: kein Rot")
+        XCTAssertEqual(rand.g, 0, accuracy: 2, "Rand: kein Grün")
+        XCTAssertEqual(rand.b, 255, accuracy: 2, "Rand: Blau")
+        XCTAssertEqual(rand.a, 255, accuracy: 2, "Rand: deckend")
+
+        let mitte = try pixel(context, x: 40, y: 40)
+        XCTAssertEqual(mitte.r, 255, accuracy: 2, "Mitte: Rot")
+        XCTAssertEqual(mitte.g, 0, accuracy: 2, "Mitte: kein Grün")
+        XCTAssertEqual(mitte.b, 0, accuracy: 2, "Mitte: kein Blau")
+        XCTAssertEqual(mitte.a, 255, accuracy: 2, "Mitte: deckend")
+    }
+
     func testMaskOpacityBlendModeAndDistortionSurvive() throws {
         let resources = DocumentResources()
         let maskenreferenz = resources.addMask(Data([1, 2, 3]))

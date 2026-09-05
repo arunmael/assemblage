@@ -83,6 +83,35 @@ final class ExportTests: XCTestCase {
         return resources.addOriginal(png, fileExtension: "png")
     }
 
+    // MARK: - Formenrand
+
+    func testShapeStrokeUsesStrokeColourAndPreservesFillColour() throws {
+        let document = AssemblageModel.Document(
+            canvas: CanvasSize(width: 100, height: 100),
+            layers: [Layer(
+                name: "Form mit Rand",
+                transform: Transform2D(x: 50, y: 50),
+                content: .shape(ShapeLayerContent(
+                    kind: .rectangle,
+                    size: Size(width: 80, height: 80),
+                    fillColorHex: "#FF0000",
+                    strokeColorHex: "#0000FF",
+                    strokeWidth: 10
+                ))
+            )]
+        )
+
+        let image = try DocumentExporter.renderedImage(
+            of: document,
+            resources: DocumentResources(),
+            targetSize: CGSize(width: 100, height: 100)
+        )
+        let context = try rgbaContext(from: image)
+
+        assertRoughly(try pixel(of: context, x: 7, y: 50), (0, 0, 255, 255), "am äusseren Rand erscheint die Randfarbe")
+        assertRoughly(try pixel(of: context, x: 50, y: 50), (255, 0, 0, 255), "in der Formmitte bleibt die Füllfarbe")
+    }
+
     // MARK: - Zielgrösse
 
     func testExportHonoursArbitraryTargetSize() async throws {
