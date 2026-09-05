@@ -15,3 +15,4 @@
 ## Anpassungen 2
 - Mann kann nicht die grösse der Leinwand verändern
 - Ebenen soll man dublizieren können
+- Bild ausschneiden fehlt damit man Teile manuell wegschneiden kann

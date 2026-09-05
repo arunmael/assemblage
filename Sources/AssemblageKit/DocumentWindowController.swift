@@ -376,4 +376,54 @@ extension DocumentWindowController {
         guard let state = (document as? AssemblageDocument)?.state else { return }
         LayerCreation.insert(.speechBubble, into: state)
     }
+
+    @IBAction func insertDiamondLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.diamond, into: state)
+    }
+
+    @IBAction func insertCrossLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.cross, into: state)
+    }
+
+    @IBAction func insertOctagonLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.octagon, into: state)
+    }
+
+    @IBAction func insertRightTriangleLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.rightTriangle, into: state)
+    }
+
+    @IBAction func insertParallelogramLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.parallelogram, into: state)
+    }
+
+    @IBAction func insertTrapezoidLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.trapezoid, into: state)
+    }
+
+    @IBAction func insertCrescentLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.crescent, into: state)
+    }
+
+    @IBAction func insertLightningBoltLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.lightningBolt, into: state)
+    }
+
+    @IBAction func insertCloudLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.cloud, into: state)
+    }
+
+    @IBAction func insertShieldLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        LayerCreation.insert(.shield, into: state)
+    }
 }

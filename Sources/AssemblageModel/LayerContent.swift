@@ -63,6 +63,18 @@ public enum ShapeKind: String, Codable, Sendable, CaseIterable {
     case arrow
     case speechBubble
 
+    // Zehn weitere Vorlagen (aus Anpassungen.md: „mindestens 20 Formen").
+    case diamond
+    case cross
+    case octagon
+    case rightTriangle
+    case parallelogram
+    case trapezoid
+    case crescent
+    case lightningBolt
+    case cloud
+    case shield
+
     /// Die Vorlage hinter dieser Form — `nil` bei den drei Grundformen, die
     /// Core Graphics direkt kennt und die deshalb keinen Streckenzug brauchen.
     public var template: ShapeTemplate? { ShapeTemplate(rawValue: rawValue) }

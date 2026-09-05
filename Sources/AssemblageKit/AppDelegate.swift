@@ -134,6 +134,46 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         vorlagen.addItem(withTitle: "Sprechblase",
                          action: #selector(DocumentWindowController.insertSpeechBubbleLayer(_:)),
                          keyEquivalent: "")
+        vorlagen.addItem(.separator())
+        vorlagen.addItem(withTitle: "Raute",
+                         action: #selector(DocumentWindowController.insertDiamondLayer(_:)),
+                         keyEquivalent: "")
+
+        vorlagen.addItem(withTitle: "Kreuz",
+                         action: #selector(DocumentWindowController.insertCrossLayer(_:)),
+                         keyEquivalent: "")
+
+        vorlagen.addItem(withTitle: "Achteck",
+                         action: #selector(DocumentWindowController.insertOctagonLayer(_:)),
+                         keyEquivalent: "")
+
+        vorlagen.addItem(withTitle: "Rechtwinkliges Dreieck",
+                         action: #selector(DocumentWindowController.insertRightTriangleLayer(_:)),
+                         keyEquivalent: "")
+
+        vorlagen.addItem(withTitle: "Parallelogramm",
+                         action: #selector(DocumentWindowController.insertParallelogramLayer(_:)),
+                         keyEquivalent: "")
+
+        vorlagen.addItem(withTitle: "Trapez",
+                         action: #selector(DocumentWindowController.insertTrapezoidLayer(_:)),
+                         keyEquivalent: "")
+
+        vorlagen.addItem(withTitle: "Sichel",
+                         action: #selector(DocumentWindowController.insertCrescentLayer(_:)),
+                         keyEquivalent: "")
+
+        vorlagen.addItem(withTitle: "Blitz",
+                         action: #selector(DocumentWindowController.insertLightningBoltLayer(_:)),
+                         keyEquivalent: "")
+
+        vorlagen.addItem(withTitle: "Wolke",
+                         action: #selector(DocumentWindowController.insertCloudLayer(_:)),
+                         keyEquivalent: "")
+
+        vorlagen.addItem(withTitle: "Schild",
+                         action: #selector(DocumentWindowController.insertShieldLayer(_:)),
+                         keyEquivalent: "")
 
         let eintrag = NSMenuItem(title: "Formvorlage", action: nil, keyEquivalent: "")
         eintrag.submenu = vorlagen

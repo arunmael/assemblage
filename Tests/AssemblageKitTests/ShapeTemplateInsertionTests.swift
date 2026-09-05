@@ -45,7 +45,8 @@ final class ShapeTemplateInsertionTests: XCTestCase {
     /// Um einen Mittelpunkt gedachte Formen werden quadratisch eingefügt.
     /// In ein breitgezogenes Rechteck gepresst sähen sie verzerrt aus.
     func testCentredShapesAreInsertedSquare() {
-        for art in [NewLayerKind.triangle, .pentagon, .hexagon, .star, .heart] {
+        for art in [NewLayerKind.triangle, .pentagon, .hexagon, .star, .heart,
+                    .diamond, .octagon, .rightTriangle, .crescent, .lightningBolt, .shield] {
             let document = vorbereitetesDokument()
             LayerCreation.insert(art, into: document.state)
 
@@ -58,7 +59,8 @@ final class ShapeTemplateInsertionTests: XCTestCase {
 
     /// Die drei Grundformen und die beiden gerichteten Vorlagen bleiben breit.
     func testWideShapesStayWide() {
-        for art in [NewLayerKind.rectangle, .ellipse, .arrow, .speechBubble] {
+        for art in [NewLayerKind.rectangle, .ellipse, .arrow, .speechBubble,
+                    .parallelogram, .trapezoid, .cloud] {
             let document = vorbereitetesDokument()
             LayerCreation.insert(art, into: document.state)
 
