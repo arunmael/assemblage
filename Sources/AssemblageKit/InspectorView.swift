@@ -32,6 +32,10 @@ struct InspectorView: View {
                 toolSection(title: "Pinsel", hint: "Ziehe auf der Leinwand, um die Maske zu malen.") {
                     brushSpecification
                 }
+            case .paint:
+                toolSection(title: "Farbe malen", hint: "Ziehe auf der Leinwand, um mit Farbe auf dieser Ebene zu malen.") {
+                    paintSpecification
+                }
             case .distort:
                 toolSection(title: "Verziehen", hint: "Ziehe eine Ecke, um die Ebene zu verzerren.") {
                     distortSpecification
@@ -83,6 +87,24 @@ struct InspectorView: View {
             LabeledContent("Grösse", value: "\(Int(state.brushSettings.diameter.rounded())) px")
             LabeledContent("Härte", value: "\(Int((state.brushSettings.hardness * 100).rounded())) %")
             LabeledContent("Modus", value: state.brushSettings.mode == .hide ? "Abdecken" : "Zurückholen")
+        }
+    }
+
+    /// Reine Anzeige wie `brushSpecification` — geändert wird ausschliesslich
+    /// über die Regler in der Werkzeugleiste.
+    private var paintSpecification: some View {
+        Group {
+            LabeledContent("Grösse", value: "\(Int(state.paintBrushSettings.diameter.rounded())) px")
+            LabeledContent("Härte", value: "\(Int((state.paintBrushSettings.hardness * 100).rounded())) %")
+            LabeledContent("Deckkraft", value: "\(Int((state.paintBrushSettings.opacity * 100).rounded())) %")
+            HStack {
+                Text("Farbe")
+                Spacer()
+                Circle()
+                    .fill(color(from: state.paintBrushSettings.colorHex))
+                    .frame(width: 18, height: 18)
+                    .overlay(Circle().stroke(.secondary, lineWidth: 1))
+            }
         }
     }
 

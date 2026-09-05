@@ -30,6 +30,7 @@ final class ToolbarTests: XCTestCase {
         XCTAssertTrue(ToolSelection.isAvailable(.select, forSelected: nil))
         XCTAssertFalse(ToolSelection.isAvailable(.crop, forSelected: nil))
         XCTAssertFalse(ToolSelection.isAvailable(.brush, forSelected: nil))
+        XCTAssertFalse(ToolSelection.isAvailable(.paint, forSelected: nil))
         XCTAssertFalse(ToolSelection.isAvailable(.distort, forSelected: nil))
     }
 
@@ -38,12 +39,13 @@ final class ToolbarTests: XCTestCase {
             XCTAssertTrue(ToolSelection.isAvailable(.select, forSelected: layer))
             XCTAssertFalse(ToolSelection.isAvailable(.crop, forSelected: layer))
             XCTAssertFalse(ToolSelection.isAvailable(.brush, forSelected: layer))
+            XCTAssertFalse(ToolSelection.isAvailable(.paint, forSelected: layer))
             XCTAssertTrue(ToolSelection.isAvailable(.distort, forSelected: layer))
         }
     }
 
     func testAllToolsAreAvailableForImageLayer() {
-        for tool in [CanvasTool.select, .crop, .brush, .distort] {
+        for tool in [CanvasTool.select, .crop, .brush, .paint, .distort] {
             XCTAssertTrue(ToolSelection.isAvailable(tool, forSelected: imageLayer))
         }
     }
@@ -186,5 +188,20 @@ final class ToolStateReportingTests: XCTestCase {
 
         toolbar.setBrushDiameterForTesting(120)
         XCTAssertEqual(document.state.brushSettings.diameter, 120, accuracy: 0.001)
+    }
+
+    /// Dieselbe Meldung wie beim Pinsel, für den Farbpinsel (aus
+    /// Anpassungen.md).
+    func testPaintBrushSettingsAreReportedOnChange() {
+        let bild = Layer(name: "Foto", content: .image(ImageLayerContent(originalFileReference: "originals/a.png")))
+        let (document, toolbar) = aufbau(selecting: bild)
+
+        XCTAssertEqual(document.state.paintBrushSettings.diameter, 30, accuracy: 0.001)
+        XCTAssertEqual(document.state.paintBrushSettings.colorHex, "#000000")
+
+        toolbar.setPaintBrushForTesting(PaintBrush(diameter: 50, hardness: 1, colorHex: "#00FF00", opacity: 0.8))
+        XCTAssertEqual(document.state.paintBrushSettings.diameter, 50, accuracy: 0.001)
+        XCTAssertEqual(document.state.paintBrushSettings.colorHex, "#00FF00")
+        XCTAssertEqual(document.state.paintBrushSettings.opacity, 0.8, accuracy: 0.001)
     }
 }

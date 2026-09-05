@@ -162,6 +162,11 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
     }
 
     @IBAction func insertTextLayer(_ sender: Any?) { insertLayer(.text) }
+
+    @IBAction func insertPaintLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        PaintLayerCommand.insertBlankLayer(into: state)
+    }
     @IBAction func insertRectangleLayer(_ sender: Any?) { insertLayer(.rectangle) }
     @IBAction func insertRoundedRectangleLayer(_ sender: Any?) { insertLayer(.roundedRectangle) }
     @IBAction func insertEllipseLayer(_ sender: Any?) { insertLayer(.ellipse) }

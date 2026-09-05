@@ -86,6 +86,7 @@ final class CanvasView: NSView {
     private var cropDrag: CropDrag?
     private var distortDrag: DistortDrag?
     private var stroke: BrushStroke?
+    private var colorStroke: ColorStroke?
     private var trackingArea: NSTrackingArea?
     private var textEditor: NSTextView?
     private var editingTextLayerID: UUID?
@@ -99,6 +100,7 @@ final class CanvasView: NSView {
             if brushLayerID != nil {
                 croppingLayerID = nil
                 distortingLayerID = nil
+                paintLayerID = nil
             }
         }
     }
@@ -106,6 +108,25 @@ final class CanvasView: NSView {
     /// Einstellungen des Pinsels. Werden von aussen gesetzt (Werkzeugleiste,
     /// Inspector) und hier nur verwendet.
     var brush = MaskBrush(diameter: 60, hardness: 0.5, mode: .hide)
+
+    /// Die Ebene, auf der gerade mit Farbe gemalt wird (aus Anpassungen.md:
+    /// „sollte auf einer eigenen Ebene sein"). Anders als die Pinsel-Maske
+    /// verändert das den sichtbaren Inhalt der Ebene selbst, nicht ihre
+    /// Maske — schliesst sich deshalb mit allen anderen Modi aus.
+    var paintLayerID: UUID? {
+        didSet {
+            guard paintLayerID != oldValue else { return }
+            if paintLayerID != nil {
+                croppingLayerID = nil
+                brushLayerID = nil
+                distortingLayerID = nil
+            }
+        }
+    }
+
+    /// Einstellungen des Farbpinsels. Werden von aussen gesetzt
+    /// (Werkzeugleiste) und hier nur verwendet.
+    var paintBrush = PaintBrush(diameter: 30, hardness: 0.8, colorHex: "#000000", opacity: 1)
 
     /// Die Ebene, die gerade zugeschnitten wird (Plan 5.3) — oder `nil`.
     ///
@@ -117,6 +138,7 @@ final class CanvasView: NSView {
             if croppingLayerID != nil {
                 brushLayerID = nil
                 distortingLayerID = nil
+                paintLayerID = nil
             }
             updateSelectionOutline()
         }
@@ -129,6 +151,7 @@ final class CanvasView: NSView {
             if distortingLayerID != nil {
                 croppingLayerID = nil
                 brushLayerID = nil
+                paintLayerID = nil
             } else {
                 NSCursor.arrow.set()
             }
@@ -482,12 +505,13 @@ final class CanvasView: NSView {
             endTextEditing(committing: false)
             return
         }
-        if croppingLayerID != nil || brushLayerID != nil || distortingLayerID != nil {
+        if croppingLayerID != nil || brushLayerID != nil || distortingLayerID != nil || paintLayerID != nil {
             _ = keyboardCommandDelegate?.canvasView(self, perform: .selectTool(.select))
         }
         croppingLayerID = nil
         brushLayerID = nil
         distortingLayerID = nil
+        paintLayerID = nil
     }
 
     override func cursorUpdate(with event: NSEvent) { updateCursor(for: event) }
@@ -553,6 +577,13 @@ final class CanvasView: NSView {
         // Ebene, statt sie zu maskieren.
         if let angefangen = beginStroke(at: punkt, event: event) {
             stroke = angefangen
+            drag = nil
+            cropDrag = nil
+            return
+        }
+
+        if let angefangen = beginColorStroke(at: punkt, event: event) {
+            colorStroke = angefangen
             drag = nil
             cropDrag = nil
             return
@@ -840,6 +871,59 @@ final class CanvasView: NSView {
         }
     }
 
+
+    /// Dasselbe wie `beginStroke`, nur für den Farbpinsel (aus
+    /// Anpassungen.md). Malt auf einer eigenen Ebene: Anders als beim
+    /// Pinsel-Modus wird nicht die Maske eines Fotos verändert, sondern der
+    /// sichtbare Inhalt der ausgewählten Bildebene selbst.
+    private func beginColorStroke(at punkt: Point, event: NSEvent) -> ColorStroke? {
+        guard let id = paintLayerID,
+              let ebene = document.layer(withID: id),
+              case .image(let inhalt) = ebene.content,
+              let pixelSize = renderer.images.pixelSize(named: inhalt.originalFileReference)
+        else { return nil }
+
+        let groesse = Size(pixelSize)
+
+        // Auf dem bestehenden Inhalt weitermalen, nicht bei null anfangen —
+        // sonst wäre jeder Strich der erste und löschte den vorherigen.
+        //
+        // Bewusst NICHT `renderer.images.image(named:)`: Der liefert für die
+        // Bildschirmvorschau ein auf höchstens 4096 Pixel verkleinertes Bild
+        // (siehe `ImageStore`). Eine Maske darf das sein — hier würde ein
+        // Farbstrich sonst dauerhaft auf verkleinerter Grundlage aufsetzen
+        // und die Ebene beim nächsten Export sichtbar unscharf machen. Also
+        // direkt aus der Originaldatei in voller Auflösung dekodieren, wie es
+        // der Export auch tut.
+        let bisheriges = renderer.images.resources.data(for: inhalt.originalFileReference)
+            .flatMap { ImageDecoding.decode($0) }
+
+        guard let painter = ColorPainter(imageSize: groesse, existing: bisheriges),
+              let imBild = ebene.imagePoint(forCanvasPoint: punkt, imageSize: groesse)
+        else { return nil }
+
+        var strich = ColorStroke(layerID: id, painter: painter, imageSize: groesse)
+        painter.beginStroke(at: imBild, pressure: Double(event.pressure), brush: paintBrush)
+        strich.markPainted()
+        zeigeFarbstrichvorschau(strich)
+        return strich
+    }
+
+    /// Zeigt den laufenden Farbstrich sofort an, ohne das Dokument
+    /// anzufassen — dieselbe Begründung wie bei `zeigeStrichvorschau`.
+    ///
+    /// Anders als dort wird nicht die Maskenschicht, sondern der Inhalt der
+    /// gerenderten Schicht selbst ersetzt: Der Farbstrich IST das sichtbare
+    /// Bild, keine Abdeckung darüber.
+    private func zeigeFarbstrichvorschau(_ strich: ColorStroke) {
+        guard let gerendert = renderedLayers[strich.layerID],
+              let bild = strich.painter.currentImage()
+        else { return }
+
+        withoutAnimation {
+            gerendert.contents = bild
+        }
+    }
     override func mouseDragged(with event: NSEvent) {
         if var strich = stroke {
             let punkt = canvasPoint(from: event)
@@ -849,6 +933,17 @@ final class CanvasView: NSView {
                 strich.markPainted()
                 zeigeStrichvorschau(strich)
                 stroke = strich
+            }
+            return
+        }
+        if var strich = colorStroke {
+            let punkt = canvasPoint(from: event)
+            if let ebene = document.layer(withID: strich.layerID),
+               let imBild = ebene.imagePoint(forCanvasPoint: punkt, imageSize: strich.imageSize) {
+                strich.painter.continueStroke(to: imBild, pressure: Double(event.pressure))
+                strich.markPainted()
+                zeigeFarbstrichvorschau(strich)
+                colorStroke = strich
             }
             return
         }
@@ -982,6 +1077,14 @@ final class CanvasView: NSView {
             strich.painter.endStroke()
             if strich.hasPainted, let daten = strich.painter.pngData() {
                 interactionDelegate?.canvasView(self, didPaintMaskForLayerWithID: strich.layerID, pngData: daten)
+            }
+            return
+        }
+        if let strich = colorStroke {
+            colorStroke = nil
+            strich.painter.endStroke()
+            if strich.hasPainted, let daten = strich.painter.pngData() {
+                interactionDelegate?.canvasView(self, didPaintColorForLayerWithID: strich.layerID, pngData: daten)
             }
             return
         }

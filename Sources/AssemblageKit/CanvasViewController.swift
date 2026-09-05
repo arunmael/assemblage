@@ -116,18 +116,27 @@ final class CanvasViewController: NSViewController {
         case .select:
             canvasView.croppingLayerID = nil
             canvasView.brushLayerID = nil
+            canvasView.paintLayerID = nil
             canvasView.distortingLayerID = nil
         case .crop:
             canvasView.brushLayerID = nil
+            canvasView.paintLayerID = nil
             canvasView.distortingLayerID = nil
             canvasView.croppingLayerID = imageLayerID
         case .brush:
             canvasView.croppingLayerID = nil
+            canvasView.paintLayerID = nil
             canvasView.distortingLayerID = nil
             canvasView.brushLayerID = imageLayerID
+        case .paint:
+            canvasView.croppingLayerID = nil
+            canvasView.brushLayerID = nil
+            canvasView.distortingLayerID = nil
+            canvasView.paintLayerID = imageLayerID
         case .distort:
             canvasView.croppingLayerID = nil
             canvasView.brushLayerID = nil
+            canvasView.paintLayerID = nil
             canvasView.distortingLayerID = layer?.id
         }
     }
@@ -136,6 +145,11 @@ final class CanvasViewController: NSViewController {
     func setBrush(_ brush: MaskBrush) {
         loadViewIfNeeded()
         canvasView?.brush = brush
+    }
+
+    func setPaintBrush(_ brush: PaintBrush) {
+        loadViewIfNeeded()
+        canvasView?.paintBrush = brush
     }
 
     /// Passt die Leinwand mit etwas Luft ins Fenster ein.
@@ -252,6 +266,25 @@ extension CanvasViewController: CanvasInteractionDelegate, CanvasKeyboardCommand
         state.owner?.modify("Maske malen") {
             try? $0.updateLayer(id: id) { ebene in
                 ebene.mask = LayerMask(maskImageReference: referenz, source: .manualBrush)
+            }
+        }
+    }
+
+    /// Ein fertig gemalter Farbstrich (aus Anpassungen.md). Anders als beim
+    /// Pinsel-Modus ist das PNG hier nicht die Maske, sondern der neue,
+    /// sichtbare Inhalt der Ebene selbst — dieselbe Rolle wie ein importiertes
+    /// Foto.
+    func canvasView(_ canvasView: CanvasView, didPaintColorForLayerWithID id: UUID, pngData: Data) {
+        // Aus demselben Grund wie bei der Maske eine **neue** Datei statt
+        // eines Überschreibens: Nur so bringt ⌘Z die vorherigen Pixel
+        // zurück, weil der Undo-Schnappschuss nur die Referenz hält.
+        let referenz = state.resources.addOriginal(pngData, fileExtension: "png")
+
+        state.owner?.modify("Farbe malen") {
+            try? $0.updateLayer(id: id) { ebene in
+                guard case .image(var inhalt) = ebene.content else { return }
+                inhalt.originalFileReference = referenz
+                ebene.content = .image(inhalt)
             }
         }
     }

@@ -48,6 +48,11 @@ protocol CanvasInteractionDelegate: AnyObject {
     /// das Dokument anzufassen. Sonst entstünde pro Mausmeldung eine
     /// Maskendatei.
     func canvasView(_ canvasView: CanvasView, didPaintMaskForLayerWithID id: UUID, pngData: Data)
+
+    /// Ein fertig gemalter Farbstrich (aus Anpassungen.md), als PNG in
+    /// Bildauflösung — anders als `didPaintMaskForLayerWithID` verändert er
+    /// nicht die Maske, sondern den sichtbaren Inhalt der Ebene selbst.
+    func canvasView(_ canvasView: CanvasView, didPaintColorForLayerWithID id: UUID, pngData: Data)
 }
 
 extension CanvasInteractionDelegate {
@@ -60,6 +65,8 @@ extension CanvasInteractionDelegate {
     ) {}
 
     func canvasView(_ canvasView: CanvasView, didFinishEditingTextOfLayerWithID id: UUID, text: String) {}
+
+    func canvasView(_ canvasView: CanvasView, didPaintColorForLayerWithID id: UUID, pngData: Data) {}
 }
 
 /// Ein laufender Pinselstrich (Plan 5.4).
@@ -225,4 +232,20 @@ struct DistortDrag {
             ? startDistortion.movingAll(by: delta)
             : startDistortion.moving(corner, by: delta)
     }
+}
+
+/// Ein laufender Farbstrich (aus Anpassungen.md), analog zu `BrushStroke`.
+struct ColorStroke {
+    let layerID: UUID
+    let painter: ColorPainter
+    let imageSize: Size
+    private(set) var hasPainted = false
+
+    init(layerID: UUID, painter: ColorPainter, imageSize: Size) {
+        self.layerID = layerID
+        self.painter = painter
+        self.imageSize = imageSize
+    }
+
+    mutating func markPainted() { hasPainted = true }
 }

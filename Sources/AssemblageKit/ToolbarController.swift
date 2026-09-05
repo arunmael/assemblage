@@ -10,6 +10,7 @@ enum CanvasTool: Equatable {
     case select
     case crop
     case brush
+    case paint
     case distort
 }
 
@@ -22,7 +23,7 @@ struct ToolSelection {
         switch tool {
         case .select:
             return true
-        case .crop, .brush:
+        case .crop, .brush, .paint:
             guard let layer, case .image = layer.content else { return false }
             return true
         case .distort:
@@ -51,6 +52,8 @@ private extension NSToolbarItem.Identifier {
     static let insertText = NSToolbarItem.Identifier("Assemblage.Einfuegen.Text")
     static let insertShape = NSToolbarItem.Identifier("Assemblage.Einfuegen.Form")
     static let brushSettings = NSToolbarItem.Identifier("Assemblage.Pinsel.Einstellungen")
+    static let paintTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Farbe")
+    static let paintSettings = NSToolbarItem.Identifier("Assemblage.Farbe.Einstellungen")
     static let zoom = NSToolbarItem.Identifier("Assemblage.Zoom")
     static let share = NSToolbarItem.Identifier("Assemblage.Teilen")
 }
@@ -70,7 +73,7 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
     private var observations: Set<AnyCancellable> = []
 
     private var currentTool: CanvasTool = .select {
-        didSet { state.reportToolState(currentTool, brush: brush) }
+        didSet { state.reportToolState(currentTool, brush: brush, paintBrush: paintBrush) }
     }
     private var selectedLayer: Layer?
     private var toolButtons: [CanvasTool: NSButton] = [:]
@@ -86,7 +89,12 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
     }
 
     private var brush = MaskBrush(diameter: 60, hardness: 0.5, mode: .hide) {
-        didSet { state.reportToolState(currentTool, brush: brush) }
+        didSet { state.reportToolState(currentTool, brush: brush, paintBrush: paintBrush) }
+    }
+
+    /// Einstellungen des Farbpinsels (aus Anpassungen.md).
+    private var paintBrush = PaintBrush(diameter: 30, hardness: 0.8, colorHex: "#000000", opacity: 1) {
+        didSet { state.reportToolState(currentTool, brush: brush, paintBrush: paintBrush) }
     }
     /// Am Leben gehalten, waehrend der Teilen-Dialog offen ist.
     private var sharingPicker: NSSharingServicePicker?
@@ -134,6 +142,7 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
     @objc private func selectTool(_ sender: Any?) { toggle(.select) }
     @objc private func cropTool(_ sender: Any?) { toggle(.crop) }
     @objc private func brushTool(_ sender: Any?) { toggle(.brush) }
+    @objc private func paintTool(_ sender: Any?) { toggle(.paint) }
     @objc private func distortTool(_ sender: Any?) { toggle(.distort) }
 
     private func toggle(_ tool: CanvasTool) {
@@ -182,6 +191,7 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
             forSelected: selectedLayer
         )
         updateBrushSettingsVisibility()
+        updatePaintSettingsVisibility()
     }
 
     private func updateBrushSettingsVisibility() {
@@ -195,6 +205,17 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
         }
     }
 
+    private func updatePaintSettingsVisibility() {
+        let index = toolbar.items.firstIndex { $0.itemIdentifier == .paintSettings }
+        if currentTool == .paint, index == nil {
+            let zoomIndex = toolbar.items.firstIndex { $0.itemIdentifier == .zoom }
+                ?? toolbar.items.count
+            toolbar.insertItem(withItemIdentifier: .paintSettings, at: zoomIndex)
+        } else if currentTool != .paint, let index {
+            toolbar.removeItem(at: index)
+        }
+    }
+
     // MARK: - Pinsel
 
     // MARK: - Zugang für Tests
@@ -204,6 +225,13 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
     func setBrushDiameterForTesting(_ diameter: Double) {
         brush.diameter = diameter
         canvasViewController?.setBrush(brush)
+    }
+
+    /// Derselbe Weg wie die Werkzeugleisten-Regler des Farbpinsels, ohne
+    /// echte `NSSlider`/`NSColorWell` zu brauchen.
+    func setPaintBrushForTesting(_ neu: PaintBrush) {
+        paintBrush = neu
+        canvasViewController?.setPaintBrush(paintBrush)
     }
 
     @objc private func diameterChanged(_ sender: NSSlider) {
@@ -265,6 +293,7 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
             .selectTool,
             .cropTool,
             .brushTool,
+            .paintTool,
             .distortTool,
             .removeSubject,
             .insertText,
@@ -276,7 +305,7 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarDefaultItemIdentifiers(toolbar) + [.brushSettings, .space]
+        toolbarDefaultItemIdentifiers(toolbar) + [.brushSettings, .paintSettings, .space]
     }
 
     func toolbar(
@@ -309,6 +338,14 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
                 symbolName: "paintbrush",
                 action: #selector(brushTool(_:))
             )
+        case .paintTool:
+            return makeToolItem(
+                identifier: itemIdentifier,
+                tool: .paint,
+                label: "Farbe malen",
+                symbolName: "paintpalette",
+                action: #selector(paintTool(_:))
+            )
         case .distortTool:
             return makeToolItem(
                 identifier: itemIdentifier,
@@ -330,6 +367,8 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
             return makeShapeItem(identifier: itemIdentifier)
         case .brushSettings:
             return makeBrushSettingsItem(identifier: itemIdentifier)
+        case .paintSettings:
+            return makePaintSettingsItem(identifier: itemIdentifier)
         case .zoom:
             return makeZoomItem(identifier: itemIdentifier)
         case .share:
@@ -518,6 +557,101 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
         item.paletteLabel = "Pinsel-Einstellungen"
         item.view = stack
         return item
+    }
+
+    private func makePaintSettingsItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
+        let farbe = NSColorWell()
+        let anfangsfarbe = RGBA(hex: paintBrush.colorHex) ?? .black
+        farbe.color = NSColor(
+            srgbRed: anfangsfarbe.red, green: anfangsfarbe.green,
+            blue: anfangsfarbe.blue, alpha: anfangsfarbe.alpha
+        )
+        farbe.target = self
+        farbe.action = #selector(paintColorChanged(_:))
+        farbe.toolTip = "Malfarbe"
+        farbe.setAccessibilityLabel("Malfarbe")
+
+        let diameter = NSSlider(
+            value: paintBrush.diameter,
+            minValue: 1,
+            maxValue: 300,
+            target: self,
+            action: #selector(paintDiameterChanged(_:))
+        )
+        diameter.isContinuous = true
+        diameter.toolTip = "Pinselgrösse"
+        diameter.setAccessibilityLabel("Pinselgrösse")
+        diameter.translatesAutoresizingMaskIntoConstraints = false
+        diameter.widthAnchor.constraint(equalToConstant: 110).isActive = true
+
+        let hardness = NSSlider(
+            value: paintBrush.hardness,
+            minValue: 0,
+            maxValue: 1,
+            target: self,
+            action: #selector(paintHardnessChanged(_:))
+        )
+        hardness.isContinuous = true
+        hardness.toolTip = "Pinselhärte"
+        hardness.setAccessibilityLabel("Pinselhärte")
+        hardness.translatesAutoresizingMaskIntoConstraints = false
+        hardness.widthAnchor.constraint(equalToConstant: 90).isActive = true
+
+        let opacity = NSSlider(
+            value: paintBrush.opacity,
+            minValue: 0,
+            maxValue: 1,
+            target: self,
+            action: #selector(paintOpacityChanged(_:))
+        )
+        opacity.isContinuous = true
+        opacity.toolTip = "Deckkraft"
+        opacity.setAccessibilityLabel("Deckkraft")
+        opacity.translatesAutoresizingMaskIntoConstraints = false
+        opacity.widthAnchor.constraint(equalToConstant: 90).isActive = true
+
+        let stack = NSStackView(views: [
+            farbe,
+            labelledControl("Grösse", control: diameter),
+            labelledControl("Härte", control: hardness),
+            labelledControl("Deckkraft", control: opacity)
+        ])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 12
+        stack.edgeInsets = NSEdgeInsets(top: 4, left: 6, bottom: 4, right: 6)
+
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        item.label = "Farbpinsel-Einstellungen"
+        item.paletteLabel = "Farbpinsel-Einstellungen"
+        item.view = stack
+        return item
+    }
+
+    @objc private func paintColorChanged(_ sender: NSColorWell) {
+        guard let umgerechnet = sender.color.usingColorSpace(.sRGB) else { return }
+        paintBrush.colorHex = RGBA(
+            red: Double(umgerechnet.redComponent),
+            green: Double(umgerechnet.greenComponent),
+            blue: Double(umgerechnet.blueComponent),
+            alpha: Double(umgerechnet.alphaComponent)
+        ).hexString
+        canvasViewController?.setPaintBrush(paintBrush)
+    }
+
+    @objc private func paintDiameterChanged(_ sender: NSSlider) {
+        paintBrush.diameter = sender.doubleValue
+        canvasViewController?.setPaintBrush(paintBrush)
+    }
+
+    @objc private func paintHardnessChanged(_ sender: NSSlider) {
+        paintBrush.hardness = sender.doubleValue
+        canvasViewController?.setPaintBrush(paintBrush)
+    }
+
+    @objc private func paintOpacityChanged(_ sender: NSSlider) {
+        paintBrush.opacity = sender.doubleValue
+        canvasViewController?.setPaintBrush(paintBrush)
     }
 
     private func labelledControl(_ label: String, control: NSView) -> NSView {
