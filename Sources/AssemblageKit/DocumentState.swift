@@ -34,6 +34,9 @@ final class DocumentState: ObservableObject {
     /// Werkzeugleiste.
     @Published fileprivate(set) var brushSettings = MaskBrush(diameter: 60, hardness: 0.5, mode: .hide)
 
+    /// Der Aus-/Einblendmodus des Lasso-Werkzeugs, zur Anzeige im Inspector.
+    @Published fileprivate(set) var lassoMode: MaskBrush.Mode = .hide
+
     /// Dieselbe Anzeige-Rolle wie `brushSettings`, für den Farbpinsel
     /// (aus Anpassungen.md).
     @Published fileprivate(set) var paintBrushSettings = PaintBrush(
@@ -230,9 +233,15 @@ extension DocumentState {
     /// (Inspector, Sidebar). Nur für `ToolbarController` gedacht: Der
     /// entscheidet weiterhin allein, welches Werkzeug gilt — diese Methode
     /// spiegelt seine Entscheidung nur, statt eine zweite zu treffen.
-    func reportToolState(_ tool: CanvasTool, brush: MaskBrush, paintBrush: PaintBrush) {
+    func reportToolState(
+        _ tool: CanvasTool,
+        brush: MaskBrush,
+        lassoMode: MaskBrush.Mode,
+        paintBrush: PaintBrush
+    ) {
         currentTool = tool
         brushSettings = brush
+        self.lassoMode = lassoMode
         paintBrushSettings = paintBrush
     }
 }

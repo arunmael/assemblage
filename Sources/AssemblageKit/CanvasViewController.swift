@@ -116,26 +116,37 @@ final class CanvasViewController: NSViewController {
         case .select:
             canvasView.croppingLayerID = nil
             canvasView.brushLayerID = nil
+            canvasView.lassoLayerID = nil
             canvasView.paintLayerID = nil
             canvasView.distortingLayerID = nil
         case .crop:
             canvasView.brushLayerID = nil
+            canvasView.lassoLayerID = nil
             canvasView.paintLayerID = nil
             canvasView.distortingLayerID = nil
             canvasView.croppingLayerID = imageLayerID
         case .brush:
             canvasView.croppingLayerID = nil
+            canvasView.lassoLayerID = nil
             canvasView.paintLayerID = nil
             canvasView.distortingLayerID = nil
             canvasView.brushLayerID = imageLayerID
+        case .lasso:
+            canvasView.croppingLayerID = nil
+            canvasView.brushLayerID = nil
+            canvasView.paintLayerID = nil
+            canvasView.distortingLayerID = nil
+            canvasView.lassoLayerID = imageLayerID
         case .paint:
             canvasView.croppingLayerID = nil
             canvasView.brushLayerID = nil
+            canvasView.lassoLayerID = nil
             canvasView.distortingLayerID = nil
             canvasView.paintLayerID = imageLayerID
         case .distort:
             canvasView.croppingLayerID = nil
             canvasView.brushLayerID = nil
+            canvasView.lassoLayerID = nil
             canvasView.paintLayerID = nil
             canvasView.distortingLayerID = layer?.id
         }
@@ -145,6 +156,11 @@ final class CanvasViewController: NSViewController {
     func setBrush(_ brush: MaskBrush) {
         loadViewIfNeeded()
         canvasView?.brush = brush
+    }
+
+    func setLassoMode(_ mode: MaskBrush.Mode) {
+        loadViewIfNeeded()
+        canvasView?.lassoMode = mode
     }
 
     func setPaintBrush(_ brush: PaintBrush) {
@@ -264,6 +280,18 @@ extension CanvasViewController: CanvasInteractionDelegate, CanvasKeyboardCommand
         let referenz = state.resources.addMask(pngData)
 
         state.owner?.modify("Maske malen") {
+            try? $0.updateLayer(id: id) { ebene in
+                ebene.mask = LayerMask(maskImageReference: referenz, source: .manualBrush)
+            }
+        }
+    }
+
+    func canvasView(_ canvasView: CanvasView, didFillLassoForLayerWithID id: UUID, pngData: Data) {
+        // Wie beim Pinsel bleibt jede Fassung als eigene Ressource erhalten,
+        // damit Undo nicht auf bereits überschriebene Pixel zeigt.
+        let referenz = state.resources.addMask(pngData)
+
+        state.owner?.modify("Bild ausschneiden") {
             try? $0.updateLayer(id: id) { ebene in
                 ebene.mask = LayerMask(maskImageReference: referenz, source: .manualBrush)
             }

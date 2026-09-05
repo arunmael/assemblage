@@ -49,6 +49,9 @@ protocol CanvasInteractionDelegate: AnyObject {
     /// Maskendatei.
     func canvasView(_ canvasView: CanvasView, didPaintMaskForLayerWithID id: UUID, pngData: Data)
 
+    /// Eine fertig gefüllte Freihand-Auswahl, als PNG in Bildauflösung.
+    func canvasView(_ canvasView: CanvasView, didFillLassoForLayerWithID id: UUID, pngData: Data)
+
     /// Ein fertig gemalter Farbstrich (aus Anpassungen.md), als PNG in
     /// Bildauflösung — anders als `didPaintMaskForLayerWithID` verändert er
     /// nicht die Maske, sondern den sichtbaren Inhalt der Ebene selbst.
@@ -67,6 +70,8 @@ extension CanvasInteractionDelegate {
     func canvasView(_ canvasView: CanvasView, didFinishEditingTextOfLayerWithID id: UUID, text: String) {}
 
     func canvasView(_ canvasView: CanvasView, didPaintColorForLayerWithID id: UUID, pngData: Data) {}
+
+    func canvasView(_ canvasView: CanvasView, didFillLassoForLayerWithID id: UUID, pngData: Data) {}
 }
 
 /// Ein laufender Pinselstrich (Plan 5.4).
@@ -83,6 +88,29 @@ struct BrushStroke {
     }
 
     mutating func markPainted() { hasPainted = true }
+}
+
+/// Eine laufende Freihand-Auswahl. Die Punkte liegen sowohl für die sichtbare
+/// Vorschau in Leinwand- als auch für `MaskPainter` in Bildkoordinaten vor.
+struct LassoStroke {
+    let layerID: UUID
+    let painter: MaskPainter
+    let imageSize: Size
+    private(set) var canvasPoints: [Point]
+    private(set) var imagePoints: [Point]
+
+    init(layerID: UUID, painter: MaskPainter, imageSize: Size, canvasPoint: Point, imagePoint: Point) {
+        self.layerID = layerID
+        self.painter = painter
+        self.imageSize = imageSize
+        self.canvasPoints = [canvasPoint]
+        self.imagePoints = [imagePoint]
+    }
+
+    mutating func append(canvasPoint: Point, imagePoint: Point) {
+        canvasPoints.append(canvasPoint)
+        imagePoints.append(imagePoint)
+    }
 }
 
 /// Ein laufendes Ziehen auf dem Canvas.

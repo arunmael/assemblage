@@ -60,6 +60,8 @@ final class CanvasView: NSView {
     private let handleShapes = CAShapeLayer()
     /// Die Ausrichtungslinien beim Ziehen (Plan 5.3).
     private let guideShapes = CAShapeLayer()
+    /// Gestrichelter Pfad einer laufenden Lasso-Auswahl.
+    private let lassoPreviewShape = CAShapeLayer()
 
     /// Kantenlänge der gezeichneten Griffe, in Bildschirmpunkten.
     ///
@@ -86,6 +88,7 @@ final class CanvasView: NSView {
     private var cropDrag: CropDrag?
     private var distortDrag: DistortDrag?
     private var stroke: BrushStroke?
+    private var lassoStroke: LassoStroke?
     private var colorStroke: ColorStroke?
     private var trackingArea: NSTrackingArea?
     private var textEditor: NSTextView?
@@ -99,6 +102,7 @@ final class CanvasView: NSView {
             guard brushLayerID != oldValue else { return }
             if brushLayerID != nil {
                 croppingLayerID = nil
+                lassoLayerID = nil
                 distortingLayerID = nil
                 paintLayerID = nil
             }
@@ -108,6 +112,25 @@ final class CanvasView: NSView {
     /// Einstellungen des Pinsels. Werden von aussen gesetzt (Werkzeugleiste,
     /// Inspector) und hier nur verwendet.
     var brush = MaskBrush(diameter: 60, hardness: 0.5, mode: .hide)
+
+    /// Die Bildebene, deren Maske mit einer Freihand-Auswahl verändert wird.
+    var lassoLayerID: UUID? {
+        didSet {
+            guard lassoLayerID != oldValue else { return }
+            if lassoLayerID != nil {
+                croppingLayerID = nil
+                brushLayerID = nil
+                distortingLayerID = nil
+                paintLayerID = nil
+            } else {
+                lassoStroke = nil
+                zeigeLassovorschau([])
+            }
+        }
+    }
+
+    /// Das Lasso kennt wie der Maskenpinsel Abdecken und Zurückholen.
+    var lassoMode: MaskBrush.Mode = .hide
 
     /// Die Ebene, auf der gerade mit Farbe gemalt wird (aus Anpassungen.md:
     /// „sollte auf einer eigenen Ebene sein"). Anders als die Pinsel-Maske
@@ -119,6 +142,7 @@ final class CanvasView: NSView {
             if paintLayerID != nil {
                 croppingLayerID = nil
                 brushLayerID = nil
+                lassoLayerID = nil
                 distortingLayerID = nil
             }
         }
@@ -137,6 +161,7 @@ final class CanvasView: NSView {
             guard croppingLayerID != oldValue else { return }
             if croppingLayerID != nil {
                 brushLayerID = nil
+                lassoLayerID = nil
                 distortingLayerID = nil
                 paintLayerID = nil
             }
@@ -151,6 +176,7 @@ final class CanvasView: NSView {
             if distortingLayerID != nil {
                 croppingLayerID = nil
                 brushLayerID = nil
+                lassoLayerID = nil
                 paintLayerID = nil
             } else {
                 NSCursor.arrow.set()
@@ -192,12 +218,16 @@ final class CanvasView: NSView {
         cropPreviewLayer.contentsGravity = .resize
         cropPreviewLayer.isHidden = true
         overlayLayer.addSublayer(guideShapes)
+        overlayLayer.addSublayer(lassoPreviewShape)
         overlayLayer.addSublayer(handleShapes)
         guideShapes.fillColor = nil
         // Kräftiges Magenta wie in anderen Gestaltungsprogrammen: Die Linien
         // müssen sich von der Auswahlfarbe unterscheiden, sonst hält man sie
         // für einen Teil des Rahmens.
         guideShapes.strokeColor = NSColor.systemPink.cgColor
+        lassoPreviewShape.fillColor = nil
+        lassoPreviewShape.strokeColor = NSColor.controlAccentColor.cgColor
+        lassoPreviewShape.lineDashPattern = [6, 4]
         selectionOutline.fillColor = nil
         selectionOutline.strokeColor = NSColor.controlAccentColor.cgColor
         // Weisse Griffe mit farbigem Rand: Sie müssen sowohl auf einem dunklen
@@ -348,6 +378,7 @@ final class CanvasView: NSView {
     var handleLayerForTesting: CAShapeLayer { handleShapes }
     var guideLayerForTesting: CAShapeLayer { guideShapes }
     var cropPreviewLayerForTesting: CALayer { cropPreviewLayer }
+    var lassoPreviewLayerForTesting: CAShapeLayer { lassoPreviewShape }
     var textEditorForTesting: NSTextView? { textEditor }
     func isRenderedLayerHiddenForTesting(_ id: UUID) -> Bool {
         renderedLayers[id]?.isHidden ?? false
@@ -505,11 +536,12 @@ final class CanvasView: NSView {
             endTextEditing(committing: false)
             return
         }
-        if croppingLayerID != nil || brushLayerID != nil || distortingLayerID != nil || paintLayerID != nil {
+        if croppingLayerID != nil || brushLayerID != nil || lassoLayerID != nil || distortingLayerID != nil || paintLayerID != nil {
             _ = keyboardCommandDelegate?.canvasView(self, perform: .selectTool(.select))
         }
         croppingLayerID = nil
         brushLayerID = nil
+        lassoLayerID = nil
         distortingLayerID = nil
         paintLayerID = nil
     }
@@ -579,6 +611,14 @@ final class CanvasView: NSView {
             stroke = angefangen
             drag = nil
             cropDrag = nil
+            return
+        }
+
+        if let angefangen = beginLasso(at: punkt) {
+            lassoStroke = angefangen
+            drag = nil
+            cropDrag = nil
+            zeigeLassovorschau(angefangen.canvasPoints)
             return
         }
 
@@ -852,8 +892,12 @@ final class CanvasView: NSView {
     /// hiesse, pro Mausmeldung eine Maskendatei anzulegen und einen
     /// Undo-Schritt zu erzeugen.
     private func zeigeStrichvorschau(_ strich: BrushStroke) {
-        guard let gerendert = renderedLayers[strich.layerID],
-              let maske = strich.painter.currentMask()
+        zeigeMaskenvorschau(painter: strich.painter, layerID: strich.layerID)
+    }
+
+    private func zeigeMaskenvorschau(painter: MaskPainter, layerID: UUID) {
+        guard let gerendert = renderedLayers[layerID],
+              let maske = painter.currentMask()
         else { return }
 
         // Dieselbe Umrechnung wie im Renderer: Core Animation wertet bei
@@ -868,6 +912,49 @@ final class CanvasView: NSView {
             schicht.contentsGravity = .resize
             schicht.frame = CGRect(origin: .zero, size: gerendert.bounds.size)
             gerendert.mask = schicht
+        }
+    }
+
+    private func beginLasso(at punkt: Point) -> LassoStroke? {
+        guard let id = lassoLayerID,
+              let ebene = document.layer(withID: id),
+              case .image(let inhalt) = ebene.content,
+              renderer.images.image(named: inhalt.originalFileReference) != nil,
+              let pixelSize = renderer.images.pixelSize(named: inhalt.originalFileReference)
+        else { return nil }
+
+        let groesse = Size(pixelSize)
+        let bisherige = ebene.mask?.maskImageReference
+            .flatMap { renderer.images.resources.data(for: $0) }
+            .flatMap { ImageDecoding.decode($0) }
+
+        guard let painter = MaskPainter(imageSize: groesse, existing: bisherige),
+              let imBild = ebene.imagePoint(forCanvasPoint: punkt, imageSize: groesse)
+        else { return nil }
+
+        return LassoStroke(
+            layerID: id,
+            painter: painter,
+            imageSize: groesse,
+            canvasPoint: punkt,
+            imagePoint: imBild
+        )
+    }
+
+    private func zeigeLassovorschau(_ punkte: [Point]) {
+        guard let erster = punkte.first else {
+            withoutAnimation { lassoPreviewShape.path = nil }
+            return
+        }
+        let pfad = CGMutablePath()
+        pfad.move(to: CGPoint(x: erster.x, y: erster.y))
+        for punkt in punkte.dropFirst() {
+            pfad.addLine(to: CGPoint(x: punkt.x, y: punkt.y))
+        }
+        if punkte.count >= 3 { pfad.closeSubpath() }
+        withoutAnimation {
+            lassoPreviewShape.path = pfad
+            lassoPreviewShape.lineWidth = 1.5 / zoomScale
         }
     }
 
@@ -934,6 +1021,20 @@ final class CanvasView: NSView {
                 zeigeStrichvorschau(strich)
                 stroke = strich
             }
+            return
+        }
+        if var lasso = lassoStroke {
+            let punkt = canvasPoint(from: event)
+            guard let letzter = lasso.canvasPoints.last else { return }
+            let dx = punkt.x - letzter.x
+            let dy = punkt.y - letzter.y
+            guard hypot(dx, dy) > 2 / Double(zoomScale),
+                  let ebene = document.layer(withID: lasso.layerID),
+                  let imBild = ebene.imagePoint(forCanvasPoint: punkt, imageSize: lasso.imageSize)
+            else { return }
+            lasso.append(canvasPoint: punkt, imagePoint: imBild)
+            lassoStroke = lasso
+            zeigeLassovorschau(lasso.canvasPoints)
             return
         }
         if var strich = colorStroke {
@@ -1077,6 +1178,27 @@ final class CanvasView: NSView {
             strich.painter.endStroke()
             if strich.hasPainted, let daten = strich.painter.pngData() {
                 interactionDelegate?.canvasView(self, didPaintMaskForLayerWithID: strich.layerID, pngData: daten)
+            }
+            return
+        }
+        if var lasso = lassoStroke {
+            lassoStroke = nil
+            let punkt = canvasPoint(from: event)
+            if let letzter = lasso.canvasPoints.last {
+                let dx = punkt.x - letzter.x
+                let dy = punkt.y - letzter.y
+                if hypot(dx, dy) > 2 / Double(zoomScale),
+                   let ebene = document.layer(withID: lasso.layerID),
+                   let imBild = ebene.imagePoint(forCanvasPoint: punkt, imageSize: lasso.imageSize) {
+                    lasso.append(canvasPoint: punkt, imagePoint: imBild)
+                }
+            }
+            zeigeLassovorschau([])
+            guard lasso.imagePoints.count >= 3 else { return }
+            lasso.painter.fillLasso(lasso.imagePoints, mode: lassoMode)
+            zeigeMaskenvorschau(painter: lasso.painter, layerID: lasso.layerID)
+            if let daten = lasso.painter.pngData() {
+                interactionDelegate?.canvasView(self, didFillLassoForLayerWithID: lasso.layerID, pngData: daten)
             }
             return
         }

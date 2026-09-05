@@ -32,6 +32,10 @@ struct InspectorView: View {
                 toolSection(title: "Pinsel", hint: "Ziehe auf der Leinwand, um die Maske zu malen.") {
                     brushSpecification
                 }
+            case .lasso:
+                toolSection(title: "Bild ausschneiden", hint: "Ziehe eine Form um den Bereich, der aus- oder eingeblendet werden soll.") {
+                    lassoSpecification
+                }
             case .paint:
                 toolSection(title: "Farbe malen", hint: "Ziehe auf der Leinwand, um mit Farbe auf dieser Ebene zu malen.") {
                     paintSpecification
@@ -88,6 +92,10 @@ struct InspectorView: View {
             LabeledContent("Härte", value: "\(Int((state.brushSettings.hardness * 100).rounded())) %")
             LabeledContent("Modus", value: state.brushSettings.mode == .hide ? "Abdecken" : "Zurückholen")
         }
+    }
+
+    private var lassoSpecification: some View {
+        LabeledContent("Modus", value: state.lassoMode == .hide ? "Abdecken" : "Zurückholen")
     }
 
     /// Reine Anzeige wie `brushSpecification` — geändert wird ausschliesslich
