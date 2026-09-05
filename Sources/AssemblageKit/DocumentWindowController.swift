@@ -113,7 +113,14 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
         splitViewController.addSplitViewItem(inspectorItem)
         self.splitViewController = splitViewController
 
-        contentViewController = splitViewController
+        // Die Ablagefläche umschliesst den Split View, statt ihn zu
+        // ersetzen — er behält seine eigene Spalten- und Grössenverwaltung
+        // vollständig.
+        let dropZone = WindowDropZoneViewController(embedding: splitViewController)
+        dropZone.onDrop = { [weak self] pasteboard in
+            self?.handleWindowDrop(from: pasteboard)
+        }
+        contentViewController = dropZone
         window?.toolbarStyle = .unified
 
         let toolbarController = ToolbarController(
@@ -197,6 +204,15 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
     @IBAction func removeLayerTexture(_ sender: Any?) {
         guard let state = (document as? AssemblageDocument)?.state else { return }
         if TextureCommand.removeTexture(in: state) != .removed { NSSound.beep() }
+    }
+
+    /// Ein Bild, irgendwo im Fenster losgelassen — nicht nur auf dem Canvas
+    /// (aus Anpassungen.md). Derselbe Weg wie ein Wurf direkt auf die
+    /// Leinwand, nur von der fensterweiten Ablagefläche statt vom Canvas
+    /// selbst gemeldet.
+    private func handleWindowDrop(from pasteboard: NSPasteboard) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        ImageDropCommand.handle(pasteboard: pasteboard, state: state, presentingWindow: window)
     }
 
     @IBAction func toggleLayerComparison(_ sender: Any?) {

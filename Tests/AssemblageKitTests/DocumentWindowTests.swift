@@ -19,13 +19,21 @@ final class DocumentWindowTests: XCTestCase {
         return try XCTUnwrap(document.windowControllers.first as? DocumentWindowController)
     }
 
+    /// Der Split View sitzt seit der fensterweiten Ablagefläche (aus
+    /// Anpassungen.md) nicht mehr direkt als `contentViewController`,
+    /// sondern als dessen einziges Kind.
+    private func splitViewController(in controller: DocumentWindowController) throws -> NSSplitViewController {
+        let huelle = try XCTUnwrap(
+            controller.contentViewController as? WindowDropZoneViewController,
+            "das Fenster muss einen Inhalt haben — nicht nur eine leere Fläche"
+        )
+        return try XCTUnwrap(huelle.children.first as? NSSplitViewController)
+    }
+
     func testWindowShowsThePanesFromThePlan() throws {
         let controller = try makeWindowController(for: AssemblageDocument())
 
-        let split = try XCTUnwrap(
-            controller.contentViewController as? NSSplitViewController,
-            "das Fenster muss einen Inhalt haben — nicht nur eine leere Fläche"
-        )
+        let split = try splitViewController(in: controller)
 
         // Ebenen, Werkzeuge, Canvas, Eigenschaften. Über die Typen und nicht
         // über die Anzahl: Eine Zahl sagt nicht, *welche* Spalte fehlt, und
@@ -53,7 +61,7 @@ final class DocumentWindowTests: XCTestCase {
         }
 
         let controller = try makeWindowController(for: document)
-        let split = try XCTUnwrap(controller.contentViewController as? NSSplitViewController)
+        let split = try splitViewController(in: controller)
         let canvas = try XCTUnwrap(
             split.splitViewItems.compactMap { $0.viewController as? CanvasViewController }.first
         )
@@ -72,7 +80,7 @@ final class DocumentWindowTests: XCTestCase {
     /// Fenster bekommen — sonst startet die App ins Nichts.
     func testUntitledDocumentAlsoGetsContent() throws {
         let controller = try makeWindowController(for: AssemblageDocument())
-        let split = try XCTUnwrap(controller.contentViewController as? NSSplitViewController)
+        let split = try splitViewController(in: controller)
         let canvas = try XCTUnwrap(
             split.splitViewItems.compactMap { $0.viewController as? CanvasViewController }.first
         )
@@ -82,7 +90,7 @@ final class DocumentWindowTests: XCTestCase {
 
     func testZoomMenuDisablesCommandsAtMagnificationLimits() throws {
         let controller = try makeWindowController(for: AssemblageDocument())
-        let split = try XCTUnwrap(controller.contentViewController as? NSSplitViewController)
+        let split = try splitViewController(in: controller)
         let canvas = try XCTUnwrap(
             split.splitViewItems.compactMap { $0.viewController as? CanvasViewController }.first
         )

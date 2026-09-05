@@ -80,6 +80,9 @@ final class CanvasView: NSView {
     static let snapDistance: Double = 8
 
     private var drag: CanvasDrag?
+    /// Zeigt an, dass ein gezogenes Bild hier angenommen würde
+    /// (aus Anpassungen.md).
+    private lazy var dropHighlight = DropHighlightController(view: self)
     private var cropDrag: CropDrag?
     private var distortDrag: DistortDrag?
     private var stroke: BrushStroke?
@@ -1067,11 +1070,21 @@ final class CenteringClipView: NSClipView {
 extension CanvasView {
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        dropOperation(for: sender)
+        let erlaubt = dropOperation(for: sender)
+        dropHighlight.setActive(erlaubt != [])
+        return erlaubt
     }
 
     override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
         dropOperation(for: sender)
+    }
+
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        dropHighlight.setActive(false)
+    }
+
+    override func draggingEnded(_ sender: any NSDraggingInfo) {
+        dropHighlight.setActive(false)
     }
 
     /// Meldet nur dann Bereitschaft, wenn tatsächlich etwas Brauchbares
@@ -1082,6 +1095,7 @@ extension CanvasView {
     }
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        dropHighlight.setActive(false)
         guard ImageImporter.canImport(from: sender.draggingPasteboard) else { return false }
         interactionDelegate?.canvasView(self, didReceiveDropFrom: sender.draggingPasteboard)
         return true
