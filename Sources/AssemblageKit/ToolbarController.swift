@@ -66,7 +66,7 @@ private extension NSToolbarItem.Identifier {
 /// Der Controller besitzt keinen Dokumentzustand neben `DocumentState`: Er
 /// übersetzt nur Auswahl und Bedienung in die bereits vorhandenen Canvas-Modi.
 @MainActor
-final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation, @preconcurrency NSSharingServicePickerDelegate {
+final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation {
 
     let toolbar: NSToolbar
 
@@ -103,9 +103,6 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
     private var paintBrush = PaintBrush(diameter: 30, hardness: 0.8, colorHex: "#000000", opacity: 1) {
         didSet { reportToolState() }
     }
-    /// Am Leben gehalten, waehrend der Teilen-Dialog offen ist.
-    private var sharingPicker: NSSharingServicePicker?
-
     init(
         state: DocumentState,
         canvasViewController: CanvasViewController,
@@ -305,17 +302,6 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
     @objc private func zoomToActualSize(_ sender: Any?) { canvasViewController?.zoomToActualSize() }
     @objc private func zoomIn(_ sender: Any?) { canvasViewController?.zoomIn() }
     @objc private func zoomOut(_ sender: Any?) { canvasViewController?.zoomOut() }
-
-    func sharingServicePicker(
-        _ sharingServicePicker: NSSharingServicePicker,
-        didChoose service: NSSharingService?
-    ) {
-        // Verzoegert statt sofort: Der Delegat wird noch innerhalb dieses
-        // Aufrufs gebraucht, um den gewaehlten Dienst tatsaechlich zu starten.
-        DispatchQueue.main.async { [weak self] in
-            self?.sharingPicker = nil
-        }
-    }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(zoomIn(_:)) {
@@ -534,29 +520,14 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
         return item
     }
 
-    /// Rendert das Dokument und oeffnet den System-Teilen-Dialog daran.
-    ///
-    /// Als eigener Task statt "async"-Aktion: "@objc"-Handler koennen nicht
-    /// async sein, und das Rendern (Bilddekodierung, Kompositing) soll die
-    /// Oberflaeche waehrenddessen nicht blockieren (Plan 2.1).
+    /// Öffnet den normalen Export-Dialog (Format/Qualität/Grösse + Sichern-
+    /// Panel) — der Knopf selbst trägt zwar Apples Teilen-Symbol (aus
+    /// Anpassungen.md: „nutze dafür bitte den normalen Apple Teilen Button"),
+    /// aber der System-Teilen-Dialog (`NSSharingServicePicker`, nur AirDrop/
+    /// Mail/Nachrichten) bot keine Wahl von Format, Qualität oder Grösse.
+    /// Nutzt deshalb denselben Weg wie „Ablage › Exportieren…" (Problems.md).
     @objc private func shareDocument(_ sender: NSButton) {
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let bild = try await ShareCommand.renderedImage(of: self.state.document, resources: self.state.resources)
-                let picker = NSSharingServicePicker(items: [bild])
-                picker.delegate = self
-                // Muss bis zum Schliessen am Leben bleiben - sonst verschwindet
-                // der Dialog, sobald diese Methode zurueckkehrt.
-                self.sharingPicker = picker
-                picker.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
-            } catch {
-                // Kein Dialog fuer einen Fehler, der praktisch nie eintritt
-                // (dasselbe Rendern laeuft beim gewoehnlichen Export klaglos) -
-                // ein Signalton reicht, das Dokument bleibt unveraendert.
-                NSSound.beep()
-            }
-        }
+        commandTarget?.exportDocument(sender)
     }
 
     private func makeBrushSettingsItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
