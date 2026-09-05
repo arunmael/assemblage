@@ -27,7 +27,13 @@ final class MaskPaintingTests: XCTestCase {
         ))
         context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
         let data = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
-        return Int(data[(image.height - 1 - y) * context.bytesPerRow + x])
+        // Pufferzeile 0 ist die oberste Bildzeile — `CGContext.draw` kippt ein
+        // `CGImage` in einem eigenständigen, ungeflippten Bitmap-Kontext
+        // NICHT (siehe `TextureRenderingTests.testTextureIsNotFlippedVertically`
+        // für die nachgemessene Herleitung). `y` ist hier schon ein
+        // Modellpunkt (Ursprung oben links) und braucht daher keine eigene
+        // Umrechnung mehr.
+        return Int(data[y * context.bytesPerRow + x])
     }
 
     private func solidImage(width: Int, height: Int, gray: CGFloat) throws -> CGImage {

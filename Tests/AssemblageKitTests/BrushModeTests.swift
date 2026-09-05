@@ -105,6 +105,29 @@ final class BrushModeTests: XCTestCase {
         XCTAssertTrue(protokoll.beendet.isEmpty)
     }
 
+    /// Ein Strich nahe dem oberen Bildrand darf nicht unten landen (aus
+    /// Anpassungen.md: „alles ist noch spiegelverkehrt"). Über echte
+    /// Mausereignisse statt direkt gegen `MaskPainter`, damit auch die
+    /// Umrechnung von Bildschirm- in Bild-Koordinaten mitgeprüft ist, nicht
+    /// nur das Malen selbst.
+    func testStrokeNearTheTopLandsNearTheTopNotTheBottom() throws {
+        canvas.brushLayerID = bildID
+
+        // Die Bildebene deckt die 200×200-Leinwand exakt ab (unskaliert,
+        // mittig) — Leinwand- und Bildkoordinaten fallen hier zusammen.
+        try male(von: (100, 10), nach: (100, 10))
+
+        let daten = try XCTUnwrap(protokoll.striche.first?.daten)
+        let maske = try XCTUnwrap(NSBitmapImageRep(data: daten))
+
+        // `NSBitmapImageRep.colorAt` zählt y von oben — wie die Leinwand.
+        let oben = try XCTUnwrap(maske.colorAt(x: 100, y: 10))
+        let unten = try XCTUnwrap(maske.colorAt(x: 100, y: 190))
+
+        XCTAssertLessThan(oben.whiteComponent, 0.5, "beim Malen oben müsste die Maske dort dunkel sein")
+        XCTAssertGreaterThan(unten.whiteComponent, 0.5, "unten, wo nicht gemalt wurde, müsste sie hell bleiben")
+    }
+
     /// Ohne Pinselmodus verschiebt derselbe Zug wie bisher.
     func testWithoutBrushModeTheSameDragStillMoves() throws {
         try male(von: (60, 100), nach: (140, 100))

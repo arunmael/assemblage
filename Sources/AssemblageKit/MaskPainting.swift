@@ -61,9 +61,12 @@ final class MaskPainter {
         strokeContext.setFillColor(gray: 0, alpha: 1)
         strokeContext.fill(CGRect(x: 0, y: 0, width: width, height: height))
 
-        // Keine Ansichts- oder Leinwandtransformation: Beim erzeugten
-        // `CGImage` entsprechen diese Rasterkoordinaten direkt den im Projekt
-        // verwendeten Bildkoordinaten mit Ursprung oben links.
+        // Der Kontext selbst trägt keine Ansichts- oder Leinwandtransformation
+        // — das erzeugte `CGImage` entspricht deshalb direkt den im Projekt
+        // verwendeten Bildkoordinaten. Sein y zählt aber, wie jeder
+        // ungeflippte Quartz-Kontext, von unten; `stamp(at:pressure:brush:)`
+        // rechnet Modellpunkte deshalb ausdrücklich um, statt sich auf eine
+        // (falsche) Übereinstimmung zu verlassen.
     }
 
     func beginStroke(at point: Point, pressure: Double, brush: MaskBrush) {
@@ -221,6 +224,15 @@ final class MaskPainter {
             locations: locations
         ) else { return }
 
+        // `point` ist ein Modellpunkt: Ursprung oben links, y wächst nach
+        // unten — wie überall im Projekt. Ein `CGContext` ohne eigenen
+        // Geometrie-Flip zählt y dagegen von unten. Ohne diese Umrechnung
+        // malt ein Strich nahe dem oberen Bildrand nahe dem unteren
+        // (aus Anpassungen.md: „alles ist noch spiegelverkehrt") —
+        // nachgemessen mit einem gezielten Stempel nahe der Bildkante, nicht
+        // nur angenommen.
+        let gezeichnetesZentrum = CGPoint(x: point.x, y: Double(height) - point.y)
+
         // Der Strichkontext beginnt schwarz und sammelt pro Pixel immer nur
         // den stärksten Stempel. Die deckenden Grautöne plus `.lighten`
         // bilden ein Maximum; überlappende Stempel addieren sich daher nicht.
@@ -228,9 +240,9 @@ final class MaskPainter {
         strokeContext.setBlendMode(.lighten)
         strokeContext.drawRadialGradient(
             gradient,
-            startCenter: CGPoint(x: point.x, y: point.y),
+            startCenter: gezeichnetesZentrum,
             startRadius: 0,
-            endCenter: CGPoint(x: point.x, y: point.y),
+            endCenter: gezeichnetesZentrum,
             endRadius: outerRadius,
             options: []
         )
