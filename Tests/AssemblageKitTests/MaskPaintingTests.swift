@@ -194,4 +194,87 @@ final class MaskPaintingTests: XCTestCase {
         XCTAssertGreaterThan(try pixel(image, x: 32, y: 32), 250)
         XCTAssertGreaterThan(try pixel(image, x: 63, y: 63), 250)
     }
+
+    // MARK: - Lasso (Anpassungen 2: „Bild ausschneiden")
+
+    /// Ein Lasso nahe dem oberen Bildrand muss auch oben ausblenden — nicht,
+    /// wie bei der ursprünglichen Pinsel-Spiegelung, unten (siehe
+    /// `Anpassungen.md`: „alles ist noch spiegelverkehrt"). Direkt
+    /// nachgemessen statt angenommen, aus demselben Grund wie bei den
+    /// bestehenden Pinseltests hier.
+    func testLassoNearTheTopHidesNearTheTopNotTheBottom() throws {
+        let painter = try painter(width: 64, height: 64)
+        // Ein kleines Quadrat, dessen Mittelpunkt bei (32, 8) liegt — deutlich
+        // näher am oberen als am unteren Rand.
+        painter.fillLasso([
+            Point(x: 24, y: 0),
+            Point(x: 40, y: 0),
+            Point(x: 40, y: 16),
+            Point(x: 24, y: 16)
+        ], mode: .hide)
+        let image = try XCTUnwrap(painter.currentMask())
+
+        XCTAssertLessThan(try pixel(image, x: 32, y: 8), 5, "oben soll ausgeblendet sein")
+        XCTAssertGreaterThan(try pixel(image, x: 32, y: 56), 250, "unten bleibt unangetastet")
+    }
+
+    func testLassoHideOnlyAffectsTheEnclosedArea() throws {
+        let painter = try painter(width: 64, height: 64)
+        painter.fillLasso([
+            Point(x: 10, y: 10),
+            Point(x: 50, y: 10),
+            Point(x: 50, y: 50),
+            Point(x: 10, y: 50)
+        ], mode: .hide)
+        let image = try XCTUnwrap(painter.currentMask())
+
+        XCTAssertLessThan(try pixel(image, x: 30, y: 30), 5, "innerhalb des Lassos ausgeblendet")
+        XCTAssertGreaterThan(try pixel(image, x: 2, y: 2), 250, "ausserhalb unverändert sichtbar")
+        XCTAssertGreaterThan(try pixel(image, x: 61, y: 61), 250, "ausserhalb unverändert sichtbar")
+    }
+
+    /// `.reveal` muss dieselbe Fläche zurückholen können, die zuvor per
+    /// `.hide`-Lasso ausgeblendet wurde — die Verrechnung teilt sich mit dem
+    /// Pinsel dieselbe `combineStroke`-Logik.
+    func testLassoRevealRestoresPreviouslyHiddenArea() throws {
+        let painter = try painter(width: 64, height: 64)
+        let quadrat = [
+            Point(x: 10, y: 10),
+            Point(x: 50, y: 10),
+            Point(x: 50, y: 50),
+            Point(x: 10, y: 50)
+        ]
+        painter.fillLasso(quadrat, mode: .hide)
+        XCTAssertLessThan(try pixel(try XCTUnwrap(painter.currentMask()), x: 30, y: 30), 5)
+
+        painter.fillLasso(quadrat, mode: .reveal)
+        XCTAssertGreaterThan(try pixel(try XCTUnwrap(painter.currentMask()), x: 30, y: 30), 250)
+    }
+
+    func testLassoWithFewerThanThreePointsDoesNothing() throws {
+        let painter = try painter(width: 64, height: 64)
+        painter.fillLasso([Point(x: 10, y: 10), Point(x: 20, y: 20)], mode: .hide)
+        let image = try XCTUnwrap(painter.currentMask())
+
+        XCTAssertGreaterThan(try pixel(image, x: 15, y: 15), 250, "zu wenige Punkte: keine Änderung")
+    }
+
+    /// Ein bereits vorhandener Zustand (z. B. eine ältere, automatische
+    /// Maske) muss erhalten bleiben ausserhalb des Lassos — dieselbe Regel
+    /// wie beim Pinsel (`testExistingMaskIsContinuedInsteadOfReplaced`).
+    func testLassoPreservesExistingMaskOutsideTheEnclosedArea() throws {
+        let existing = try solidImage(width: 64, height: 64, gray: 0)
+        let painter = try painter(width: 64, height: 64, existing: existing)
+
+        painter.fillLasso([
+            Point(x: 10, y: 10),
+            Point(x: 50, y: 10),
+            Point(x: 50, y: 50),
+            Point(x: 10, y: 50)
+        ], mode: .reveal)
+        let image = try XCTUnwrap(painter.currentMask())
+
+        XCTAssertGreaterThan(try pixel(image, x: 30, y: 30), 250, "innerhalb freigestellt")
+        XCTAssertLessThan(try pixel(image, x: 2, y: 2), 5, "ausserhalb bleibt die alte, verdeckte Maske")
+    }
 }

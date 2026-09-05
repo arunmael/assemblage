@@ -102,6 +102,39 @@ final class MaskPainter {
         clearStrokeContext()
     }
 
+    /// Füllt das Innere eines geschlossenen Freihand-Lassos in die Maske
+    /// (aus Anpassungen 2: „Bild ausschneiden fehlt damit man Teile manuell
+    /// wegschneiden kann"). Nutzt bewusst denselben Strichkontext und
+    /// dieselbe `combineStroke`-Verrechnung wie ein Pinselstrich, statt eine
+    /// eigene Bitmap-Logik zu bauen — Vorhandenes-Maske-erhalten,
+    /// Verdecken/Freistellen und PNG-Export sind so automatisch identisch
+    /// zum Pinsel getestet.
+    ///
+    /// `points` sind mindestens drei Modellpunkte (Ursprung oben links, y
+    /// wächst nach unten); die Füllung schliesst den Pfad selbst, ein
+    /// expliziter Rückweg zum Startpunkt ist nicht nötig.
+    func fillLasso(_ points: [Point], mode: MaskBrush.Mode) {
+        guard points.count >= 3 else { return }
+
+        clearStrokeContext()
+        strokeContext.saveGState()
+        strokeContext.setFillColor(gray: 1, alpha: 1)
+        strokeContext.beginPath()
+        // Derselbe Grund wie in `stamp(at:pressure:brush:)`: Modellpunkte
+        // zählen y nach unten, der ungeflippte Strichkontext nach oben.
+        let erstesModell = points[0]
+        strokeContext.move(to: CGPoint(x: erstesModell.x, y: Double(height) - erstesModell.y))
+        for punkt in points.dropFirst() {
+            strokeContext.addLine(to: CGPoint(x: punkt.x, y: Double(height) - punkt.y))
+        }
+        strokeContext.closePath()
+        strokeContext.fillPath()
+        strokeContext.restoreGState()
+
+        combineStroke(mode: mode, into: maskContext)
+        clearStrokeContext()
+    }
+
     /// Der aktuelle Stand als Bitmap, passend zum Maskenvertrag.
     func currentMask() -> CGImage? {
         guard let brush else { return maskContext.makeImage() }
