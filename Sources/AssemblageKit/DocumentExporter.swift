@@ -24,6 +24,11 @@ import AssemblageModel
 /// verlagern die Arbeit explizit auf einen Hintergrund-Task.
 enum DocumentExporter {
 
+    /// Acht Felder pro Achse halten die quadratische Kante beim Export auch
+    /// bei deutlichen Ausschlägen glatt, ohne aus einer Ebene hunderte
+    /// Core-Image-Aufträge zu machen.
+    static let meshRenderResolution = 8
+
     enum EffectSurfaceMode {
         case bounded
         case fullCanvas
@@ -554,17 +559,6 @@ enum DocumentExporter {
         )
         guard let sourceImage = sourceContext.makeImage() else { return }
 
-        let modelCorners = layer.transform.corners(
-            contentSize: Size(contentSize),
-            distortion: distortion
-        )
-        guard modelCorners.count == 4 else { return }
-        let corners = modelCorners.map {
-            CGPoint(
-                x: $0.x * exportScale.width,
-                y: (canvasHeight - $0.y) * exportScale.height
-            )
-        }
         let destinationIndices: [Int]
         switch (layer.transform.scaleX < 0, layer.transform.scaleY < 0) {
         case (false, false): destinationIndices = [0, 1, 2, 3]
@@ -573,11 +567,278 @@ enum DocumentExporter {
         case (true, true): destinationIndices = [2, 3, 0, 1]
         }
 
-        drawPerspectiveImage(
+        if distortion.hasCurvedEdges {
+            // Sehr kleine Inhalte können weniger Pixel als Gitterfelder
+            // besitzen. Dort entsprechend reduzieren, damit keine Zelle auf
+            // einen leeren, nicht zuschneidbaren Quellbereich fällt.
+            let resolution = min(meshRenderResolution, sourceImage.width, sourceImage.height)
+            let modelGrid = layer.transform.meshCorners(
+                contentSize: Size(contentSize),
+                distortion: distortion,
+                resolution: resolution
+            )
+            let destinationGrid = modelGrid.map { row in
+                row.map {
+                    CGPoint(
+                        x: $0.x * exportScale.width,
+                        y: (canvasHeight - $0.y) * exportScale.height
+                    )
+                }
+            }
+            drawMeshImage(
+                sourceImage,
+                destinationGrid: destinationGrid,
+                destinationIndices: destinationIndices,
+                targetSize: targetSize,
+                into: context
+            )
+        } else {
+            let modelCorners = layer.transform.corners(
+                contentSize: Size(contentSize),
+                distortion: distortion
+            )
+            guard modelCorners.count == 4 else { return }
+            let corners = modelCorners.map {
+                CGPoint(
+                    x: $0.x * exportScale.width,
+                    y: (canvasHeight - $0.y) * exportScale.height
+                )
+            }
+            drawPerspectiveImage(
+                sourceImage,
+                corners: destinationIndices.map { corners[$0] },
+                targetSize: targetSize,
+                into: context
+            )
+        }
+    }
+
+    /// Zerlegt die Rasterquelle passend zum Modellgitter und zeichnet jedes
+    /// Feld über den bewährten Vier-Ecken-Pfad. `CGImage.cropping(to:)`
+    /// verwendet einen Ursprung oben links; deshalb entspricht die
+    /// Gitterzeile direkt der Quellzeile und braucht keinen zusätzlichen
+    /// Koordinaten-Flip.
+    static func drawMeshImage(
+        _ sourceImage: CGImage,
+        destinationGrid: [[CGPoint]],
+        destinationIndices: [Int],
+        targetSize: CGSize,
+        into context: CGContext
+    ) {
+        let resolution = destinationGrid.count - 1
+        guard resolution >= 1,
+              destinationGrid.allSatisfy({ $0.count == resolution + 1 }),
+              destinationIndices.count == 4
+        else { return }
+
+        // Die Überlappung soll nur innerhalb der Ebene deckend werden. Alpha
+        // und Blend-Modus der Ebene dürfen nicht bei jeder Kachel erneut
+        // wirken (bei 50 % Deckkraft ergäbe die Überlappung sonst 75 %).
+        // Die Transparenzgruppe sammelt alle Zellen mit normalem Source-over
+        // und komponiert das fertige Mesh anschliessend genau einmal mit dem
+        // vom Aufrufer gesetzten Alpha/Blend-Modus.
+        context.saveGState()
+        context.beginTransparencyLayer(auxiliaryInfo: nil)
+        context.setAlpha(1)
+        context.setBlendMode(.normal)
+        defer {
+            context.endTransparencyLayer()
+            context.restoreGState()
+        }
+
+        for sourceRow in 0..<resolution {
+            for sourceColumn in 0..<resolution {
+                // Spiegeln vertauscht nicht nur die vier Ecken eines Feldes,
+                // sondern auch dessen Platz im Gesamtgitter. Andernfalls
+                // würde jede einzelne Kachel gespiegelt, ihre Reihenfolge
+                // über die ganze Ebene aber unverändert bleiben.
+                let targetRow = destinationIndices == [3, 2, 1, 0] || destinationIndices == [2, 3, 0, 1]
+                    ? resolution - 1 - sourceRow : sourceRow
+                let targetColumn = destinationIndices == [1, 0, 3, 2] || destinationIndices == [2, 3, 0, 1]
+                    ? resolution - 1 - sourceColumn : sourceColumn
+
+                let cellX0 = sourceImage.width * sourceColumn / resolution
+                let cellX1 = sourceImage.width * (sourceColumn + 1) / resolution
+                let cellY0 = sourceImage.height * sourceRow / resolution
+                let cellY1 = sourceImage.height * (sourceRow + 1) / resolution
+                guard cellX1 > cellX0, cellY1 > cellY0 else { continue }
+
+                // Core Image tastet an einer einzeln verzogenen Kachel auch
+                // knapp ausserhalb ihrer Bildkante ab. Ohne Rand werden die
+                // betreffenden Pixel teiltransparent und bilden zusammen mit
+                // der Nachbarkachel eine sichtbare Naht. Ein Quellpixel
+                // Überstand auf jeder inneren Seite liefert dort echte
+                // Bildfarbe; am äusseren Rand des Gesamtbilds wird geklemmt.
+                let cropX0 = max(0, cellX0 - 1)
+                let cropX1 = min(sourceImage.width, cellX1 + 1)
+                let cropY0 = max(0, cellY0 - 1)
+                let cropY1 = min(sourceImage.height, cellY1 + 1)
+                guard let cellImage = sourceImage.cropping(to: CGRect(
+                    x: cropX0, y: cropY0, width: cropX1 - cropX0, height: cropY1 - cropY0
+                ))
+                else { continue }
+
+                let cellCorners = [
+                    destinationGrid[targetRow][targetColumn],
+                    destinationGrid[targetRow][targetColumn + 1],
+                    destinationGrid[targetRow + 1][targetColumn + 1],
+                    destinationGrid[targetRow + 1][targetColumn]
+                ]
+                let mappedCorners = destinationIndices.map { cellCorners[$0] }
+                let width = CGFloat(cellX1 - cellX0)
+                let height = CGFloat(cellY1 - cellY0)
+                let expandedCorners = projectiveExtension(
+                    of: mappedCorners,
+                    u0: CGFloat(cropX0 - cellX0) / width,
+                    u1: CGFloat(cropX1 - cellX0) / width,
+                    v0: CGFloat(cropY0 - cellY0) / height,
+                    v1: CGFloat(cropY1 - cellY0) / height
+                )
+                guard expandedCorners.count == 4 else { continue }
+
+                drawPerspectiveImage(
+                    cellImage,
+                    corners: expandedCorners,
+                    targetSize: targetSize,
+                    into: context
+                )
+            }
+        }
+    }
+
+    /// Setzt die Homographie eines Zielvierecks über das ursprüngliche
+    /// Einheitsquadrat hinaus fort. So wächst das Ziel exakt um denselben
+    /// projektiven Rand wie der erweiterte Quellausschnitt; blosses Skalieren
+    /// des Vierecks um seinen Mittelpunkt wäre bei perspektivischen Zellen
+    /// geometrisch nicht dieselbe Abbildung.
+    private static func projectiveExtension(
+        of corners: [CGPoint],
+        u0: CGFloat,
+        u1: CGFloat,
+        v0: CGFloat,
+        v1: CGFloat
+    ) -> [CGPoint] {
+        guard corners.count == 4 else { return [] }
+        let p0 = corners[0], p1 = corners[1], p2 = corners[2], p3 = corners[3]
+        let dx1 = p1.x - p2.x
+        let dx2 = p3.x - p2.x
+        let dx3 = p0.x - p1.x + p2.x - p3.x
+        let dy1 = p1.y - p2.y
+        let dy2 = p3.y - p2.y
+        let dy3 = p0.y - p1.y + p2.y - p3.y
+        let determinant = dx1 * dy2 - dx2 * dy1
+
+        let g: CGFloat
+        let h: CGFloat
+        if abs(dx3) < 1e-12, abs(dy3) < 1e-12 {
+            g = 0
+            h = 0
+        } else {
+            guard abs(determinant) > 1e-12 else { return corners }
+            g = (dx3 * dy2 - dx2 * dy3) / determinant
+            h = (dx1 * dy3 - dx3 * dy1) / determinant
+        }
+        let a = p1.x - p0.x + g * p1.x
+        let b = p3.x - p0.x + h * p3.x
+        let d = p1.y - p0.y + g * p1.y
+        let e = p3.y - p0.y + h * p3.y
+
+        func projected(u: CGFloat, v: CGFloat) -> CGPoint? {
+            let divisor = g * u + h * v + 1
+            guard abs(divisor) > 1e-12 else { return nil }
+            return CGPoint(
+                x: (a * u + b * v + p0.x) / divisor,
+                y: (d * u + e * v + p0.y) / divisor
+            )
+        }
+
+        guard let topLeft = projected(u: u0, v: v0),
+              let topRight = projected(u: u1, v: v0),
+              let bottomRight = projected(u: u1, v: v1),
+              let bottomLeft = projected(u: u0, v: v1)
+        else { return corners }
+        return [topLeft, topRight, bottomRight, bottomLeft]
+    }
+
+    /// Bildschirmfassung einer gekrümmten Ebene. Die komplette Geometrie
+    /// (einschliesslich Skalierung und Drehung) steckt danach bereits in der
+    /// Bitmap; die zurückgegebene Box kann deshalb ohne weiteren Transform
+    /// direkt als Bounds/Position einer `CALayer` verwendet werden.
+    static func curvedPreview(
+        of layer: Layer,
+        distortion: QuadDistortion,
+        contentSize: CGSize,
+        contentsScale: CGFloat,
+        resources: DocumentResources,
+        resolution: Int
+    ) -> (image: CGImage, frame: CGRect)? {
+        guard contentsScale.isFinite, contentsScale > 0 else { return nil }
+        let rasterScale = max(
+            abs(layer.transform.scaleX) * contentsScale,
+            abs(layer.transform.scaleY) * contentsScale,
+            contentsScale
+        )
+        let sourceSize = CGSize(
+            width: (contentSize.width * rasterScale).rounded(.up),
+            height: (contentSize.height * rasterScale).rounded(.up)
+        )
+        guard let sourceContext = makeTransparentContext(size: sourceSize) else { return nil }
+        sourceContext.scaleBy(x: rasterScale, y: rasterScale)
+        drawContent(
+            layer.content,
+            texture: layer.texture,
+            in: CGRect(origin: .zero, size: contentSize),
+            resources: resources,
+            context: sourceContext,
+            mask: maskImage(for: layer, resources: resources)
+        )
+        guard let sourceImage = sourceContext.makeImage() else { return nil }
+
+        let effectiveResolution = min(resolution, sourceImage.width, sourceImage.height)
+        let modelGrid = layer.transform.meshCorners(
+            contentSize: Size(contentSize), distortion: distortion, resolution: effectiveResolution
+        )
+        let points = modelGrid.flatMap { $0 }
+        guard let minX = points.map(\.x).min(), let maxX = points.map(\.x).max(),
+              let minY = points.map(\.y).min(), let maxY = points.map(\.y).max(),
+              maxX > minX, maxY > minY
+        else { return nil }
+
+        let targetSize = CGSize(
+            width: ((maxX - minX) * contentsScale).rounded(.up),
+            height: ((maxY - minY) * contentsScale).rounded(.up)
+        )
+        guard let targetContext = makeTransparentContext(size: targetSize) else { return nil }
+        let destinationGrid = modelGrid.map { row in
+            row.map {
+                CGPoint(
+                    x: ($0.x - minX) * contentsScale,
+                    y: targetSize.height - ($0.y - minY) * contentsScale
+                )
+            }
+        }
+        let destinationIndices: [Int]
+        switch (layer.transform.scaleX < 0, layer.transform.scaleY < 0) {
+        case (false, false): destinationIndices = [0, 1, 2, 3]
+        case (true, false): destinationIndices = [1, 0, 3, 2]
+        case (false, true): destinationIndices = [3, 2, 1, 0]
+        case (true, true): destinationIndices = [2, 3, 0, 1]
+        }
+        drawMeshImage(
             sourceImage,
-            corners: destinationIndices.map { corners[$0] },
+            destinationGrid: destinationGrid,
+            destinationIndices: destinationIndices,
             targetSize: targetSize,
-            into: context
+            into: targetContext
+        )
+        guard let image = targetContext.makeImage() else { return nil }
+        return (
+            image,
+            CGRect(
+                x: minX, y: minY,
+                width: targetSize.width / contentsScale,
+                height: targetSize.height / contentsScale
+            )
         )
     }
 

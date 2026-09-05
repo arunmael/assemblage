@@ -12,6 +12,7 @@ final class DistortRenderingTests: XCTestCase {
         topLeft: Point(x: 22, y: 14), topRight: Point(x: -8, y: -12),
         bottomRight: Point(x: 18, y: 9), bottomLeft: Point(x: -15, y: 7)
     )
+    private let curvedTopEdge = QuadDistortion(topMid: Point(x: 0, y: -30))
 
     private func layer(distortion: QuadDistortion?) -> Layer {
         Layer(
@@ -50,6 +51,25 @@ final class DistortRenderingTests: XCTestCase {
         let row = image.height - 1 - y
         let p = data.advanced(by: row * context.bytesPerRow + x * 4).assumingMemoryBound(to: UInt8.self)
         return (p[0], p[1], p[2], p[3])
+    }
+
+    private func assertSimilarPixel(
+        _ canvas: CGImage,
+        _ export: CGImage,
+        x: Int,
+        y: Int,
+        tolerance: Int = 45,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let a = try pixel(canvas, x: x, y: y)
+        let b = try pixel(export, x: x, y: y)
+        for (canvasValue, exportValue) in zip([a.0, a.1, a.2, a.3], [b.0, b.1, b.2, b.3]) {
+            XCTAssertEqual(
+                Int(canvasValue), Int(exportValue), accuracy: tolerance,
+                "Canvas und Export unterscheiden sich bei (\(x), \(y))", file: file, line: line
+            )
+        }
     }
 
     /// Prüft die vom Live-Renderer gesetzte Matrix statt `CALayer.render(in:)`.
@@ -356,6 +376,120 @@ final class DistortRenderingTests: XCTestCase {
             differences.isEmpty,
             "abweichende Geometrie an \(differences.count) Messpunkten; erste: \(differences.prefix(8))"
         )
+    }
+
+    func testCurvedMeshCanvasAndExportAgreeAtEdgeCentreOppositeEdgeAndCentre() async throws {
+        let shape = layer(distortion: curvedTopEdge)
+        let document = AssemblageModel.Document(canvas: canvasSize, layers: [shape])
+        let canvas = try canvasImage(document)
+        let export = try await DocumentExporter.image(
+            of: document, resources: DocumentResources(), targetSize: CGSize(width: 300, height: 300)
+        )
+
+        // Die erste Probe liegt knapp innerhalb der nach oben gewölbten
+        // Kantenmitte; die anderen sichern die unveränderte Gegenkante und
+        // das Innere der Fläche ab.
+        for point in [(150, 82), (150, 194), (150, 150)] {
+            try assertSimilarPixel(canvas, export, x: point.0, y: point.1)
+            let colour = try pixel(export, x: point.0, y: point.1)
+            XCTAssertGreaterThan(colour.0, 180, "rote Fläche fehlt bei \(point)")
+            XCTAssertLessThan(colour.1, 80, "unerwartete Farbe bei \(point)")
+            XCTAssertGreaterThan(colour.3, 180, "Fläche ist bei \(point) transparent")
+        }
+    }
+
+    func testExportActuallyBendsTheTopEdgeBeyondTheFourCornerQuad() async throws {
+        let curved = AssemblageModel.Document(
+            canvas: canvasSize, layers: [layer(distortion: curvedTopEdge)]
+        )
+        let straight = AssemblageModel.Document(
+            canvas: canvasSize, layers: [layer(distortion: .identity)]
+        )
+        let curvedImage = try await DocumentExporter.image(
+            of: curved, resources: DocumentResources(), targetSize: CGSize(width: 300, height: 300)
+        )
+        let straightImage = try await DocumentExporter.image(
+            of: straight, resources: DocumentResources(), targetSize: CGSize(width: 300, height: 300)
+        )
+
+        // Alle vier Ecken liegen weiter bei y=100. Nur die echte Kante kann
+        // daher den Punkt y=82 bedecken; eine Homographie bleibt dort leer.
+        XCTAssertGreaterThan(try pixel(curvedImage, x: 150, y: 82).3, 180)
+        XCTAssertLessThan(try pixel(straightImage, x: 150, y: 82).3, 10)
+    }
+
+    func testCurvedExportHasNoTransparentMeshSeams() async throws {
+        let document = AssemblageModel.Document(
+            canvas: canvasSize, layers: [layer(distortion: curvedTopEdge)]
+        )
+        let image = try await DocumentExporter.image(
+            of: document, resources: DocumentResources(), targetSize: CGSize(width: 300, height: 300)
+        )
+
+        // Dicht über alle inneren Zellengrenzen prüfen. Der Bereich liegt
+        // deutlich innerhalb der Silhouette; ein Alphaausreisser wäre daher
+        // eine Naht zwischen zwei Perspektiv-Kacheln, keine Aussenkante.
+        var transparentSamples: [(Int, Int, UInt8)] = []
+        for y in 110...190 {
+            for x in 112...188 {
+                let alpha = try pixel(image, x: x, y: y).3
+                if alpha < 200 { transparentSamples.append((x, y, alpha)) }
+            }
+        }
+        XCTAssertTrue(
+            transparentSamples.isEmpty,
+            "sichtbare Mesh-Nähte; erste Proben: \(transparentSamples.prefix(12))"
+        )
+    }
+
+    func testCornerOnlyDistortionStillUsesThePixelIdenticalLegacyPath() throws {
+        let shape = layer(distortion: nonParallelogram)
+        XCTAssertFalse(nonParallelogram.hasCurvedEdges)
+
+        let actual = try DocumentExporter.renderedImage(
+            of: AssemblageModel.Document(canvas: canvasSize, layers: [shape]),
+            resources: DocumentResources(),
+            targetSize: CGSize(width: 300, height: 300)
+        )
+
+        let sourceContext = try XCTUnwrap(CGContext(
+            data: nil, width: 100, height: 100, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        sourceContext.setFillColor(CGColor(srgbRed: 224.0 / 255, green: 32.0 / 255, blue: 32.0 / 255, alpha: 1))
+        sourceContext.fill(CGRect(x: 0, y: 0, width: 100, height: 100))
+        let source = try XCTUnwrap(sourceContext.makeImage())
+        let expectedContext = try XCTUnwrap(CGContext(
+            data: nil, width: 300, height: 300, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let corners = shape.transform.corners(
+            contentSize: Size(width: 100, height: 100), distortion: nonParallelogram
+        ).map { CGPoint(x: $0.x, y: 300 - $0.y) }
+        DocumentExporter.drawPerspectiveImage(
+            source, corners: corners, targetSize: CGSize(width: 300, height: 300), into: expectedContext
+        )
+        let expected = try XCTUnwrap(expectedContext.makeImage())
+
+        XCTAssertEqual(actual.dataProvider?.data, expected.dataProvider?.data)
+        XCTAssertTrue(
+            LayerRenderer(images: ImageStore(resources: DocumentResources())).makeLayer(for: shape) is CAShapeLayer,
+            "Reine Eckverzerrung muss die native Vektorschicht behalten"
+        )
+    }
+
+    func testLayerTypeChangesWhenShapeSwitchesBetweenCurvedAndNativeRendering() {
+        let renderer = LayerRenderer(images: ImageStore(resources: DocumentResources()))
+        let curved = layer(distortion: curvedTopEdge)
+        let straight = layer(distortion: nonParallelogram)
+        let curvedLayer = renderer.makeLayer(for: curved)
+        let straightLayer = renderer.makeLayer(for: straight)
+
+        XCTAssertFalse(curvedLayer is CAShapeLayer)
+        XCTAssertFalse(renderer.canReuse(curvedLayer, for: straight))
+        XCTAssertFalse(renderer.canReuse(straightLayer, for: curved))
     }
 
     func testHomographyMapsEveryCornerToTheModelCorner() throws {

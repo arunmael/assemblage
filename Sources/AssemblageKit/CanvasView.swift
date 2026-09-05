@@ -327,7 +327,7 @@ final class CanvasView: NSView {
             for layer in document.layers {
                 guard let rendered = renderedLayers[layer.id] else { continue }
                 let anzeige = displayed(layer)
-                guard renderer.canReuse(rendered, for: anzeige.content) else {
+                guard renderer.canReuse(rendered, for: anzeige) else {
                     let neu = renderer.makeLayer(for: anzeige)
                     canvasLayer.replaceSublayer(rendered, with: neu)
                     renderedLayers[layer.id] = neu
