@@ -16,3 +16,5 @@
 - Mann kann nicht die grösse der Leinwand verändern
 - Ebenen soll man dublizieren können
 - Bild ausschneiden fehlt damit man Teile manuell wegschneiden kann
+- Rahmen/ Rand run um alle Formen
+- Beim exportieren wird einmal alles auf den Kopfgestellt/ gespiegelt

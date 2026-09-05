@@ -131,6 +131,16 @@ enum LayerFlattening {
                 context.setFillColor((RGBA(hex: shape.fillColorHex) ?? .white).cgColor)
                 context.addPath(pfad)
                 context.fillPath()
+
+                // Rand analog zu Leinwand (CAShapeLayer) und Export
+                // (DocumentExporter.drawShape). `fillPath()` verbraucht den
+                // Pfad, deshalb erneut hinzufügen.
+                if shape.strokeWidth > 0 {
+                    context.addPath(pfad)
+                    context.setStrokeColor((RGBA(hex: shape.strokeColorHex) ?? .black).cgColor)
+                    context.setLineWidth(shape.strokeWidth)
+                    context.strokePath()
+                }
             }
 
         case .image:

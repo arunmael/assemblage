@@ -845,6 +845,16 @@ enum DocumentExporter {
         context.addPath(path)
         context.setFillColor((RGBA(hex: content.fillColorHex) ?? .white).cgColor)
         context.fillPath()
+
+        // Rand nach der Füllung: `fillPath()` verbraucht den Pfad, deshalb
+        // erneut hinzufügen. `strokeWidth == 0` heisst „kein Rand" (aus
+        // Anpassungen 2) — dann bleibt das Verhalten exakt wie zuvor.
+        if content.strokeWidth > 0 {
+            context.addPath(path)
+            context.setStrokeColor((RGBA(hex: content.strokeColorHex) ?? .black).cgColor)
+            context.setLineWidth(content.strokeWidth)
+            context.strokePath()
+        }
         context.restoreGState()
     }
 

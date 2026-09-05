@@ -189,6 +189,13 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
         LayerListEditing(state: state).delete(id)
     }
 
+    @IBAction func duplicateSelectedLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state,
+              let id = state.selectedLayerID
+        else { return }
+        LayerListEditing(state: state).duplicate(id)
+    }
+
     @IBAction func moveSelectedLayerUp(_ sender: Any?) { moveSelectedLayer(.up) }
     @IBAction func moveSelectedLayerDown(_ sender: Any?) { moveSelectedLayer(.down) }
     @IBAction func moveSelectedLayerToTop(_ sender: Any?) { moveSelectedLayer(.toTop) }
@@ -271,7 +278,8 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
         if let action = menuItem.action,
            [
             #selector(toggleSelectedLayerVisibility(_:)),
-            #selector(deleteSelectedLayer(_:))
+            #selector(deleteSelectedLayer(_:)),
+            #selector(duplicateSelectedLayer(_:))
            ].contains(action) {
             return (document as? AssemblageDocument)?.state.selectedLayer != nil
         }

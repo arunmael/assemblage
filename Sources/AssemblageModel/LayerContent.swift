@@ -93,19 +93,30 @@ public struct ShapeLayerContent: Codable, Equatable, Sendable {
     /// Zacken eines Sterns. Nur für `.star` von Bedeutung; die übrigen
     /// Vorlagen haben eine feste Punktzahl.
     public var pointCount: Int
+    /// Farbe des Rands (aus Anpassungen 2: „Rahmen/Rand rund um alle
+    /// Formen"). Gilt für jede Vorlage gleichermassen, weil alle über
+    /// denselben Pfad gezeichnet werden.
+    public var strokeColorHex: String
+    /// Breite des Rands in Punkten. `0` heisst: kein Rand — der bisherige,
+    /// unveränderte Normalfall.
+    public var strokeWidth: Double
 
     public init(
         kind: ShapeKind,
         size: Size,
         cornerRadius: Double = 0,
         fillColorHex: String = "#FFFFFF",
-        pointCount: Int = 5
+        pointCount: Int = 5,
+        strokeColorHex: String = "#000000",
+        strokeWidth: Double = 0
     ) {
         self.kind = kind
         self.size = size
         self.cornerRadius = cornerRadius
         self.fillColorHex = fillColorHex
         self.pointCount = pointCount
+        self.strokeColorHex = strokeColorHex
+        self.strokeWidth = strokeWidth
     }
 }
 

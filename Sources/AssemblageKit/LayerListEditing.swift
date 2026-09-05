@@ -48,6 +48,40 @@ struct LayerListEditing {
         }
     }
 
+    /// Dupliziert eine Ebene (aus Anpassungen 2). Die Kopie erscheint direkt
+    /// über dem Original — in Modellreihenfolge also am nächsthöheren Index,
+    /// in der (umgekehrten) Ebenenliste unmittelbar darüber — und leicht
+    /// versetzt, damit sie nicht deckungsgleich unter dem Original verborgen
+    /// bleibt und man sofort sieht, dass sich etwas verdoppelt hat.
+    ///
+    /// Referenzen auf Bild-, Masken- und Texturdateien werden unverändert
+    /// übernommen, nicht kopiert: Beide Ebenen zeigen zunächst auf dieselbe
+    /// Datei. Das ist gefahrlos, weil jede spätere Bearbeitung (Pinsel,
+    /// Freistellen, Farbmalen) ohnehin immer eine **neue** Datei anlegt,
+    /// statt die bestehende zu überschreiben — die beiden Ebenen laufen also
+    /// auseinander, sobald eine von ihnen tatsächlich verändert wird, nicht
+    /// schon beim Duplizieren.
+    @discardableResult
+    func duplicate(_ id: UUID) -> UUID? {
+        guard let original = state.document.layer(withID: id),
+              let index = state.document.index(ofLayerID: id)
+        else { return nil }
+
+        var kopie = original
+        kopie.id = UUID()
+        kopie.name = "\(original.name) Kopie"
+        // Zehn Punkte Versatz sind bei jeder Leinwandgrösse sichtbar, aber
+        // klein genug, um die Kopie nicht aus dem Bild zu schieben.
+        kopie.transform.x += 10
+        kopie.transform.y += 10
+
+        state.owner?.modify("Ebene duplizieren") { document in
+            _ = try? document.addLayer(kopie, at: index + 1)
+        }
+        state.selectedLayerID = kopie.id
+        return kopie.id
+    }
+
     /// Verschiebt die Auswahl in Modellreihenfolge: Index 0 liegt zuunterst,
     /// deshalb bedeutet „nach oben“ ausdrücklich einen höheren Index.
     func moveSelected(_ command: LayerOrderCommand) {

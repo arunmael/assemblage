@@ -236,6 +236,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         visibility.keyEquivalentModifierMask = [.command, .shift]
         menu.addItem(visibility)
 
+        let duplicate = NSMenuItem(
+            title: "Ebene duplizieren",
+            action: #selector(DocumentWindowController.duplicateSelectedLayer(_:)),
+            keyEquivalent: "d"
+        )
+        duplicate.keyEquivalentModifierMask = [.command]
+        menu.addItem(duplicate)
+
         let delete = NSMenuItem(
             title: "Ebene löschen",
             action: #selector(DocumentWindowController.deleteSelectedLayer(_:)),

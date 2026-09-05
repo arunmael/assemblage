@@ -157,3 +157,63 @@ final class LayerListEditingTests: XCTestCase {
         XCTAssertFalse(undoManager.canUndo)
     }
 }
+
+// MARK: - Duplizieren (aus Anpassungen 2)
+
+extension LayerListEditingTests {
+
+    func testDuplicateInsertsACopyDirectlyAboveTheOriginal() {
+        let unten = ebene("Unten")
+        let original = ebene("Original")
+        let oben = ebene("Oben")
+        let (document, editing, _) = dokument(mit: [unten, original, oben])
+
+        let neueID = try? XCTUnwrap(editing.duplicate(original.id))
+
+        XCTAssertEqual(document.state.document.layers.count, 4)
+        // Modellreihenfolge: unten, Original, Kopie, oben — die Kopie sitzt
+        // direkt über dem Original.
+        XCTAssertEqual(document.state.document.layers.map(\.name), ["Unten", "Original", "Original Kopie", "Oben"])
+        XCTAssertEqual(document.state.selectedLayerID, neueID, "die Kopie müsste ausgewählt sein")
+    }
+
+    /// Ein Feld verändert, alle anderen bleiben — sonst wäre es kein Duplikat.
+    func testDuplicatePreservesEveryFieldExceptIdentityAndPosition() {
+        var original = ebene("Original")
+        original.opacity = 0.42
+        original.blendMode = .multiply
+        original.isVisible = false
+        original.transform = Transform2D(x: 50, y: 60, scaleX: 2, rotationDegrees: 30)
+        let (document, editing, _) = dokument(mit: [original])
+
+        editing.duplicate(original.id)
+        let kopie = try? XCTUnwrap(document.state.document.layers.last)
+
+        XCTAssertNotEqual(kopie?.id, original.id, "die Kopie braucht eine eigene Identität")
+        XCTAssertEqual(kopie?.opacity, 0.42)
+        XCTAssertEqual(kopie?.blendMode, .multiply)
+        XCTAssertEqual(kopie?.isVisible, false)
+        XCTAssertEqual(kopie?.transform.scaleX, 2)
+        XCTAssertEqual(kopie?.transform.rotationDegrees, 30)
+        // Nur die Position ist bewusst leicht versetzt.
+        XCTAssertEqual(kopie?.transform.x, 60)
+        XCTAssertEqual(kopie?.transform.y, 70)
+    }
+
+    func testDuplicateIsUndoable() {
+        let original = ebene("Original")
+        let (document, editing, undoManager) = dokument(mit: [original])
+
+        editing.duplicate(original.id)
+        XCTAssertEqual(document.state.document.layers.count, 2)
+
+        undoManager.undo()
+        XCTAssertEqual(document.state.document.layers.count, 1)
+    }
+
+    func testDuplicateOfAnUnknownLayerDoesNothing() {
+        let (document, editing, _) = dokument(mit: [ebene("Einzige")])
+        XCTAssertNil(editing.duplicate(UUID()))
+        XCTAssertEqual(document.state.document.layers.count, 1)
+    }
+}

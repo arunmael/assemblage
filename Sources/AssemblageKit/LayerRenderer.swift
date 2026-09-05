@@ -342,6 +342,16 @@ struct LayerRenderer {
     private func applyShape(_ content: ShapeLayerContent, to layer: CAShapeLayer) {
         layer.path = ShapePath.cgPath(for: content, in: CGRect(origin: .zero, size: content.size.cgSize))
         layer.fillColor = (RGBA(hex: content.fillColorHex) ?? .white).cgColor
+        // `strokeWidth == 0` heisst „kein Rand" — `CAShapeLayer` zeichnet bei
+        // Breite 0 ohnehin nichts, aber `strokeColor = nil` macht die Absicht
+        // zusätzlich explizit und spart eine (wirkungslose) Farbzuweisung.
+        if content.strokeWidth > 0 {
+            layer.strokeColor = (RGBA(hex: content.strokeColorHex) ?? .black).cgColor
+            layer.lineWidth = content.strokeWidth
+        } else {
+            layer.strokeColor = nil
+            layer.lineWidth = 0
+        }
     }
 
     /// Sichtbarer Platzhalter für eine Ebene, deren Originaldatei fehlt.

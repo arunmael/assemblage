@@ -343,6 +343,37 @@ struct InspectorView: View {
                 shape.fillColorHex = hex
                 layer.content = .shape(shape)
             }
+
+            // Rand (aus Anpassungen 2: „Rahmen/Rand rund um alle Formen").
+            // `strokeWidth == 0` heisst kein Rand — dafür braucht es keinen
+            // eigenen Schalter, der Regler auf 0 tut dasselbe.
+            colorPicker("Randfarbe", fallback: content.strokeColorHex, actionName: "Randfarbe ändern", get: { layer in
+                guard case .shape(let shape) = layer.content else { return content.strokeColorHex }
+                return shape.strokeColorHex
+            }) { layer, hex in
+                guard case .shape(var shape) = layer.content else { return }
+                shape.strokeColorHex = hex
+                layer.content = .shape(shape)
+            }
+            valueSlider(
+                "Randbreite",
+                value: layerBinding(
+                    fallback: content.strokeWidth,
+                    actionName: "Randbreite ändern",
+                    get: { layer in
+                        guard case .shape(let shape) = layer.content else { return content.strokeWidth }
+                        return shape.strokeWidth
+                    },
+                    update: { layer, value in
+                        guard case .shape(var shape) = layer.content else { return }
+                        shape.strokeWidth = value
+                        layer.content = .shape(shape)
+                    }
+                ),
+                range: 0...40,
+                actionName: "Randbreite ändern",
+                valueText: { String(format: "%.0f pt", $0) }
+            )
         }
     }
 
@@ -412,10 +443,20 @@ struct InspectorView: View {
         _ title: String,
         fallback: String,
         actionName: String,
+        get: @escaping (Layer) -> String? = { _ in nil },
         update: @escaping (inout Layer, String) -> Void
     ) -> some View {
+        // Vorgabe-Getter `{ _ in nil }` löst über `?? colorHex(in:)` weiter
+        // den bisherigen, ebenentyp-übergreifenden Weg aus — Formfarbe und
+        // Textfarbe brauchten nie einen eigenen Getter. Ein zweites Farbfeld
+        // am selben Ebenentyp (Randfarbe neben Füllfarbe) braucht dagegen
+        // einen expliziten, weil `colorHex(in:)` pro Ebenentyp nur ein Feld
+        // kennt.
         let binding = Binding<Color>(
-            get: { color(from: colorHex(in: state.selectedLayer) ?? fallback) },
+            get: {
+                let hexValue = state.selectedLayer.flatMap(get) ?? colorHex(in: state.selectedLayer) ?? fallback
+                return color(from: hexValue)
+            },
             set: { color in
                 guard let hex = hex(from: color) else { return }
                 editing.updateSelectedLayer(actionName: actionName) { update(&$0, hex) }
