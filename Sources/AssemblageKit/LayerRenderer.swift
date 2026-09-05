@@ -13,6 +13,10 @@ import AssemblageModel
 @MainActor
 struct LayerRenderer {
 
+    /// Sechs Felder pro Achse genügen bei Bildschirmauflösung für flüssige
+    /// Griffbewegungen; der höher aufgelöste Export verwendet acht.
+    private static let meshPreviewResolution = 6
+
     let images: ImageStore
     /// Pixel pro Punkt des Bildschirms — sonst sind Text und Formen auf
     /// Retina-Displays sichtbar unscharf.
@@ -21,28 +25,35 @@ struct LayerRenderer {
     // MARK: - Aufbau
 
     func makeLayer(for layer: Layer) -> CALayer {
-        let rendered = makeContentLayer(for: layer.content)
+        let rendered = if layer.distortion?.hasCurvedEdges == true {
+            CALayer()
+        } else {
+            makeContentLayer(for: layer.content)
+        }
         apply(layer, to: rendered)
         applyMask(layer, to: rendered)
         return rendered
     }
 
-    /// Lässt sich diese Schicht für den Inhalt weiterverwenden?
+    /// Lässt sich diese Schicht für die Ebene weiterverwenden?
     ///
-    /// Nur der Wechsel der Ebenen*art* verlangt eine neue Schicht — Text
-    /// braucht eine `CATextLayer`, eine Form eine `CAShapeLayer`. Alles
+    /// Neben dem Wechsel der Ebenenart verlangt auch der Übergang zwischen
+    /// nativer Vektorschicht und gerastertem Mesh eine neue Schicht. Alles
     /// andere, auch ein geänderter Text oder eine andere Füllfarbe, wird in
-    /// der bestehenden Schicht aufgefrischt: Sie neu zu bauen hiesse bei
-    /// Bildebenen, das Foto erneut zu dekodieren.
-    func canReuse(_ renderedLayer: CALayer, for content: LayerContent) -> Bool {
-        switch content {
+    /// der bestehenden Schicht aufgefrischt.
+    func canReuse(_ renderedLayer: CALayer, for layer: Layer) -> Bool {
+        if layer.distortion?.hasCurvedEdges == true {
+            return !(renderedLayer is CATextLayer) && !(renderedLayer is CAShapeLayer)
+        }
+        switch layer.content {
         case .text: return renderedLayer is CATextLayer
         case .shape: return renderedLayer is CAShapeLayer
-        case .image:
+        case .image(let image):
             // Der Platzhalter für ein fehlendes Original ist eine schlichte
             // CALayer; taucht die Datei wieder auf, muss neu gebaut werden.
             guard !(renderedLayer is CATextLayer), !(renderedLayer is CAShapeLayer) else { return false }
-            return renderedLayer.contents != nil
+            let originalExists = images.image(named: image.originalFileReference) != nil
+            return originalExists == (renderedLayer.contents != nil)
         }
     }
 
@@ -140,6 +151,13 @@ struct LayerRenderer {
     /// bei den Anpassungen, und aus demselben Grund: Eine Maske zu ändern darf
     /// kein Neuzeichnen des Bildes auslösen.
     func applyMask(_ layer: Layer, to renderedLayer: CALayer) {
+        // Im Mesh-Pfad ist die Maske bereits zusammen mit dem Inhalt
+        // gerastert. Eine zweite rechteckige CALayer-Maske wäre geometrisch
+        // falsch und würde sie ausserdem doppelt anwenden.
+        guard layer.distortion?.hasCurvedEdges != true else {
+            renderedLayer.mask = nil
+            return
+        }
         let ausschnitt: Rect?
         if case .image(let inhalt) = layer.content {
             ausschnitt = inhalt.cropRect
@@ -173,8 +191,36 @@ struct LayerRenderer {
     /// alten, weil die Schicht ja schon existiert. Ein Neuaufbau passiert
     /// nur, wenn sich die Ebenenstruktur ändert — beim Tippen also nie.
     func apply(_ layer: Layer, to renderedLayer: CALayer) {
-        applyContent(layer.content, to: renderedLayer)
         let contentSize = self.contentSize(of: layer.content)
+
+        if let distortion = layer.distortion, distortion.hasCurvedEdges,
+           let preview = DocumentExporter.curvedPreview(
+               of: layer,
+               distortion: distortion,
+               contentSize: contentSize.cgSize,
+               contentsScale: contentsScale,
+               resources: images.resources,
+               resolution: Self.meshPreviewResolution
+           ) {
+            renderedLayer.sublayers?.first { $0.name == Self.textureLayerName }?.removeFromSuperlayer()
+            renderedLayer.contents = preview.image
+            renderedLayer.contentsRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+            renderedLayer.contentsGravity = .resize
+            renderedLayer.magnificationFilter = .trilinear
+            renderedLayer.minificationFilter = .trilinear
+            renderedLayer.bounds = CGRect(origin: .zero, size: preview.frame.size)
+            renderedLayer.position = CGPoint(x: preview.frame.midX, y: preview.frame.midY)
+            // Skalierung, Spiegelung, Drehung und Krümmung sind schon in der
+            // Bitmap. Jeder weitere Transform würde sie doppelt anwenden.
+            renderedLayer.transform = CATransform3DIdentity
+            renderedLayer.contentsScale = contentsScale
+            renderedLayer.filters = nil
+            applyEffects(layer.effects, to: renderedLayer)
+            applyCommonProperties(layer, to: renderedLayer)
+            return
+        }
+
+        applyContent(layer.content, to: renderedLayer)
 
         // `bounds` bleibt die *unskalierte* Inhaltsgrösse; Skalierung,
         // Spiegelung und Drehung stecken zusammen in der Matrix.
@@ -205,9 +251,7 @@ struct LayerRenderer {
 
         applyEffects(layer.effects, to: renderedLayer)
         applyTexture(layer, to: renderedLayer)
-        renderedLayer.isHidden = !layer.isVisible
-        renderedLayer.opacity = Float(layer.opacity.clamped(to: 0...1))
-        renderedLayer.compositingFilter = layer.blendMode.compositingFilterName
+        applyCommonProperties(layer, to: renderedLayer)
 
         // Anpassungen als Filterkette an die Schicht hängen statt das Bild neu
         // zu berechnen (Plan 7.2): Core Animation wendet sie auf der GPU an,
@@ -219,6 +263,12 @@ struct LayerRenderer {
         } else {
             renderedLayer.filters = nil
         }
+    }
+
+    private func applyCommonProperties(_ layer: Layer, to renderedLayer: CALayer) {
+        renderedLayer.isHidden = !layer.isVisible
+        renderedLayer.opacity = Float(layer.opacity.clamped(to: 0...1))
+        renderedLayer.compositingFilter = layer.blendMode.compositingFilterName
     }
 
     // MARK: - Inhaltsgrösse
