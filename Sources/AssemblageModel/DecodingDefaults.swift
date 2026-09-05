@@ -154,6 +154,32 @@ extension TextLayerContent {
     }
 }
 
+extension QuadDistortion {
+    // Muss ausgeschrieben werden: Ein eigenes `init(from:)` unterdrückt
+    // auch die automatisch erzeugten CodingKeys. Die vier Kantenmitten
+    // (aus Anpassungen.md: „8 Punkte") kamen erst nach den vier Ecken dazu —
+    // ein älteres Dokument kennt nur Letztere. Vorgabe `.zero` heisst „auf
+    // der linearen Kante", was `MeshWarp` exakt auf die alte, reine
+    // Vier-Ecken-Verzerrung reduziert.
+    enum CodingKeys: String, CodingKey {
+        case topLeft, topRight, bottomRight, bottomLeft, topMid, rightMid, bottomMid, leftMid
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            topLeft: try container.value(.topLeft, or: .zero),
+            topRight: try container.value(.topRight, or: .zero),
+            bottomRight: try container.value(.bottomRight, or: .zero),
+            bottomLeft: try container.value(.bottomLeft, or: .zero),
+            topMid: try container.value(.topMid, or: .zero),
+            rightMid: try container.value(.rightMid, or: .zero),
+            bottomMid: try container.value(.bottomMid, or: .zero),
+            leftMid: try container.value(.leftMid, or: .zero)
+        )
+    }
+}
+
 extension ShapeLayerContent {
     // Muss ausgeschrieben werden: Ein eigenes `init(from:)` unterdrückt
     // auch die automatisch erzeugten CodingKeys.

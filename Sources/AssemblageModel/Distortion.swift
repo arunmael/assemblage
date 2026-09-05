@@ -19,16 +19,39 @@ public struct QuadDistortion: Codable, Equatable, Sendable {
     public var bottomRight: Point
     public var bottomLeft: Point
 
+    // Vier weitere Griffe (aus Anpassungen.md: „8 Punkte … alle Eckpunkte und
+    // alle Mitten einer Seite"). Der Versatz gilt jeweils relativ zur
+    // *linearen* Kantenmitte zwischen den beiden Nachbar-Ecken — bei `.zero`
+    // liegt der Griff also genau dort, wo er ohne diese Erweiterung auch
+    // gelegen hätte. Das ist keine Vereinfachung, sondern erzwungen durch
+    // `MeshWarp`: Bei `.zero` reduziert sich die Acht-Punkt-Fläche exakt auf
+    // die bisherige projektive Vier-Ecken-Abbildung (mit Test nachgewiesen,
+    // `MeshWarpTests.testReducesToTheExistingFourCornerMappingWhenMidpointsAreZero`) —
+    // ein bestehendes Dokument mit reiner Eckenverzerrung sieht dadurch nach
+    // dieser Erweiterung exakt gleich aus.
+    public var topMid: Point
+    public var rightMid: Point
+    public var bottomMid: Point
+    public var leftMid: Point
+
     public init(
         topLeft: Point = .zero,
         topRight: Point = .zero,
         bottomRight: Point = .zero,
-        bottomLeft: Point = .zero
+        bottomLeft: Point = .zero,
+        topMid: Point = .zero,
+        rightMid: Point = .zero,
+        bottomMid: Point = .zero,
+        leftMid: Point = .zero
     ) {
         self.topLeft = topLeft
         self.topRight = topRight
         self.bottomRight = bottomRight
         self.bottomLeft = bottomLeft
+        self.topMid = topMid
+        self.rightMid = rightMid
+        self.bottomMid = bottomMid
+        self.leftMid = leftMid
     }
 
     /// Keine Verzerrung — die Ebene bleibt ein Rechteck.
@@ -39,27 +62,49 @@ public struct QuadDistortion: Codable, Equatable, Sendable {
     /// „unverzerrt" eindeutig erkennbar.
     public var isIdentity: Bool { self == .identity }
 
+    /// Nur die vier Ecken bewegt, alle Kantenmitten auf ihrem linearen Platz?
+    /// In diesem (häufigsten) Fall genügt die günstige, native
+    /// Vier-Ecken-Homographie — `MeshWarp` und die teurere Gitterdarstellung
+    /// werden dann gar nicht erst gebraucht.
+    public var hasCurvedEdges: Bool {
+        topMid != .zero || rightMid != .zero || bottomMid != .zero || leftMid != .zero
+    }
+
     /// Die vier Versätze in der Reihenfolge, in der `corners` sie erwartet:
     /// im Uhrzeigersinn ab oben links.
     var offsetsClockwise: [Point] { [topLeft, topRight, bottomRight, bottomLeft] }
 
-    /// Verschiebt eine einzelne Ecke. Wird vom Verziehen-Werkzeug gebraucht.
-    public func moving(_ corner: QuadCorner, by delta: Point) -> QuadDistortion {
+    /// Verschiebt einen einzelnen Griff — Ecke oder Kantenmitte. Wird vom
+    /// Verziehen-Werkzeug gebraucht.
+    public func moving(_ handle: DistortHandle, by delta: Point) -> QuadDistortion {
         var kopie = self
-        switch corner {
-        case .topLeft: kopie.topLeft = Point(x: topLeft.x + delta.x, y: topLeft.y + delta.y)
-        case .topRight: kopie.topRight = Point(x: topRight.x + delta.x, y: topRight.y + delta.y)
-        case .bottomRight: kopie.bottomRight = Point(x: bottomRight.x + delta.x, y: bottomRight.y + delta.y)
-        case .bottomLeft: kopie.bottomLeft = Point(x: bottomLeft.x + delta.x, y: bottomLeft.y + delta.y)
+        func verschoben(_ punkt: Point) -> Point {
+            Point(x: punkt.x + delta.x, y: punkt.y + delta.y)
+        }
+        switch handle {
+        case .topLeft: kopie.topLeft = verschoben(topLeft)
+        case .topRight: kopie.topRight = verschoben(topRight)
+        case .bottomRight: kopie.bottomRight = verschoben(bottomRight)
+        case .bottomLeft: kopie.bottomLeft = verschoben(bottomLeft)
+        case .topMid: kopie.topMid = verschoben(topMid)
+        case .rightMid: kopie.rightMid = verschoben(rightMid)
+        case .bottomMid: kopie.bottomMid = verschoben(bottomMid)
+        case .leftMid: kopie.leftMid = verschoben(leftMid)
         }
         return kopie
     }
 
-    /// Verschiebt **alle** Ecken gleich — die Verzerrung bleibt in ihrer Form
-    /// erhalten. Das ist gemeint mit „mit gedrückter Wahltaste verzieht sich
-    /// alles proportional".
+    /// Rückwärtskompatibler Name für `moving(_: DistortHandle, by:)` mit den
+    /// vier ursprünglichen Ecken.
+    public func moving(_ corner: QuadCorner, by delta: Point) -> QuadDistortion {
+        moving(DistortHandle(corner), by: delta)
+    }
+
+    /// Verschiebt **alle acht** Griffe gleich — die Verzerrung bleibt in
+    /// ihrer Form erhalten. Das ist gemeint mit „mit gedrückter Wahltaste
+    /// verzieht sich alles proportional".
     public func movingAll(by delta: Point) -> QuadDistortion {
-        QuadCorner.allCases.reduce(self) { $0.moving($1, by: delta) }
+        DistortHandle.allCases.reduce(self) { $0.moving($1, by: delta) }
     }
 }
 
@@ -75,6 +120,53 @@ public enum QuadCorner: CaseIterable, Sendable {
         case .topRight: return (1, -1)
         case .bottomRight: return (1, 1)
         case .bottomLeft: return (-1, 1)
+        }
+    }
+}
+
+/// Alle acht Verziehen-Griffe: die vier Ecken aus `QuadCorner` plus die vier
+/// Kantenmitten (aus Anpassungen.md).
+public enum DistortHandle: CaseIterable, Sendable, Hashable {
+    case topLeft, topRight, bottomRight, bottomLeft
+    case topMid, rightMid, bottomMid, leftMid
+
+    init(_ corner: QuadCorner) {
+        switch corner {
+        case .topLeft: self = .topLeft
+        case .topRight: self = .topRight
+        case .bottomRight: self = .bottomRight
+        case .bottomLeft: self = .bottomLeft
+        }
+    }
+
+    /// Lage im natürlichen Koordinatensystem des Serendipity-Achtknoten-
+    /// Vierecks (ξ, η ∈ [-1, 1]) — Grundlage für `MeshWarp`.
+    var naturalCoordinate: (xi: Double, eta: Double) {
+        switch self {
+        case .topLeft: return (-1, -1)
+        case .topRight: return (1, -1)
+        case .bottomRight: return (1, 1)
+        case .bottomLeft: return (-1, 1)
+        case .topMid: return (0, -1)
+        case .rightMid: return (1, 0)
+        case .bottomMid: return (0, 1)
+        case .leftMid: return (-1, 0)
+        }
+    }
+}
+
+extension QuadDistortion {
+    /// Der Versatz an einem beliebigen der acht Griffe.
+    func offset(at handle: DistortHandle) -> Point {
+        switch handle {
+        case .topLeft: return topLeft
+        case .topRight: return topRight
+        case .bottomRight: return bottomRight
+        case .bottomLeft: return bottomLeft
+        case .topMid: return topMid
+        case .rightMid: return rightMid
+        case .bottomMid: return bottomMid
+        case .leftMid: return leftMid
         }
     }
 }
