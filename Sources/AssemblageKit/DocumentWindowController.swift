@@ -360,6 +360,13 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
         return true
     }
 
+    /// Die Grössenänderung läuft über `modify`, damit sie denselben Undo-Weg
+    /// wie alle anderen Dokumentänderungen nimmt.
+    @IBAction func resizeCanvas(_ sender: Any?) {
+        guard let assemblageDocument = document as? AssemblageDocument, let window else { return }
+        CanvasResizePanelController.present(for: assemblageDocument, host: window)
+    }
+
     /// „Ablage › Exportieren…" (Plan 5.8). Ohne Dokument oder Fenster passiert
     /// nichts — dieselbe Absicherung wie beim Rest der Menübefehle hier;
     /// ohne Ziel ist der Menüpunkt über die Responder-Chain-Validierung
