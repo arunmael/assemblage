@@ -116,6 +116,52 @@ final class ContentUpdateTests: XCTestCase {
         XCTAssertEqual(farbe[0], 0, accuracy: 0.01, "kein rot")
     }
 
+    func testShapeWithoutStrokeKeepsStrokeDisabled() throws {
+        let document = AssemblageModel.Document(
+            canvas: CanvasSize(width: 400, height: 400),
+            layers: [Layer(
+                name: "Form",
+                transform: Transform2D(x: 200, y: 200),
+                content: .shape(ShapeLayerContent(
+                    kind: .rectangle,
+                    size: Size(width: 100, height: 100),
+                    strokeColorHex: "#3366CC",
+                    strokeWidth: 0
+                ))
+            )]
+        )
+
+        let form = try XCTUnwrap(schicht(ansicht(document)) as? CAShapeLayer)
+
+        XCTAssertNil(form.strokeColor)
+        XCTAssertEqual(form.lineWidth, 0)
+    }
+
+    func testShapeStrokeIsAppliedToCanvasLayer() throws {
+        let document = AssemblageModel.Document(
+            canvas: CanvasSize(width: 400, height: 400),
+            layers: [Layer(
+                name: "Form mit Rand",
+                transform: Transform2D(x: 200, y: 200),
+                content: .shape(ShapeLayerContent(
+                    kind: .rectangle,
+                    size: Size(width: 100, height: 100),
+                    strokeColorHex: "#3366CC",
+                    strokeWidth: 10
+                ))
+            )]
+        )
+
+        let form = try XCTUnwrap(schicht(ansicht(document)) as? CAShapeLayer)
+        let farbe = try XCTUnwrap(form.strokeColor?.components)
+
+        XCTAssertEqual(form.lineWidth, 10)
+        XCTAssertEqual(farbe[0], 0x33 as CGFloat / 255, accuracy: 0.01, "rot")
+        XCTAssertEqual(farbe[1], 0x66 as CGFloat / 255, accuracy: 0.01, "grün")
+        XCTAssertEqual(farbe[2], 0xCC as CGFloat / 255, accuracy: 0.01, "blau")
+        XCTAssertEqual(farbe[3], 1, accuracy: 0.01, "deckend")
+    }
+
     /// Ein Formwechsel (Rechteck → Ellipse) muss den Pfad austauschen.
     func testChangingShapeKindUpdatesThePath() throws {
         var document = AssemblageModel.Document(

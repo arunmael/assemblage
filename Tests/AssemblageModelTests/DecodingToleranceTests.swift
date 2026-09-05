@@ -86,6 +86,24 @@ final class DecodingToleranceTests: XCTestCase {
         XCTAssertEqual(text.alignment, .left)
         XCTAssertEqual(shape.cornerRadius, 0)
         XCTAssertEqual(shape.fillColorHex, "#FFFFFF")
+        XCTAssertEqual(shape.strokeColorHex, "#000000")
+        XCTAssertEqual(shape.strokeWidth, 0)
+    }
+
+    func testShapeStrokeRoundTrips() throws {
+        let original = ShapeLayerContent(
+            kind: .roundedRectangle,
+            size: Size(width: 120, height: 80),
+            cornerRadius: 14,
+            fillColorHex: "#123456",
+            strokeColorHex: "#ABCDEF",
+            strokeWidth: 9.5
+        )
+
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(ShapeLayerContent.self, from: encoded)
+
+        XCTAssertEqual(decoded, original)
     }
 
     func testDocumentWithoutLayersDecodesAsEmpty() throws {
