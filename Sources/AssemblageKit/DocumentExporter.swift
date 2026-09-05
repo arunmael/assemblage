@@ -1078,12 +1078,16 @@ enum DocumentExporter {
     private static func drawText(_ content: TextLayerContent, in rect: CGRect, context: CGContext) {
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
-        // `flipped: true`, weil der Kontext für die Leinwandkoordinaten
-        // (Ursprung oben links) bereits gespiegelt ist. Meldet man hier
-        // `false`, zeichnet AppKit den Text seitenverkehrt — mit `L` sofort
-        // sichtbar, mit einer Formebene dagegen unsichtbar, weil Rechteck und
-        // Ellipse senkrecht symmetrisch sind.
-        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
+        // Der Kontext trägt an dieser Stelle KEINEN eigenen Geometrie-Flip
+        // (dieselbe native, ungespiegelte CTM wie bei `drawImage`/`drawShape`
+        // — beide gleichen das deshalb mit einer eigenen lokalen Spiegelung
+        // aus, siehe dort). `flipped: false` meldet AppKit genau das:
+        // nachgemessen mit einem „L", das mit `flipped: true` zuverlässig auf
+        // dem Kopf stand (Fuss oben statt unten) — die gegenteilige Behauptung
+        // im vorherigen Kommentar war falsch (`MirrorProbeTests`, gelöscht
+        // nach der Korrektur, siehe `testExportedTextIsNotUpsideDown` für die
+        // bleibende Absicherung).
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
         TextLayout.attributedString(for: content).draw(in: rect)
     }
 

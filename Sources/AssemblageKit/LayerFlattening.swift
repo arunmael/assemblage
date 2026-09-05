@@ -110,11 +110,15 @@ enum LayerFlattening {
         switch content {
         case .text(let text):
             // Das gespeicherte CGImage wird beim späteren Bildzeichnen lokal
-            // gespiegelt (siehe `DocumentExporter.drawImage`). Deshalb wird
-            // Text hier ungeflippt in die Bitmap gesetzt; die beiden Schritte
-            // heben sich auf und Grundlinie sowie Glyphenlage bleiben gleich.
+            // gespiegelt (siehe `DocumentExporter.drawImage`). `flipped: true`
+            // setzt den Text deshalb absichtlich VORVERKEHRT in die Bitmap;
+            // erst die spätere Spiegelung beim Zeichnen als Bild dreht ihn
+            // wieder richtig herum. Nachgemessen statt angenommen (Problems.md:
+            // eine geflattete Textebene stand nach dem Export auf dem Kopf, als
+            // hier noch `flipped: false` stand — siehe
+            // `LayerFlatteningTests.testRasterizedTextLooksLikeTheEditableOriginal`).
             NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
             TextLayout.attributedString(for: text).draw(in: CGRect(origin: .zero, size: size))
             NSGraphicsContext.restoreGraphicsState()
 

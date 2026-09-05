@@ -264,4 +264,50 @@ final class LayerFlatteningTests: XCTestCase {
         ))))
         XCTAssertFalse(LayerFlattening.canFlatten(.image(ImageLayerContent(originalFileReference: "x.png"))))
     }
+
+    /// Eigenständiger Nachweis neben `testRasterizedTextLooksLikeTheEditableOriginal`:
+    /// Ein „L" hat seine Masse unten (Fussbalken), oben nur den schmalen
+    /// Stamm — bei symmetrischen Formen fällt eine Spiegelung nicht auf.
+    /// Direkt am **exportierten** Ergebnis der geflatteten Ebene geprüft,
+    /// nicht an der rohen Rasterbitmap: Genau dort hoben sich früher zwei
+    /// unabhängige Spiegel-Fehler auf (`LayerFlattening.draw` +
+    /// `DocumentExporter.drawText`) und verdeckten sich beide gegenseitig,
+    /// bis Problems.md eine kopfstehende Textebene im Export meldete.
+    func testFlattenedTextIsNotUpsideDownAfterExport() async throws {
+        let layer = Layer(
+            name: "L", transform: Transform2D(x: 100, y: 100),
+            content: .text(TextLayerContent(string: "L", fontName: "Helvetica-Bold", fontSize: 120, colorHex: "#000000"))
+        )
+        let (document, _) = dokument(mit: layer)
+        document.modify("Leinwand") { $0.canvas = CanvasSize(width: 200, height: 200) }
+        document.undoManager?.removeAllActions()
+
+        XCTAssertTrue(LayerFlattening.flattenSelected(in: document.state))
+        let bild = try await DocumentExporter.image(
+            of: document.state.document, resources: document.state.resources, targetSize: CGSize(width: 200, height: 200)
+        )
+        let kontext = try XCTUnwrap(CGContext(
+            data: nil, width: 200, height: 200, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        kontext.draw(bild, in: CGRect(x: 0, y: 0, width: 200, height: 200))
+        let daten = try XCTUnwrap(kontext.data).assumingMemoryBound(to: UInt8.self)
+
+        func schwarzeInZeile(_ y: Int) -> Int {
+            (0..<200).filter { x in
+                Int(daten.advanced(by: y * kontext.bytesPerRow + x * 4)[3]) > 128
+            }.count
+        }
+        let bemalt = (0..<200).filter { schwarzeInZeile($0) > 0 }
+        let oben = try XCTUnwrap(bemalt.first)
+        let unten = try XCTUnwrap(bemalt.last)
+        let mitte = (oben + unten) / 2
+        let masseOben = (oben...mitte).map(schwarzeInZeile).reduce(0, +)
+        let masseUnten = ((mitte + 1)...unten).map(schwarzeInZeile).reduce(0, +)
+
+        XCTAssertGreaterThan(
+            masseUnten, masseOben,
+            "beim geflatteten L liegt die Masse unten; liegt sie oben, ist der Text gespiegelt"
+        )
+    }
 }
