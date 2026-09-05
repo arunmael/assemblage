@@ -137,6 +137,11 @@ struct InspectorView: View {
             LabeledContent("Oben rechts", value: format(distortion.topRight.x, distortion.topRight.y))
             LabeledContent("Unten rechts", value: format(distortion.bottomRight.x, distortion.bottomRight.y))
             LabeledContent("Unten links", value: format(distortion.bottomLeft.x, distortion.bottomLeft.y))
+            LabeledContent("Oben Mitte", value: format(distortion.topMid.x, distortion.topMid.y))
+            LabeledContent("Rechts Mitte", value: format(distortion.rightMid.x, distortion.rightMid.y))
+            LabeledContent("Unten Mitte", value: format(distortion.bottomMid.x, distortion.bottomMid.y))
+            LabeledContent("Links Mitte", value: format(distortion.leftMid.x, distortion.leftMid.y))
+            LabeledContent("Kantenform", value: distortion.hasCurvedEdges ? "Gekrümmt" : "Gerade")
         } else {
             LabeledContent("Verzerrung", value: "Keine")
         }

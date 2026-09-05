@@ -169,7 +169,8 @@ final class CanvasView: NSView {
         }
     }
 
-    /// Die Ebene, deren vier Ecken gerade frei verschoben werden.
+    /// Die Ebene, deren vier Ecken und vier Kantenmitten gerade frei
+    /// verschoben werden.
     var distortingLayerID: UUID? {
         didSet {
             guard distortingLayerID != oldValue else { return }
@@ -405,19 +406,34 @@ final class CanvasView: NSView {
         // 8-fachem Zoom ein Klotz und bei 10 % nicht mehr zu treffen.
         let seite = Self.handleSide / zoomScale
         let griffe = CGMutablePath()
-        let griffMittelpunkte: [Point]
         if distortingLayerID == layer.id {
-            griffMittelpunkte = ecken
+            // Eckgriffe bleiben quadratisch, Kantenmitten sind etwas kleiner
+            // und rund. So ist ihre unterschiedliche Wirkung sofort sichtbar.
+            for (handle, mitte) in distortHandlePositions(for: layer) {
+                switch handle {
+                case .topLeft, .topRight, .bottomRight, .bottomLeft:
+                    griffe.addRect(CGRect(
+                        x: mitte.x - seite / 2, y: mitte.y - seite / 2,
+                        width: seite, height: seite
+                    ))
+                case .topMid, .rightMid, .bottomMid, .leftMid:
+                    let durchmesser = seite * 0.8
+                    griffe.addEllipse(in: CGRect(
+                        x: mitte.x - durchmesser / 2, y: mitte.y - durchmesser / 2,
+                        width: durchmesser, height: durchmesser
+                    ))
+                }
+            }
         } else {
-            griffMittelpunkte = ResizeHandle.allCases.map {
+            let griffMittelpunkte = ResizeHandle.allCases.map {
                 layer.transform.position(of: $0, contentSize: groesse)
             }
-        }
-        for mitte in griffMittelpunkte {
-            griffe.addRect(CGRect(
-                x: mitte.x - seite / 2, y: mitte.y - seite / 2,
-                width: seite, height: seite
-            ))
+            for mitte in griffMittelpunkte {
+                griffe.addRect(CGRect(
+                    x: mitte.x - seite / 2, y: mitte.y - seite / 2,
+                    width: seite, height: seite
+                ))
+            }
         }
 
         if distortingLayerID != layer.id {
@@ -553,10 +569,10 @@ final class CanvasView: NSView {
     }
 
     private func updateCursor(for event: NSEvent) {
-        // Das Fadenkreuz passt, weil eine Ecke frei in zwei Richtungen und
+        // Das Fadenkreuz passt, weil ein Griff frei in zwei Richtungen und
         // punktgenau platziert wird; ein diagonaler Skalierzeiger würde eine
         // feste Achse und Grössenänderung suggerieren.
-        if distortDrag != nil || distortCorner(at: canvasPoint(from: event)) != nil {
+        if distortDrag != nil || distortHandle(at: canvasPoint(from: event)) != nil {
             NSCursor.crosshair.set()
             return
         }
@@ -629,10 +645,10 @@ final class CanvasView: NSView {
             return
         }
 
-        if let (corner, ebene) = distortCorner(at: punkt) {
+        if let (handle, ebene) = distortHandle(at: punkt) {
             distortDrag = DistortDrag(
                 layerID: ebene.id,
-                corner: corner,
+                handle: handle,
                 startDistortion: ebene.distortion ?? .identity,
                 startTransform: ebene.transform,
                 startPoint: punkt
@@ -813,19 +829,40 @@ final class CanvasView: NSView {
         }
     }
 
-    private func distortCorner(at punkt: Point) -> (QuadCorner, Layer)? {
+    /// Positionen der acht Q8-Knoten. `MeshWarp.grid` läuft zeilenweise in
+    /// η-Richtung und innerhalb jeder Zeile in ξ-Richtung. Bei Auflösung 2
+    /// entsprechen die Indizes deshalb direkt den natürlichen Koordinaten
+    /// -1, 0 und 1 aus `DistortHandle.naturalCoordinate`.
+    private func distortHandlePositions(for ebene: Layer) -> [(DistortHandle, Point)] {
+        let gitter = ebene.transform.meshCorners(
+            contentSize: renderer.contentSize(of: ebene.content),
+            distortion: ebene.distortion ?? .identity,
+            resolution: 2
+        )
+        guard gitter.count == 3, gitter.allSatisfy({ $0.count == 3 }) else { return [] }
+        return DistortHandle.allCases.map { handle in
+            let position = switch handle {
+            case .topLeft: gitter[0][0]
+            case .topRight: gitter[0][2]
+            case .bottomRight: gitter[2][2]
+            case .bottomLeft: gitter[2][0]
+            case .topMid: gitter[0][1]
+            case .rightMid: gitter[1][2]
+            case .bottomMid: gitter[2][1]
+            case .leftMid: gitter[1][0]
+            }
+            return (handle, position)
+        }
+    }
+
+    private func distortHandle(at punkt: Point) -> (DistortHandle, Layer)? {
         guard let id = distortingLayerID,
               let ebene = document.layer(withID: id)
         else { return nil }
-        let corners = ebene.transform.corners(
-            contentSize: renderer.contentSize(of: ebene.content),
-            distortion: ebene.distortion
-        )
         let tolerance = Self.handleHitRadius / zoomScale
-        for (index, corner) in QuadCorner.allCases.enumerated() where index < corners.count {
-            let target = corners[index]
+        for (handle, target) in distortHandlePositions(for: ebene) {
             if abs(target.x - punkt.x) <= tolerance, abs(target.y - punkt.y) <= tolerance {
-                return (corner, ebene)
+                return (handle, ebene)
             }
         }
         return nil
