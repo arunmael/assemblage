@@ -64,7 +64,54 @@ final class DistortModeTests: XCTestCase {
         XCTAssertEqual(distortion.topRight, .zero)
         XCTAssertEqual(distortion.bottomRight, .zero)
         XCTAssertEqual(distortion.bottomLeft, .zero)
+        XCTAssertEqual(distortion.topMid, .zero)
+        XCTAssertEqual(distortion.rightMid, .zero)
+        XCTAssertEqual(distortion.bottomMid, .zero)
+        XCTAssertEqual(distortion.leftMid, .zero)
+        XCTAssertFalse(distortion.hasCurvedEdges)
         XCTAssertEqual(log.beendet, ["Ebene verziehen"])
+    }
+
+    func testAllEightDistortHandlesCanBeHit() throws {
+        let positions: [(DistortHandle, Point)] = [
+            (.topLeft, Point(x: 150, y: 150)),
+            (.topRight, Point(x: 250, y: 150)),
+            (.bottomRight, Point(x: 250, y: 250)),
+            (.bottomLeft, Point(x: 150, y: 250)),
+            (.topMid, Point(x: 200, y: 150)),
+            (.rightMid, Point(x: 250, y: 200)),
+            (.bottomMid, Point(x: 200, y: 250)),
+            (.leftMid, Point(x: 150, y: 200))
+        ]
+
+        for (handle, position) in positions {
+            log.verzerrungen.removeAll()
+            canvas.mouseDown(with: try event(.leftMouseDown, x: position.x, y: position.y))
+            canvas.mouseDragged(with: try event(.leftMouseDragged, x: position.x + 12, y: position.y + 7))
+            canvas.mouseUp(with: try event(.leftMouseUp, x: position.x + 12, y: position.y + 7))
+
+            let distortion = try XCTUnwrap(log.verzerrungen.last?.1, "Griff \(handle) muss getroffen werden")
+            for candidate in DistortHandle.allCases {
+                XCTAssertEqual(
+                    distortion.offset(at: candidate),
+                    candidate == handle ? Point(x: 12, y: 7) : .zero,
+                    "Ziehen an \(handle) darf \(candidate) nicht fälschlich ändern"
+                )
+            }
+        }
+    }
+
+    func testDraggingEdgeMidpointCreatesCurvedDistortionAndChangesOnlyThatMidpoint() throws {
+        canvas.mouseDown(with: try event(.leftMouseDown, x: 200, y: 150))
+        canvas.mouseDragged(with: try event(.leftMouseDragged, x: 208, y: 132))
+        canvas.mouseUp(with: try event(.leftMouseUp, x: 208, y: 132))
+
+        let distortion = try XCTUnwrap(log.verzerrungen.last?.1)
+        XCTAssertTrue(distortion.hasCurvedEdges)
+        XCTAssertEqual(distortion.topMid, Point(x: 8, y: -18))
+        for handle in DistortHandle.allCases where handle != .topMid {
+            XCTAssertEqual(distortion.offset(at: handle), .zero, "nur die obere Kantenmitte darf sich ändern")
+        }
     }
 
     func testOptionDraggingCornerMovesAllCorners() throws {
@@ -76,6 +123,25 @@ final class DistortModeTests: XCTestCase {
         for corner in [distortion.topLeft, distortion.topRight, distortion.bottomRight, distortion.bottomLeft] {
             XCTAssertEqual(corner, Point(x: 20, y: 15))
         }
+        for midpoint in [distortion.topMid, distortion.rightMid, distortion.bottomMid, distortion.leftMid] {
+            XCTAssertEqual(midpoint, Point(x: 20, y: 15))
+        }
+    }
+
+    func testDistortModeDrawsFourSquareCornersAndFourRoundMidpoints() throws {
+        let path = try XCTUnwrap(canvas.handleLayerForTesting.path)
+        var closedSubpaths = 0
+        var curves = 0
+        path.applyWithBlock { element in
+            switch element.pointee.type {
+            case .closeSubpath: closedSubpaths += 1
+            case .addCurveToPoint: curves += 1
+            default: break
+            }
+        }
+
+        XCTAssertEqual(closedSubpaths, 8, "vier Eck- und vier Kantenmittengriffe")
+        XCTAssertGreaterThan(curves, 0, "die Kantenmittengriffe müssen rund statt quadratisch sein")
     }
 
     func testOneDragOpensAndClosesOneUndoInteraction() throws {
@@ -122,7 +188,7 @@ final class DistortModeTests: XCTestCase {
         XCTAssertFalse(ToolSelection.isAvailable(.distort, forSelected: nil))
     }
 
-    func testDraggingIsOneUndoStepAndUndoRestoresDistortion() throws {
+    func testDraggingEdgeMidpointIsOneUndoStepAndUndoRestoresDistortion() throws {
         let document = AssemblageDocument()
         let undo = UndoManager()
         document.undoManager = undo
@@ -146,13 +212,15 @@ final class DistortModeTests: XCTestCase {
         let delegate = UndoDelegate(document)
         canvas.interactionDelegate = delegate
 
-        canvas.mouseDown(with: try event(.leftMouseDown, x: 150, y: 150))
-        canvas.mouseDragged(with: try event(.leftMouseDragged, x: 165, y: 160))
-        canvas.mouseDragged(with: try event(.leftMouseDragged, x: 175, y: 165))
-        canvas.mouseUp(with: try event(.leftMouseUp, x: 175, y: 165))
+        canvas.mouseDown(with: try event(.leftMouseDown, x: 250, y: 200))
+        canvas.mouseDragged(with: try event(.leftMouseDragged, x: 265, y: 210))
+        canvas.mouseDragged(with: try event(.leftMouseDragged, x: 275, y: 215))
+        canvas.mouseUp(with: try event(.leftMouseUp, x: 275, y: 215))
 
         XCTAssertEqual(undo.undoActionName, "Ebene verziehen")
-        XCTAssertEqual(document.state.document.layer(withID: layer.id)?.distortion?.topLeft, Point(x: 25, y: 15))
+        let distortion = try XCTUnwrap(document.state.document.layer(withID: layer.id)?.distortion)
+        XCTAssertEqual(distortion.rightMid, Point(x: 25, y: 15))
+        XCTAssertTrue(distortion.hasCurvedEdges)
         undo.undo()
         XCTAssertNil(document.state.document.layer(withID: layer.id)?.distortion)
         XCTAssertFalse(undo.canUndo, "der ganze Zug muss genau ein Schritt sein")
@@ -164,7 +232,11 @@ final class DistortModeTests: XCTestCase {
         document.undoManager = undo
         document.modify("Ebene anlegen") { _ = try? $0.addLayer(layer) }
         document.state.selectedLayerID = layer.id
-        document.modify("Vorbereiten") { try? $0.updateLayer(id: self.layer.id) { $0.distortion = QuadDistortion(topLeft: Point(x: 10, y: 5)) } }
+        document.modify("Vorbereiten") {
+            try? $0.updateLayer(id: self.layer.id) {
+                $0.distortion = QuadDistortion(topMid: Point(x: 10, y: 5))
+            }
+        }
         undo.removeAllActions()
 
         DistortionCommands.resetSelected(in: document.state)
@@ -172,6 +244,7 @@ final class DistortModeTests: XCTestCase {
         XCTAssertNil(document.state.selectedLayer?.distortion)
         XCTAssertEqual(undo.undoActionName, "Verzerrung zurücksetzen")
         undo.undo()
-        XCTAssertEqual(document.state.selectedLayer?.distortion?.topLeft, Point(x: 10, y: 5))
+        XCTAssertEqual(document.state.selectedLayer?.distortion?.topMid, Point(x: 10, y: 5))
+        XCTAssertTrue(document.state.selectedLayer?.distortion?.hasCurvedEdges == true)
     }
 }

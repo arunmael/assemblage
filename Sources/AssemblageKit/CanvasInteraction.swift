@@ -231,10 +231,10 @@ struct CropDrag {
     }
 }
 
-/// Ein laufender Zug an einer Ecke des verzogenen Vierecks.
+/// Ein laufender Zug an einem der acht Griffe des verzogenen Vierecks.
 struct DistortDrag {
     let layerID: UUID
-    let corner: QuadCorner
+    let handle: DistortHandle
     let startDistortion: QuadDistortion
     let startTransform: Transform2D
     let startPoint: Point
@@ -258,7 +258,7 @@ struct DistortDrag {
         )
         return movesAll
             ? startDistortion.movingAll(by: delta)
-            : startDistortion.moving(corner, by: delta)
+            : startDistortion.moving(handle, by: delta)
     }
 }
 
