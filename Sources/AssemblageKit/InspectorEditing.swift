@@ -46,7 +46,7 @@ struct InspectorEditing {
 
     /// Akzeptiert Punkt und Komma als Dezimaltrennzeichen. Gemischte
     /// Schreibweisen bleiben ungültig, weil ihre Bedeutung mehrdeutig ist.
-    static func number(from text: String) -> Double? {
+    nonisolated static func number(from text: String) -> Double? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         guard !(trimmed.contains(",") && trimmed.contains(".")) else { return nil }
