@@ -34,6 +34,12 @@ final class DocumentState: ObservableObject {
     /// Werkzeugleiste.
     @Published fileprivate(set) var brushSettings = MaskBrush(diameter: 60, hardness: 0.5, mode: .hide)
 
+    /// Dieselbe Anzeige-Rolle wie `brushSettings`, für den Farbpinsel
+    /// (aus Anpassungen.md).
+    @Published fileprivate(set) var paintBrushSettings = PaintBrush(
+        diameter: 30, hardness: 0.8, colorHex: "#000000", opacity: 1
+    )
+
     private(set) var resources: DocumentResources
     private(set) var images: ImageStore
 
@@ -224,8 +230,9 @@ extension DocumentState {
     /// (Inspector, Sidebar). Nur für `ToolbarController` gedacht: Der
     /// entscheidet weiterhin allein, welches Werkzeug gilt — diese Methode
     /// spiegelt seine Entscheidung nur, statt eine zweite zu treffen.
-    func reportToolState(_ tool: CanvasTool, brush: MaskBrush) {
+    func reportToolState(_ tool: CanvasTool, brush: MaskBrush, paintBrush: PaintBrush) {
         currentTool = tool
         brushSettings = brush
+        paintBrushSettings = paintBrush
     }
 }

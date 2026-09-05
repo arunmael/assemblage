@@ -189,6 +189,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         text.keyEquivalentModifierMask = [.command, .option]
         menu.addItem(text)
+
+        menu.addItem(withTitle: "Malebene",
+                     action: #selector(DocumentWindowController.insertPaintLayer(_:)),
+                     keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Rechteck", action: #selector(DocumentWindowController.insertRectangleLayer(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Abgerundetes Rechteck", action: #selector(DocumentWindowController.insertRoundedRectangleLayer(_:)), keyEquivalent: "")
