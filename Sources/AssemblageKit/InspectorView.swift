@@ -12,10 +12,30 @@ struct InspectorView: View {
 
     var body: some View {
         Form {
-            if let layer = state.selectedLayer {
-                layerSections(layer)
-            } else {
-                documentSection
+            // Nur beim Auswählen-Werkzeug zeigt eine angewählte Ebene ihre
+            // bearbeitbaren Eigenschaften (aus Anpassungen.md). Bei jedem
+            // anderen Werkzeug — Zuschneiden, Pinsel, Verziehen — geht es um
+            // das Werkzeug selbst: Seine Regler stehen schon in der
+            // Werkzeugleiste, hier steht nur, worauf es gerade wirkt.
+            switch state.currentTool {
+            case .select:
+                if let layer = state.selectedLayer {
+                    layerSections(layer)
+                } else {
+                    documentSection
+                }
+            case .crop:
+                toolSection(title: "Zuschneiden", hint: "Ziehe die Griffe auf der Leinwand, um den Ausschnitt zu verändern.") {
+                    cropSpecification
+                }
+            case .brush:
+                toolSection(title: "Pinsel", hint: "Ziehe auf der Leinwand, um die Maske zu malen.") {
+                    brushSpecification
+                }
+            case .distort:
+                toolSection(title: "Verziehen", hint: "Ziehe eine Ecke, um die Ebene zu verzerren.") {
+                    distortSpecification
+                }
             }
         }
         .formStyle(.grouped)
@@ -27,6 +47,68 @@ struct InspectorView: View {
         Section("Dokument") {
             LabeledContent("Leinwand", value: formatted(state.document.canvas))
             LabeledContent("Ebenen", value: "\(state.document.layers.count)")
+        }
+    }
+
+    // MARK: - Werkzeug-Spezifikationen
+
+    /// Rahmen für die drei Werkzeugabschnitte: Titel, Zielebene (falls
+    /// vorhanden) und ein kurzer Hinweis, wie man das Werkzeug bedient.
+    @ViewBuilder
+    private func toolSection<Content: View>(
+        title: String,
+        hint: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        Section(title) {
+            if let layer = state.selectedLayer {
+                LabeledContent("Ebene", value: layer.name)
+                content()
+            } else {
+                Text("Keine Ebene ausgewählt.")
+                    .foregroundStyle(.secondary)
+            }
+            Text(hint)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Reine Anzeige, absichtlich ohne Regler: Die Werkzeugleiste ist die
+    /// einzige Stelle, die den Pinsel ändert (siehe `DocumentState.brushSettings`
+    /// und `ToolbarController.reportToolState`) — zwei Stellen, die
+    /// unabhängig voneinander schreiben dürften, liefen sonst auseinander.
+    private var brushSpecification: some View {
+        Group {
+            LabeledContent("Grösse", value: "\(Int(state.brushSettings.diameter.rounded())) px")
+            LabeledContent("Härte", value: "\(Int((state.brushSettings.hardness * 100).rounded())) %")
+            LabeledContent("Modus", value: state.brushSettings.mode == .hide ? "Abdecken" : "Zurückholen")
+        }
+    }
+
+    @ViewBuilder
+    private var cropSpecification: some View {
+        if case .image(let inhalt) = state.selectedLayer?.content {
+            if let crop = inhalt.cropRect {
+                LabeledContent("Ausschnitt", value: format(crop.width, crop.height))
+            } else {
+                LabeledContent("Ausschnitt", value: "Ganzes Bild")
+            }
+        } else {
+            Text("Zuschneiden wirkt nur auf Bildebenen.")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var distortSpecification: some View {
+        if let distortion = state.selectedLayer?.distortion, !distortion.isIdentity {
+            LabeledContent("Oben links", value: format(distortion.topLeft.x, distortion.topLeft.y))
+            LabeledContent("Oben rechts", value: format(distortion.topRight.x, distortion.topRight.y))
+            LabeledContent("Unten rechts", value: format(distortion.bottomRight.x, distortion.bottomRight.y))
+            LabeledContent("Unten links", value: format(distortion.bottomLeft.x, distortion.bottomLeft.y))
+        } else {
+            LabeledContent("Verzerrung", value: "Keine")
         }
     }
 

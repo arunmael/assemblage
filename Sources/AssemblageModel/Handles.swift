@@ -12,7 +12,7 @@ public enum ResizeHandle: CaseIterable, Sendable {
 
     /// Anteilige Lage im Rahmen der Ebene, jeweils -1 (links/oben),
     /// 0 (Mitte) oder 1 (rechts/unten).
-    var unitOffset: (x: Double, y: Double) {
+    public var unitOffset: (x: Double, y: Double) {
         switch self {
         case .topLeft: return (-1, -1)
         case .top: return (0, -1)

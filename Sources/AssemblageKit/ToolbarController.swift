@@ -52,6 +52,7 @@ private extension NSToolbarItem.Identifier {
     static let insertShape = NSToolbarItem.Identifier("Assemblage.Einfuegen.Form")
     static let brushSettings = NSToolbarItem.Identifier("Assemblage.Pinsel.Einstellungen")
     static let zoom = NSToolbarItem.Identifier("Assemblage.Zoom")
+    static let share = NSToolbarItem.Identifier("Assemblage.Teilen")
 }
 
 /// Bindet die testbare Werkzeuglogik an `NSToolbar` und den Canvas.
@@ -59,7 +60,7 @@ private extension NSToolbarItem.Identifier {
 /// Der Controller besitzt keinen Dokumentzustand neben `DocumentState`: Er
 /// übersetzt nur Auswahl und Bedienung in die bereits vorhandenen Canvas-Modi.
 @MainActor
-final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation {
+final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation, @preconcurrency NSSharingServicePickerDelegate {
 
     let toolbar: NSToolbar
 
@@ -68,7 +69,9 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
     private weak var commandTarget: DocumentWindowController?
     private var observations: Set<AnyCancellable> = []
 
-    private var currentTool: CanvasTool = .select
+    private var currentTool: CanvasTool = .select {
+        didSet { state.reportToolState(currentTool, brush: brush) }
+    }
     private var selectedLayer: Layer?
     private var toolButtons: [CanvasTool: NSButton] = [:]
     private weak var removeSubjectButton: NSButton?
@@ -82,7 +85,11 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
         }
     }
 
-    private var brush = MaskBrush(diameter: 60, hardness: 0.5, mode: .hide)
+    private var brush = MaskBrush(diameter: 60, hardness: 0.5, mode: .hide) {
+        didSet { state.reportToolState(currentTool, brush: brush) }
+    }
+    /// Am Leben gehalten, waehrend der Teilen-Dialog offen ist.
+    private var sharingPicker: NSSharingServicePicker?
 
     init(
         state: DocumentState,
@@ -190,6 +197,15 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
 
     // MARK: - Pinsel
 
+    // MARK: - Zugang für Tests
+
+    /// Derselbe Weg wie der Grössen-Regler in der Werkzeugleiste, ohne einen
+    /// echten `NSSlider` zu brauchen.
+    func setBrushDiameterForTesting(_ diameter: Double) {
+        brush.diameter = diameter
+        canvasViewController?.setBrush(brush)
+    }
+
     @objc private func diameterChanged(_ sender: NSSlider) {
         brush.diameter = sender.doubleValue
         canvasViewController?.setBrush(brush)
@@ -221,6 +237,17 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
     @objc private func zoomIn(_ sender: Any?) { canvasViewController?.zoomIn() }
     @objc private func zoomOut(_ sender: Any?) { canvasViewController?.zoomOut() }
 
+    func sharingServicePicker(
+        _ sharingServicePicker: NSSharingServicePicker,
+        didChoose service: NSSharingService?
+    ) {
+        // Verzoegert statt sofort: Der Delegat wird noch innerhalb dieses
+        // Aufrufs gebraucht, um den gewaehlten Dienst tatsaechlich zu starten.
+        DispatchQueue.main.async { [weak self] in
+            self?.sharingPicker = nil
+        }
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(zoomIn(_:)) {
             return canvasViewController?.canZoomIn == true
@@ -243,7 +270,8 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
             .insertText,
             .insertShape,
             .flexibleSpace,
-            .zoom
+            .zoom,
+            .share
         ]
     }
 
@@ -304,6 +332,8 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
             return makeBrushSettingsItem(identifier: itemIdentifier)
         case .zoom:
             return makeZoomItem(identifier: itemIdentifier)
+        case .share:
+            return makeShareItem(identifier: itemIdentifier)
         default:
             return nil
         }
@@ -396,6 +426,44 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
             button.heightAnchor.constraint(greaterThanOrEqualToConstant: 36)
         ])
         return button
+    }
+
+    /// Der Apple-typische Teilen-Knopf (aus Anpassungen.md). Ein Export-Weg
+    /// existierte bereits ueber die Ablage-Menue-Zeile "Exportieren..." -
+    /// nur ohne sichtbaren Knopf im Fenster, weshalb er leicht zu uebersehen war.
+    private func makeShareItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
+        let button = toolbarButton(label: "Teilen", symbolName: "square.and.arrow.up", action: #selector(shareDocument(_:)))
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        item.label = "Teilen"
+        item.paletteLabel = "Teilen"
+        item.toolTip = "Teilen"
+        item.view = button
+        return item
+    }
+
+    /// Rendert das Dokument und oeffnet den System-Teilen-Dialog daran.
+    ///
+    /// Als eigener Task statt "async"-Aktion: "@objc"-Handler koennen nicht
+    /// async sein, und das Rendern (Bilddekodierung, Kompositing) soll die
+    /// Oberflaeche waehrenddessen nicht blockieren (Plan 2.1).
+    @objc private func shareDocument(_ sender: NSButton) {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let bild = try await ShareCommand.renderedImage(of: self.state.document, resources: self.state.resources)
+                let picker = NSSharingServicePicker(items: [bild])
+                picker.delegate = self
+                // Muss bis zum Schliessen am Leben bleiben - sonst verschwindet
+                // der Dialog, sobald diese Methode zurueckkehrt.
+                self.sharingPicker = picker
+                picker.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+            } catch {
+                // Kein Dialog fuer einen Fehler, der praktisch nie eintritt
+                // (dasselbe Rendern laeuft beim gewoehnlichen Export klaglos) -
+                // ein Signalton reicht, das Dokument bleibt unveraendert.
+                NSSound.beep()
+            }
+        }
     }
 
     private func makeBrushSettingsItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {

@@ -19,6 +19,21 @@ final class DocumentState: ObservableObject {
     /// Fenster, ein Fokus").
     @Published var selectedLayerID: UUID?
 
+    /// Das gerade aktive Canvas-Werkzeug — vom `ToolbarController` gepflegt.
+    ///
+    /// Nur zum **Lesen** von hier aus (Inspector, Sidebar-Anzeige o. Ä.):
+    /// Ein Werkzeugwechsel läuft weiterhin ausschliesslich über
+    /// `ToolbarController.select(_:)`/`toggle(_:)`, die dessen Regeln kennen
+    /// (z. B. dass ein zweiter Klick auf dasselbe Werkzeug zurückschaltet).
+    /// Zwei Stellen, die unabhängig voneinander schreiben dürften, liefen
+    /// sonst irgendwann auseinander.
+    @Published fileprivate(set) var currentTool: CanvasTool = .select
+
+    /// Die aktuellen Pinsel-Einstellungen — ebenfalls nur zur Anzeige
+    /// (Inspector), geschrieben wird ausschliesslich über die Regler in der
+    /// Werkzeugleiste.
+    @Published fileprivate(set) var brushSettings = MaskBrush(diameter: 60, hardness: 0.5, mode: .hide)
+
     private(set) var resources: DocumentResources
     private(set) var images: ImageStore
 
@@ -201,5 +216,16 @@ extension AssemblageDocument {
         coalescingActionName = nil
         coalescingTargetID = nil
         lastCoalescedAt = nil
+    }
+}
+
+extension DocumentState {
+    /// Meldet das aktive Werkzeug und die Pinsel-Einstellungen zur Anzeige
+    /// (Inspector, Sidebar). Nur für `ToolbarController` gedacht: Der
+    /// entscheidet weiterhin allein, welches Werkzeug gilt — diese Methode
+    /// spiegelt seine Entscheidung nur, statt eine zweite zu treffen.
+    func reportToolState(_ tool: CanvasTool, brush: MaskBrush) {
+        currentTool = tool
+        brushSettings = brush
     }
 }

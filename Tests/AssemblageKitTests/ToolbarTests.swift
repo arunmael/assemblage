@@ -117,3 +117,74 @@ final class ToolbarTests: XCTestCase {
         )))
     }
 }
+
+/// Das aktive Werkzeug und die Pinsel-Einstellungen müssen im
+/// `DocumentState` ankommen (aus Anpassungen.md: „Die Spezifikation des
+/// Werkzeugs sollte im Inspector ersichtlich sein"). Der Inspector selbst
+/// ist SwiftUI und lässt sich hier nicht rendern — geprüft wird deshalb die
+/// Zustandsspiegelung, die er liest.
+@MainActor
+final class ToolStateReportingTests: XCTestCase {
+
+    private func aufbau(selecting layer: Layer? = nil) -> (AssemblageDocument, ToolbarController) {
+        let document = AssemblageDocument()
+        if let layer {
+            document.modify("Vorbereiten") { _ = try? $0.addLayer(layer) }
+            document.state.selectedLayerID = layer.id
+        }
+        let canvas = CanvasViewController(state: document.state)
+        let toolbar = ToolbarController(
+            state: document.state,
+            canvasViewController: canvas,
+            commandTarget: DocumentWindowController()
+        )
+        return (document, toolbar)
+    }
+
+    /// Startzustand: „Auswählen", ohne dass ein Werkzeug erst umgeschaltet
+    /// werden musste.
+    func testInitialToolIsSelect() {
+        let (document, _) = aufbau()
+        XCTAssertEqual(document.state.currentTool, .select)
+    }
+
+    func testSwitchingToolsUpdatesTheReportedTool() {
+        let bild = Layer(name: "Foto", content: .image(ImageLayerContent(originalFileReference: "originals/a.png")))
+        let (document, toolbar) = aufbau(selecting: bild)
+
+        _ = toolbar.select(.crop)
+        XCTAssertEqual(document.state.currentTool, .crop)
+
+        _ = toolbar.select(.brush)
+        XCTAssertEqual(document.state.currentTool, .brush)
+
+        // Zurück zu „Auswählen": derselbe Weg, den ein zweiter Klick auf den
+        // aktiven Knopf nimmt.
+        _ = toolbar.select(.select)
+        XCTAssertEqual(document.state.currentTool, .select)
+    }
+
+    /// Ein Werkzeug, das für die aktuelle Auswahl nicht verfügbar ist, darf
+    /// den gemeldeten Zustand nicht verändern — sonst zeigte der Inspector
+    /// ein Werkzeug an, das gar nicht aktiv wurde.
+    func testUnavailableToolDoesNotChangeTheReportedTool() {
+        let form = Layer(name: "Form", content: .shape(
+            ShapeLayerContent(kind: .rectangle, size: Size(width: 10, height: 10))))
+        let (document, toolbar) = aufbau(selecting: form)
+
+        XCTAssertFalse(toolbar.select(.brush), "Formebenen können nicht bemalt werden")
+        XCTAssertEqual(document.state.currentTool, .select)
+    }
+
+    func testBrushSettingsAreReportedOnChange() {
+        let bild = Layer(name: "Foto", content: .image(ImageLayerContent(originalFileReference: "originals/a.png")))
+        let (document, toolbar) = aufbau(selecting: bild)
+
+        XCTAssertEqual(document.state.brushSettings.diameter, 60, accuracy: 0.001)
+        XCTAssertEqual(document.state.brushSettings.hardness, 0.5, accuracy: 0.001)
+        XCTAssertEqual(document.state.brushSettings.mode, .hide)
+
+        toolbar.setBrushDiameterForTesting(120)
+        XCTAssertEqual(document.state.brushSettings.diameter, 120, accuracy: 0.001)
+    }
+}

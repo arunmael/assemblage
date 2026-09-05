@@ -499,9 +499,28 @@ final class CanvasView: NSView {
         // feste Achse und Grössenänderung suggerieren.
         if distortDrag != nil || distortCorner(at: canvasPoint(from: event)) != nil {
             NSCursor.crosshair.set()
-        } else {
-            NSCursor.arrow.set()
+            return
         }
+
+        // Während eines laufenden Ziehens gilt der Griff, mit dem es begann —
+        // sonst flackerte der Zeiger zurück auf den Pfeil, sobald die Maus
+        // beim Ziehen leicht von der ursprünglichen Griffposition abweicht.
+        if let laufend = drag, case .resize(let griff) = laufend.kind,
+           let ebene = document.layer(withID: laufend.layerID) {
+            ResizeCursor.cursor(for: griff, layerRotationDegrees: ebene.transform.rotationDegrees).set()
+            return
+        }
+
+        // Ausserhalb eines Ziehens: der Griff unter dem Zeiger, falls einer
+        // dort liegt (aus Anpassungen.md: „Der Cursor sollte sich anpassen,
+        // wenn man die Grösse eines Fotos verändert").
+        if let id = selectedLayerID, case .resize(let griff)? = handleDrag(at: canvasPoint(from: event))?.0,
+           let ebene = document.layer(withID: id) {
+            ResizeCursor.cursor(for: griff, layerRotationDegrees: ebene.transform.rotationDegrees).set()
+            return
+        }
+
+        NSCursor.arrow.set()
     }
 
     /// Rechnet einen Punkt aus der Ansicht in Leinwandkoordinaten um.

@@ -438,3 +438,112 @@ final class CanvasInteractionTests: XCTestCase {
         XCTAssertEqual(protokoll.wuerfe, 0)
     }
 }
+
+/// Der Mauszeiger über einem Grössen-Griff (aus Anpassungen.md).
+@MainActor
+final class CanvasCursorTests: XCTestCase {
+
+    private var fenster: NSWindow!
+    private var canvas: CanvasView!
+
+    private func aufbau(rotationDegrees: Double = 0) -> UUID {
+        let ebene = Layer(
+            name: "Foto",
+            transform: Transform2D(x: 200, y: 200, rotationDegrees: rotationDegrees),
+            content: .shape(ShapeLayerContent(kind: .rectangle, size: Size(width: 100, height: 100)))
+        )
+        let document = AssemblageModel.Document(canvas: CanvasSize(width: 400, height: 400), layers: [ebene])
+        canvas = CanvasView(document: document, images: ImageStore(resources: DocumentResources()))
+        canvas.selectedLayerID = ebene.id
+
+        fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        fenster.contentView?.addSubview(canvas)
+        canvas.frame = NSRect(x: 0, y: 0, width: 400, height: 400)
+        return ebene.id
+    }
+
+    private func bewegen(atCanvasX x: Double, y: Double) throws {
+        let inView = NSPoint(x: x, y: Double(canvas.bounds.height) - y)
+        let inWindow = canvas.convert(inView, to: nil)
+        let ereignis = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .mouseMoved, location: inWindow, modifierFlags: [], timestamp: 0,
+            windowNumber: fenster.windowNumber, context: nil,
+            eventNumber: 0, clickCount: 0, pressure: 0
+        ))
+        canvas.mouseMoved(with: ereignis)
+    }
+
+    /// Bewegt die Maus genau auf die Bildschirmposition eines Griffs — auch
+    /// nach einer Drehung, statt eine Koordinate zu erraten.
+    private func bewegen(auf griff: ResizeHandle, transform: Transform2D) throws {
+        let punkt = transform.position(of: griff, contentSize: Size(width: 100, height: 100))
+        try bewegen(atCanvasX: punkt.x, y: punkt.y)
+    }
+
+    func testCursorOverAnEdgeHandleIsResizeLeftRight() throws {
+        _ = aufbau()
+        // Der Rahmen ist 100×100, mittig bei (200,200) — der linke Griff
+        // liegt also bei x=150, y=200.
+        try bewegen(atCanvasX: 150, y: 200)
+        XCTAssertEqual(NSCursor.current, NSCursor.resizeLeftRight)
+    }
+
+    func testCursorOverATopOrBottomHandleIsResizeUpDown() throws {
+        _ = aufbau()
+        try bewegen(atCanvasX: 200, y: 150)
+        XCTAssertEqual(NSCursor.current, NSCursor.resizeUpDown)
+    }
+
+    /// Die Ecke und ihr gegenüberliegender Griff müssen denselben Zeiger
+    /// zeigen — dieselbe Achse, nur das andere Ende.
+    func testCornerHandlesShareTheirDiagonalCursor() throws {
+        _ = aufbau()
+        try bewegen(atCanvasX: 150, y: 150)
+        let obenLinks = NSCursor.current
+
+        try bewegen(atCanvasX: 250, y: 250)
+        let untenRechts = NSCursor.current
+
+        XCTAssertEqual(obenLinks, untenRechts)
+        XCTAssertNotEqual(obenLinks, NSCursor.resizeLeftRight)
+        XCTAssertNotEqual(obenLinks, NSCursor.resizeUpDown)
+    }
+
+    /// Gegenprobe: Die andere Diagonale muss sich vom ersten Zeiger
+    /// unterscheiden — sonst könnten beide „Diagonal"-Fälle zufällig auf
+    /// denselben (falschen) Zeiger abgebildet worden sein.
+    func testTheTwoDiagonalsAreDifferentCursors() throws {
+        _ = aufbau()
+        try bewegen(atCanvasX: 150, y: 150)
+        let obenLinksUntenRechts = NSCursor.current
+
+        try bewegen(atCanvasX: 250, y: 150)
+        let obenRechtsUntenLinks = NSCursor.current
+
+        XCTAssertNotEqual(obenLinksUntenRechts, obenRechtsUntenLinks)
+    }
+
+    /// Ausserhalb jedes Griffs bleibt es beim gewöhnlichen Pfeil.
+    func testCursorAwayFromAnyHandleIsTheArrow() throws {
+        _ = aufbau()
+        try bewegen(atCanvasX: 200, y: 200)
+        XCTAssertEqual(NSCursor.current, NSCursor.arrow)
+    }
+
+    /// Eine gedrehte Ebene: Der linke Griff liegt jetzt an anderer
+    /// Bildschirmstelle, aber der Zeiger muss ihr folgen und darf nicht mehr
+    /// der ungedrehte „links/rechts"-Zeiger sein.
+    func testRotatedLayerGetsARotatedCursor() throws {
+        let transform = Transform2D(x: 200, y: 200, rotationDegrees: 90)
+        _ = aufbau(rotationDegrees: 90)
+
+        // Der linke Griff liegt nach 90° Drehung an anderer Bildschirmstelle,
+        // seine Achse bleibt aber dieselbe „linke/rechte" wie ungedreht — nur
+        // sichtbar um 90° gekippt, und damit senkrecht statt waagrecht.
+        try bewegen(auf: .left, transform: transform)
+        XCTAssertEqual(NSCursor.current, NSCursor.resizeUpDown)
+    }
+}
