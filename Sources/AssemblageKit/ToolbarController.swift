@@ -10,6 +10,7 @@ enum CanvasTool: Equatable {
     case select
     case crop
     case brush
+    case lasso
     case paint
     case distort
 }
@@ -23,7 +24,7 @@ struct ToolSelection {
         switch tool {
         case .select:
             return true
-        case .crop, .brush, .paint:
+        case .crop, .brush, .lasso, .paint:
             guard let layer, case .image = layer.content else { return false }
             return true
         case .distort:
@@ -47,11 +48,13 @@ private extension NSToolbarItem.Identifier {
     static let selectTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Auswaehlen")
     static let cropTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Zuschneiden")
     static let brushTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Pinsel")
+    static let lassoTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Lasso")
     static let distortTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Verziehen")
     static let removeSubject = NSToolbarItem.Identifier("Assemblage.Werkzeug.Freistellen")
     static let insertText = NSToolbarItem.Identifier("Assemblage.Einfuegen.Text")
     static let insertShape = NSToolbarItem.Identifier("Assemblage.Einfuegen.Form")
     static let brushSettings = NSToolbarItem.Identifier("Assemblage.Pinsel.Einstellungen")
+    static let lassoSettings = NSToolbarItem.Identifier("Assemblage.Lasso.Einstellungen")
     static let paintTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Farbe")
     static let paintSettings = NSToolbarItem.Identifier("Assemblage.Farbe.Einstellungen")
     static let zoom = NSToolbarItem.Identifier("Assemblage.Zoom")
@@ -73,7 +76,7 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
     private var observations: Set<AnyCancellable> = []
 
     private var currentTool: CanvasTool = .select {
-        didSet { state.reportToolState(currentTool, brush: brush, paintBrush: paintBrush) }
+        didSet { reportToolState() }
     }
     private var selectedLayer: Layer?
     private var toolButtons: [CanvasTool: NSButton] = [:]
@@ -89,12 +92,16 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
     }
 
     private var brush = MaskBrush(diameter: 60, hardness: 0.5, mode: .hide) {
-        didSet { state.reportToolState(currentTool, brush: brush, paintBrush: paintBrush) }
+        didSet { reportToolState() }
+    }
+
+    private var lassoMode: MaskBrush.Mode = .hide {
+        didSet { reportToolState() }
     }
 
     /// Einstellungen des Farbpinsels (aus Anpassungen.md).
     private var paintBrush = PaintBrush(diameter: 30, hardness: 0.8, colorHex: "#000000", opacity: 1) {
-        didSet { state.reportToolState(currentTool, brush: brush, paintBrush: paintBrush) }
+        didSet { reportToolState() }
     }
     /// Am Leben gehalten, waehrend der Teilen-Dialog offen ist.
     private var sharingPicker: NSSharingServicePicker?
@@ -142,6 +149,7 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
     @objc private func selectTool(_ sender: Any?) { toggle(.select) }
     @objc private func cropTool(_ sender: Any?) { toggle(.crop) }
     @objc private func brushTool(_ sender: Any?) { toggle(.brush) }
+    @objc private func lassoTool(_ sender: Any?) { toggle(.lasso) }
     @objc private func paintTool(_ sender: Any?) { toggle(.paint) }
     @objc private func distortTool(_ sender: Any?) { toggle(.distort) }
 
@@ -166,6 +174,8 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
         canvasViewController?.setTool(currentTool, forSelected: selectedLayer)
         if currentTool == .brush {
             canvasViewController?.setBrush(brush)
+        } else if currentTool == .lasso {
+            canvasViewController?.setLassoMode(lassoMode)
         }
     }
 
@@ -191,7 +201,19 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
             forSelected: selectedLayer
         )
         updateBrushSettingsVisibility()
+        updateLassoSettingsVisibility()
         updatePaintSettingsVisibility()
+    }
+
+    private func updateLassoSettingsVisibility() {
+        let index = toolbar.items.firstIndex { $0.itemIdentifier == .lassoSettings }
+        if currentTool == .lasso, index == nil {
+            let zoomIndex = toolbar.items.firstIndex { $0.itemIdentifier == .zoom }
+                ?? toolbar.items.count
+            toolbar.insertItem(withItemIdentifier: .lassoSettings, at: zoomIndex)
+        } else if currentTool != .lasso, let index {
+            toolbar.removeItem(at: index)
+        }
     }
 
     private func updateBrushSettingsVisibility() {
@@ -227,6 +249,11 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
         canvasViewController?.setBrush(brush)
     }
 
+    func setLassoModeForTesting(_ mode: MaskBrush.Mode) {
+        lassoMode = mode
+        canvasViewController?.setLassoMode(mode)
+    }
+
     /// Derselbe Weg wie die Werkzeugleisten-Regler des Farbpinsels, ohne
     /// echte `NSSlider`/`NSColorWell` zu brauchen.
     func setPaintBrushForTesting(_ neu: PaintBrush) {
@@ -247,6 +274,20 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
     @objc private func brushModeChanged(_ sender: NSSegmentedControl) {
         brush.mode = sender.selectedSegment == 1 ? .reveal : .hide
         canvasViewController?.setBrush(brush)
+    }
+
+    @objc private func lassoModeChanged(_ sender: NSSegmentedControl) {
+        lassoMode = sender.selectedSegment == 1 ? .reveal : .hide
+        canvasViewController?.setLassoMode(lassoMode)
+    }
+
+    private func reportToolState() {
+        state.reportToolState(
+            currentTool,
+            brush: brush,
+            lassoMode: lassoMode,
+            paintBrush: paintBrush
+        )
     }
 
     // MARK: - Befehle
@@ -293,6 +334,7 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
             .selectTool,
             .cropTool,
             .brushTool,
+            .lassoTool,
             .paintTool,
             .distortTool,
             .removeSubject,
@@ -305,7 +347,7 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarDefaultItemIdentifiers(toolbar) + [.brushSettings, .paintSettings, .space]
+        toolbarDefaultItemIdentifiers(toolbar) + [.brushSettings, .lassoSettings, .paintSettings, .space]
     }
 
     func toolbar(
@@ -338,6 +380,16 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
                 symbolName: "paintbrush",
                 action: #selector(brushTool(_:))
             )
+        case .lassoTool:
+            let symbolName = NSImage(systemSymbolName: "lasso", accessibilityDescription: nil) == nil
+                ? "scissors" : "lasso"
+            return makeToolItem(
+                identifier: itemIdentifier,
+                tool: .lasso,
+                label: "Bild ausschneiden",
+                symbolName: symbolName,
+                action: #selector(lassoTool(_:))
+            )
         case .paintTool:
             return makeToolItem(
                 identifier: itemIdentifier,
@@ -367,6 +419,8 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
             return makeShapeItem(identifier: itemIdentifier)
         case .brushSettings:
             return makeBrushSettingsItem(identifier: itemIdentifier)
+        case .lassoSettings:
+            return makeLassoSettingsItem(identifier: itemIdentifier)
         case .paintSettings:
             return makePaintSettingsItem(identifier: itemIdentifier)
         case .zoom:
@@ -556,6 +610,24 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
         item.label = "Pinsel-Einstellungen"
         item.paletteLabel = "Pinsel-Einstellungen"
         item.view = stack
+        return item
+    }
+
+    private func makeLassoSettingsItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
+        let mode = NSSegmentedControl(
+            labels: ["Abdecken", "Zurückholen"],
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(lassoModeChanged(_:))
+        )
+        mode.selectedSegment = lassoMode == .hide ? 0 : 1
+        mode.controlSize = .large
+        mode.setAccessibilityLabel("Lassomodus")
+
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        item.label = "Lasso-Einstellungen"
+        item.paletteLabel = "Lasso-Einstellungen"
+        item.view = mode
         return item
     }
 

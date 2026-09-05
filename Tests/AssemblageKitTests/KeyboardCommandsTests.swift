@@ -25,6 +25,7 @@ final class KeyboardCommandsTests: XCTestCase {
         XCTAssertEqual(befehl("v"), .selectTool(.select))
         XCTAssertEqual(befehl("c"), .selectTool(.crop))
         XCTAssertEqual(befehl("b"), .selectTool(.brush))
+        XCTAssertEqual(befehl("l"), .selectTool(.lasso))
     }
 
     func testToolKeysAreCaseInsensitive() {
@@ -34,7 +35,7 @@ final class KeyboardCommandsTests: XCTestCase {
     /// **Der wichtigste Test.** Ohne diesen Schutz wechselt beim Schreiben
     /// eines Titels mit jedem „b" das Werkzeug.
     func testNoCommandsWhileTypingText() {
-        for zeichen in ["v", "c", "b", "1", "0"] {
+        for zeichen in ["v", "c", "b", "l", "1", "0"] {
             XCTAssertNil(befehl(zeichen, tippt: true), "Taste \(zeichen) darf beim Tippen nichts auslösen")
         }
         XCTAssertNil(befehl(String(UnicodeScalar(NSUpArrowFunctionKey)!), tippt: true))

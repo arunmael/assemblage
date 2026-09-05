@@ -13,13 +13,19 @@ final class ToolSidebarView: NSView {
 
     /// Die Werkzeuge in der Reihenfolge, in der sie in der Leiste stehen.
     /// Eine Stelle, damit Leiste und Verfügbarkeitsprüfung nicht auseinanderlaufen.
-    static let allTools: [CanvasTool] = [.select, .crop, .brush, .paint, .distort]
+    static let allTools: [CanvasTool] = [.select, .crop, .brush, .lasso, .paint, .distort]
 
     /// Die Einträge der Leiste, wie sie das Fenster aufbaut.
     static let defaultItems: [ToolSidebarItem] = [
         ToolSidebarItem(tool: .select, title: "Auswählen", symbolName: "cursorarrow"),
         ToolSidebarItem(tool: .crop, title: "Zuschneiden", symbolName: "crop"),
         ToolSidebarItem(tool: .brush, title: "Maske malen", symbolName: "paintbrush"),
+        ToolSidebarItem(
+            tool: .lasso,
+            title: "Bild ausschneiden",
+            symbolName: NSImage(systemSymbolName: "lasso", accessibilityDescription: nil) == nil
+                ? "scissors" : "lasso"
+        ),
         ToolSidebarItem(tool: .paint, title: "Farbe malen", symbolName: "paintpalette"),
         ToolSidebarItem(tool: .distort, title: "Verziehen", symbolName: "skew")
     ]

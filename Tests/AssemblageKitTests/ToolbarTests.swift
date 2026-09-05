@@ -30,6 +30,7 @@ final class ToolbarTests: XCTestCase {
         XCTAssertTrue(ToolSelection.isAvailable(.select, forSelected: nil))
         XCTAssertFalse(ToolSelection.isAvailable(.crop, forSelected: nil))
         XCTAssertFalse(ToolSelection.isAvailable(.brush, forSelected: nil))
+        XCTAssertFalse(ToolSelection.isAvailable(.lasso, forSelected: nil))
         XCTAssertFalse(ToolSelection.isAvailable(.paint, forSelected: nil))
         XCTAssertFalse(ToolSelection.isAvailable(.distort, forSelected: nil))
     }
@@ -39,13 +40,14 @@ final class ToolbarTests: XCTestCase {
             XCTAssertTrue(ToolSelection.isAvailable(.select, forSelected: layer))
             XCTAssertFalse(ToolSelection.isAvailable(.crop, forSelected: layer))
             XCTAssertFalse(ToolSelection.isAvailable(.brush, forSelected: layer))
+            XCTAssertFalse(ToolSelection.isAvailable(.lasso, forSelected: layer))
             XCTAssertFalse(ToolSelection.isAvailable(.paint, forSelected: layer))
             XCTAssertTrue(ToolSelection.isAvailable(.distort, forSelected: layer))
         }
     }
 
     func testAllToolsAreAvailableForImageLayer() {
-        for tool in [CanvasTool.select, .crop, .brush, .paint, .distort] {
+        for tool in [CanvasTool.select, .crop, .brush, .lasso, .paint, .distort] {
             XCTAssertTrue(ToolSelection.isAvailable(tool, forSelected: imageLayer))
         }
     }
@@ -53,6 +55,7 @@ final class ToolbarTests: XCTestCase {
     func testSecondClickOnActiveToolReturnsToSelect() {
         XCTAssertEqual(ToolSelection.toggled(.crop, current: .crop), .select)
         XCTAssertEqual(ToolSelection.toggled(.brush, current: .brush), .select)
+        XCTAssertEqual(ToolSelection.toggled(.lasso, current: .lasso), .select)
         XCTAssertEqual(ToolSelection.toggled(.distort, current: .distort), .select)
         XCTAssertEqual(ToolSelection.toggled(.select, current: .select), .select)
     }
@@ -60,6 +63,7 @@ final class ToolbarTests: XCTestCase {
     func testClickOnAnotherToolSwitchesToIt() {
         XCTAssertEqual(ToolSelection.toggled(.crop, current: .select), .crop)
         XCTAssertEqual(ToolSelection.toggled(.brush, current: .crop), .brush)
+        XCTAssertEqual(ToolSelection.toggled(.lasso, current: .brush), .lasso)
         XCTAssertEqual(ToolSelection.toggled(.select, current: .brush), .select)
         XCTAssertEqual(ToolSelection.toggled(.distort, current: .crop), .distort)
     }
@@ -71,9 +75,14 @@ final class ToolbarTests: XCTestCase {
         )
     }
 
+    func testLassoFallsBackToSelectWhenSelectionChangesToText() {
+        XCTAssertEqual(ToolSelection.adjusted(.lasso, forSelected: textLayer), .select)
+    }
+
     func testActiveToolFallsBackToSelectWhenSelectionIsCleared() {
         XCTAssertEqual(ToolSelection.adjusted(.crop, forSelected: nil), .select)
         XCTAssertEqual(ToolSelection.adjusted(.brush, forSelected: nil), .select)
+        XCTAssertEqual(ToolSelection.adjusted(.lasso, forSelected: nil), .select)
     }
 
     func testAvailableActiveToolSurvivesImageSelection() {
@@ -85,6 +94,7 @@ final class ToolbarTests: XCTestCase {
             ToolSelection.adjusted(.brush, forSelected: imageLayer),
             .brush
         )
+        XCTAssertEqual(ToolSelection.adjusted(.lasso, forSelected: imageLayer), .lasso)
     }
 
     func testUnavailableKeyboardToolIsNotReportedAsHandled() {
@@ -160,6 +170,9 @@ final class ToolStateReportingTests: XCTestCase {
         _ = toolbar.select(.brush)
         XCTAssertEqual(document.state.currentTool, .brush)
 
+        _ = toolbar.select(.lasso)
+        XCTAssertEqual(document.state.currentTool, .lasso)
+
         // Zurück zu „Auswählen": derselbe Weg, den ein zweiter Klick auf den
         // aktiven Knopf nimmt.
         _ = toolbar.select(.select)
@@ -175,6 +188,7 @@ final class ToolStateReportingTests: XCTestCase {
         let (document, toolbar) = aufbau(selecting: form)
 
         XCTAssertFalse(toolbar.select(.brush), "Formebenen können nicht bemalt werden")
+        XCTAssertFalse(toolbar.select(.lasso), "Formebenen können nicht mit dem Lasso maskiert werden")
         XCTAssertEqual(document.state.currentTool, .select)
     }
 
@@ -188,6 +202,15 @@ final class ToolStateReportingTests: XCTestCase {
 
         toolbar.setBrushDiameterForTesting(120)
         XCTAssertEqual(document.state.brushSettings.diameter, 120, accuracy: 0.001)
+    }
+
+    func testLassoModeIsReportedOnChange() {
+        let bild = Layer(name: "Foto", content: .image(ImageLayerContent(originalFileReference: "originals/a.png")))
+        let (document, toolbar) = aufbau(selecting: bild)
+
+        XCTAssertEqual(document.state.lassoMode, .hide)
+        toolbar.setLassoModeForTesting(.reveal)
+        XCTAssertEqual(document.state.lassoMode, .reveal)
     }
 
     /// Dieselbe Meldung wie beim Pinsel, für den Farbpinsel (aus

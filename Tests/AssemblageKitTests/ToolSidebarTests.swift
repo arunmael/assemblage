@@ -11,11 +11,17 @@ import AppKit
 @MainActor
 final class ToolSidebarTests: XCTestCase {
 
+    func testDefaultToolsContainLasso() {
+        XCTAssertTrue(ToolSidebarView.allTools.contains(.lasso))
+        XCTAssertTrue(ToolSidebarView.defaultItems.contains { $0.tool == .lasso })
+    }
+
     private func leiste() -> ToolSidebarView {
         ToolSidebarView(items: [
             ToolSidebarItem(tool: .select, title: "Auswählen", symbolName: "cursorarrow"),
             ToolSidebarItem(tool: .crop, title: "Zuschneiden", symbolName: "crop"),
             ToolSidebarItem(tool: .brush, title: "Pinsel", symbolName: "paintbrush"),
+            ToolSidebarItem(tool: .lasso, title: "Lasso", symbolName: "lasso"),
             ToolSidebarItem(tool: .distort, title: "Verziehen", symbolName: "skew")
         ])
     }
@@ -61,7 +67,7 @@ final class ToolSidebarTests: XCTestCase {
     func testEveryRowCarriesItsTitleAsTooltip() {
         XCTAssertEqual(
             leiste().toolTipsForTesting.sorted(),
-            ["Auswählen", "Pinsel", "Verziehen", "Zuschneiden"]
+            ["Auswählen", "Lasso", "Pinsel", "Verziehen", "Zuschneiden"]
         )
     }
 

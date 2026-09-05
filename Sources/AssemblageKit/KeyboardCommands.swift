@@ -51,6 +51,7 @@ enum KeyboardCommands {
         case "v": return .selectTool(.select)
         case "c": return .selectTool(.crop)
         case "b": return .selectTool(.brush)
+        case "l": return .selectTool(.lasso)
         default: break
         }
 
