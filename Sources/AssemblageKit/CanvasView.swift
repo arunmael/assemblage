@@ -283,6 +283,7 @@ final class CanvasView: NSView {
 
         if canvasChanged {
             frame = CGRect(origin: .zero, size: document.canvas.cgSize)
+            sizeCanvasLayers()
         }
 
         if structureChanged {
@@ -341,13 +342,23 @@ final class CanvasView: NSView {
         }
     }
 
+    /// Legt Grund- und Bedienschicht auf die aktuelle Leinwandgrösse.
+    /// Idempotent — deshalb darf sie sowohl beim reinen Grössenwechsel als
+    /// auch beim Neuaufbau laufen, ohne dass es einen Sonderfall braucht.
+    private func sizeCanvasLayers() {
+        let canvasFrame = CGRect(origin: .zero, size: document.canvas.cgSize)
+        withoutAnimation {
+            canvasLayer.frame = canvasFrame
+            overlayLayer.frame = canvasFrame
+        }
+    }
+
     private func rebuild() {
         canvasLayer.sublayers?.forEach { $0.removeFromSuperlayer() }
         renderedLayers.removeAll()
+        sizeCanvasLayers()
 
         withoutAnimation {
-            canvasLayer.frame = CGRect(origin: .zero, size: document.canvas.cgSize)
-            overlayLayer.frame = canvasLayer.frame
             // Reihenfolge im Modell = Kompositing-Reihenfolge, Index 0 zuunterst
             // — und genau so erwartet Core Animation seine `sublayers`.
             for layer in document.layers {
@@ -1304,26 +1315,26 @@ extension CanvasView: NSTextViewDelegate {
     }
 }
 
-/// `NSClipView`, die ihren Inhalt zentriert, solange er kleiner als das
-/// Fenster ist.
+/// `NSClipView` ohne Begrenzung auf den Dokumentrahmen.
 ///
-/// Ohne das klebt eine herausgezoomte Leinwand in der linken oberen Ecke —
-/// AppKit kennt von sich aus keine Zentrierung.
+/// AppKit hält den sichtbaren Ausschnitt von sich aus über der Leinwand fest —
+/// damit klebt man an ihr, statt frei auf der Fläche zu arbeiten. Hier darf sie
+/// beliebig weit aus dem Fenster geschoben werden; der Rückweg ist „Ins Fenster
+/// einpassen", das über `centerDocument()` wieder zentriert.
 final class CenteringClipView: NSClipView {
 
     override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
-        var rect = super.constrainBoundsRect(proposedBounds)
-        guard let documentView else { return rect }
+        proposedBounds
+    }
 
-        let content = documentView.frame
-
-        if rect.width > content.width {
-            rect.origin.x = (content.width - rect.width) / 2
-        }
-        if rect.height > content.height {
-            rect.origin.y = (content.height - rect.height) / 2
-        }
-        return rect
+    /// Holt die Leinwand mittig ins Sichtfeld zurück.
+    func centerDocument() {
+        guard let documentView else { return }
+        scroll(to: CGPoint(
+            x: documentView.frame.midX - bounds.width / 2,
+            y: documentView.frame.midY - bounds.height / 2
+        ))
+        enclosingScrollView?.reflectScrolledClipView(self)
     }
 }
 

@@ -9,6 +9,7 @@ final class CanvasViewController: NSViewController {
     private let state: DocumentState
     private var canvasView: CanvasView!
     private let scrollView = NSScrollView()
+    private let clipView = CenteringClipView()
     private var observations: Set<AnyCancellable> = []
     /// Beim ersten Anzeigen einmal auf Fenstergrösse einpassen — danach nicht
     /// mehr, sonst würde jede Fenstergrössenänderung den vom Nutzer gewählten
@@ -27,11 +28,16 @@ final class CanvasViewController: NSViewController {
     override func loadView() {
         canvasView = CanvasView(document: state.document, images: state.images)
 
-        scrollView.contentView = CenteringClipView()
+        scrollView.contentView = clipView
         scrollView.documentView = canvasView
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
+        // Ohne Elastizität lässt AppKit den Bildlauf ganz aus, sobald die
+        // Leinwand kleiner als das Fenster ist — dann liesse sie sich gerade
+        // beim Herauszoomen nicht mehr verschieben.
+        scrollView.horizontalScrollElasticity = .allowed
+        scrollView.verticalScrollElasticity = .allowed
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = true
         scrollView.backgroundColor = .underPageBackgroundColor
@@ -183,7 +189,7 @@ final class CanvasViewController: NSViewController {
         // Nicht über 100 % hinaus vergrössern: ein Instagram-Post soll beim
         // Öffnen nicht formatfüllend aufgeblasen werden.
         scrollView.magnification = min(max(scale, scrollView.minMagnification), 1)
-        scrollView.contentView.scrollToVisible(canvasView.bounds)
+        clipView.centerDocument()
         zoomDidChange()
     }
 

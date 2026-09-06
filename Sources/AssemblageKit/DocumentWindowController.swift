@@ -129,6 +129,14 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
         document.undoManager?.undo()
     }
 
+    /// Gegenstück zu `undo(_:)`: Ohne diese Methode lief `redo:` bisher ins
+    /// Leere, weil die Responder-Kette es nirgends implementiert hatte.
+    @IBAction func redo(_ sender: Any?) {
+        guard let document = document as? AssemblageDocument else { return }
+        document.endCoalescingInteraction()
+        document.undoManager?.redo()
+    }
+
     @IBAction func insertTextLayer(_ sender: Any?) { insertLayer(.text) }
 
     @IBAction func insertPaintLayer(_ sender: Any?) {
@@ -234,6 +242,10 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
         if menuItem.action == #selector(undo(_:)) {
             guard let document = document as? AssemblageDocument else { return false }
             return document.coalescingActionName != nil || document.undoManager?.canUndo == true
+        }
+        if menuItem.action == #selector(redo(_:)) {
+            guard let document = document as? AssemblageDocument else { return false }
+            return document.undoManager?.canRedo == true
         }
 
         if menuItem.action == #selector(zoomIn(_:)) {

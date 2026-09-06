@@ -34,6 +34,23 @@ final class AssemblageDocument: NSDocument {
     var coalescingTargetID: UUID?
     var lastCoalescedAt: Date?
     var coalescingTimer: Timer?
+    private(set) var lastManualBackupAt: Date?
+
+    /// Legt die zusätzliche Dateiversion an.
+    ///
+    /// Ersetzbar, damit Tests ohne echten Dateizugriff prüfen können, *wann*
+    /// gesichert wird. Die Vorgabe kopiert das ganze Dokumentpaket und läuft
+    /// deshalb im Hintergrund — auf dem Hauptthread wäre das nach jedem
+    /// bewussten Sichern eine sichtbare Blockade.
+    var manualFileVersionCreator: (URL) -> Void = { url in
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                try NSFileVersion.addOfItem(at: url, withContentsOf: url, options: [])
+            } catch {
+                NSLog("Manuelles Backup für %@ fehlgeschlagen: %@", url.path, error.localizedDescription)
+            }
+        }
+    }
 
     // MARK: - Verhalten
 
@@ -48,6 +65,40 @@ final class AssemblageDocument: NSDocument {
     }
 
     // MARK: - Lesen & Schreiben
+
+    override func save(
+        to url: URL,
+        ofType typeName: String,
+        for saveOperation: NSDocument.SaveOperationType,
+        completionHandler: @escaping (Error?) -> Void
+    ) {
+        super.save(to: url, ofType: typeName, for: saveOperation) { [weak self] error in
+            completionHandler(error)
+            self?.handleCompletedSave(error: error, operation: saveOperation)
+        }
+    }
+
+    /// Eigene Methode, damit der erfolgreiche Abschluss ohne den im
+    /// Swift-Package-Testbundle fehlenden AppKit-Dokumenttyp prüfbar bleibt.
+    func handleCompletedSave(error: Error?, operation: NSDocument.SaveOperationType) {
+        let isManualSave = operation == .saveOperation || operation == .saveAsOperation
+        guard error == nil, isManualSave else { return }
+        createManualBackupIfNeeded()
+    }
+
+    /// Hält einen bewusst gesicherten Stand zusätzlich zu den automatischen
+    /// Dokumentversionen fest, höchstens einmal pro halbe Stunde.
+    private func createManualBackupIfNeeded() {
+        let now = Date()
+        if let lastManualBackupAt,
+           now.timeIntervalSince(lastManualBackupAt) <= 30 * 60 {
+            return
+        }
+
+        guard let fileURL else { return }
+        manualFileVersionCreator(fileURL)
+        lastManualBackupAt = now
+    }
 
     override func read(from fileWrapper: FileWrapper, ofType typeName: String) throws {
         guard let documentData = fileWrapper.fileWrappers?[DocumentPackage.documentFileName]?

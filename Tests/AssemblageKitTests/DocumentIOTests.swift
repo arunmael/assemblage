@@ -106,6 +106,41 @@ final class DocumentIOTests: XCTestCase {
         XCTAssertNil(reopened.state.resources.data(for: reference))
     }
 
+    /// Ein bewusstes Sichern legt zusätzlich zur normalen Versionierung einen
+    /// Stand an; weitere Sicherungen kurz danach werden zusammengefasst.
+    func testManualSaveCreatesAtMostOneBackupWithinThirtyMinutes() throws {
+        let document = AssemblageDocument()
+        let url = packageURL("ManuellesBackup")
+        try document.write(
+            to: url,
+            ofType: AssemblageDocument.fileType,
+            for: .saveOperation,
+            originalContentsURL: nil
+        )
+        document.fileURL = url
+
+        var createdVersions = 0
+        document.manualFileVersionCreator = { versionURL in
+            XCTAssertEqual(versionURL, url)
+            createdVersions += 1
+        }
+
+        document.handleCompletedSave(error: nil, operation: .saveOperation)
+        let firstBackupAt = try XCTUnwrap(
+            document.lastManualBackupAt,
+            "der erste manuelle Save muss eine zusätzliche Dateiversion anlegen"
+        )
+
+        document.handleCompletedSave(error: nil, operation: .saveOperation)
+
+        XCTAssertEqual(createdVersions, 1)
+        XCTAssertEqual(
+            document.lastManualBackupAt,
+            firstBackupAt,
+            "innerhalb von 30 Minuten darf keine weitere manuelle Version entstehen"
+        )
+    }
+
     // MARK: - Fehlerfälle statt Abstürze (Plan 2.1)
 
     func testOpeningPackageWithoutDocumentJSONThrows() throws {

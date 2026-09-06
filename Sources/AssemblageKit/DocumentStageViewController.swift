@@ -34,6 +34,7 @@ final class DocumentStageViewController: NSViewController {
 
     /// Nimmt die drei echten Fenster-Knöpfe auf (siehe `adoptTrafficLights()`).
     private let trafficLightHost = TrafficLightHostView()
+    private var windowUpdateObservation: NSObjectProtocol?
 
     /// Zwei sich ausschliessende Anker für die Oberkante des Eigenschaften-
     /// Panels: normalerweise ein fester Abstand unter der Werkzeugleiste,
@@ -67,6 +68,12 @@ final class DocumentStageViewController: NSViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) wird nicht unterstützt") }
 
+    deinit {
+        if let windowUpdateObservation {
+            NotificationCenter.default.removeObserver(windowUpdateObservation)
+        }
+    }
+
     override func loadView() {
         let container = NSView()
         container.wantsLayer = true
@@ -81,19 +88,31 @@ final class DocumentStageViewController: NSViewController {
             canvasView.trailingAnchor.constraint(equalTo: container.trailingAnchor)
         ])
 
-        // Bis ganz an die Fensteroberkante statt mit 24-pt-Abstand: Dort
-        // sitzen jetzt auch die echten Ampel-Knöpfe (siehe
-        // `adoptTrafficLights()`), genau wie im Mockup die gemalten Punkte
-        // im selben Panel sitzen.
         let layersPanel = GlassPanel(cornerRadius: AssemblageTheme.panelCornerRadius)
         layersPanel.content = makeLayersPanelContent()
         layersPanel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(layersPanel)
         NSLayoutConstraint.activate([
-            layersPanel.topAnchor.constraint(equalTo: container.topAnchor),
+            // Derselbe Abstand zur Fensterkante wie bei allen anderen
+            // schwebenden Panels; der Streifen darüber gehört den echten
+            // Ampel-Knöpfen (siehe unten und `adoptTrafficLights()`).
+            layersPanel.topAnchor.constraint(equalTo: container.topAnchor, constant: AssemblageTheme.margin),
             layersPanel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -AssemblageTheme.margin),
             layersPanel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: AssemblageTheme.margin),
             layersPanel.widthAnchor.constraint(equalToConstant: AssemblageTheme.layersPanelWidth)
+        ])
+
+        // Die echten Fenster-Knöpfe sitzen im freien Streifen über dem
+        // Ebenen-Panel, linksbündig mit dessen Kante. Grösse kommt aus der
+        // intrinsischen Grösse des Hosts, der sie erst zur Laufzeit aufnimmt
+        // (`adoptTrafficLights()`).
+        trafficLightHost.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(trafficLightHost)
+        NSLayoutConstraint.activate([
+            trafficLightHost.leadingAnchor.constraint(equalTo: layersPanel.leadingAnchor),
+            trafficLightHost.centerYAnchor.constraint(
+                equalTo: container.topAnchor, constant: AssemblageTheme.margin / 2
+            )
         ])
 
         let toolbarRow = toolbarController.buildFloatingToolbarRow()
@@ -198,17 +217,15 @@ final class DocumentStageViewController: NSViewController {
     }
 
     /// Hängt die drei echten Fenster-Knöpfe (Schliessen/Einklappen/Vollbild)
-    /// aus der System-Titelleiste in `trafficLightHost` um — also nach oben
-    /// links ins Ebenen-Panel, wo das Mockup seine gemalten Ampel-Punkte
-    /// zeigt.
+    /// aus der System-Titelleiste in `trafficLightHost` um — also in den
+    /// Streifen über dem Ebenen-Panel, linksbündig mit dessen Kante.
     ///
     /// Umhängen statt bloss verschieben: Die Knöpfe per `setFrameOrigin` an
     /// die Wunschstelle zu schieben hielt nicht, weil AppKit die Titelleiste
     /// nach `viewDidLayout` noch einmal selbst anordnet und die Knöpfe dabei
     /// kommentarlos auf ihre Standardposition zurücksetzt — genau das liess
     /// sie scheinbar zufällig mal hier, mal dort sitzen. In unserer eigenen
-    /// Ansichtshierarchie greift AppKits Titelleisten-Layout nicht mehr zu,
-    /// und Auto Layout hält die Position auch bei Grössenänderungen.
+    /// Ansichtshierarchie greift AppKits Titelleisten-Layout nicht mehr zu.
     ///
     /// Läuft bei jedem Layout statt nur einmal, weil AppKit sich die Knöpfe
     /// bei manchen Fenstervorgängen (z. B. Vollbild) zurückholt; die
@@ -221,22 +238,7 @@ final class DocumentStageViewController: NSViewController {
               close.superview !== trafficLightHost
         else { return }
 
-        var previous: NSView?
-        for button in [close, miniaturize, zoomButton] {
-            button.removeFromSuperview()
-            button.translatesAutoresizingMaskIntoConstraints = false
-            trafficLightHost.addSubview(button)
-            // 6 pt Lücke zwischen 14 pt breiten Knöpfen — der Abstand, den
-            // AppKit in der Titelleiste selbst verwendet.
-            let leading = previous.map {
-                button.leadingAnchor.constraint(equalTo: $0.trailingAnchor, constant: 6)
-            } ?? button.leadingAnchor.constraint(equalTo: trafficLightHost.leadingAnchor)
-            NSLayoutConstraint.activate([
-                leading,
-                button.centerYAnchor.constraint(equalTo: trafficLightHost.centerYAnchor)
-            ])
-            previous = button
-        }
+        trafficLightHost.adopt([close, miniaturize, zoomButton])
     }
 
     // MARK: - Ebenen-Panel: Kopf- und Fusszeile
@@ -247,13 +249,6 @@ final class DocumentStageViewController: NSViewController {
     /// Teil von `LayerListView`, damit deren eigener, unabhängig
     /// restylter Zustand nicht mit dieser Layout-Entscheidung kollidiert.
     private func makeLayersPanelContent() -> NSView {
-        // Die echten Ampel-Knöpfe hängen zur Laufzeit hier drin (siehe
-        // `adoptTrafficLights()`); vorher ist der Host leer und hält per
-        // Höhen-Constraint den Platz frei, damit die „EBENEN"-Kopfzeile nicht
-        // nach oben rutscht.
-        trafficLightHost.translatesAutoresizingMaskIntoConstraints = false
-        trafficLightHost.heightAnchor.constraint(equalToConstant: 16).isActive = true
-
         let header = makeLayersHeader()
         let list = layersHostingController.view
         let footer = makeLayersFooter()
@@ -263,7 +258,7 @@ final class DocumentStageViewController: NSViewController {
         // der abgerundeten Panel-Kante.
         let insets = NSEdgeInsets(top: 18, left: 22, bottom: 22, right: 22)
 
-        let stack = NSStackView(views: [trafficLightHost, header, list, footer])
+        let stack = NSStackView(views: [header, list, footer])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -276,7 +271,7 @@ final class DocumentStageViewController: NSViewController {
         // `edgeInsets` überstehen — Kopf-/Fusszeile klebten dadurch bündig an
         // der Panel-Kante, statt den vorgesehenen Rand zu haben.
         let seitenraender = insets.left + insets.right
-        for view in [trafficLightHost, header, list, footer] {
+        for view in [header, list, footer] {
             view.translatesAutoresizingMaskIntoConstraints = false
             view.widthAnchor.constraint(
                 equalTo: stack.widthAnchor, constant: -seitenraender
@@ -335,6 +330,25 @@ final class DocumentStageViewController: NSViewController {
         let target = view.window?.windowController
         for item in addMenuItemsNeedingWindow {
             item.target = target
+        }
+        observeWindowUpdatesForTrafficLights()
+    }
+
+    /// AppKit holt sich die umgehängten Ampel-Knöpfe von sich aus in die
+    /// Titelleiste zurück — nachgemessen unter anderem beim Fensterwechsel,
+    /// und zwar ohne dass dabei zwingend ein Layout unserer Ansichten läuft.
+    /// `NSWindow.didUpdateNotification` kommt in jedem Ereignisschleifen-
+    /// Durchlauf dieses Fensters und ist damit der einzige Haken, der das
+    /// zuverlässig auffängt; teuer ist das nicht, weil `adoptTrafficLights()`
+    /// im Normalfall nach einem Zeigervergleich zurückkehrt.
+    private func observeWindowUpdatesForTrafficLights() {
+        guard let window = view.window, windowUpdateObservation == nil else { return }
+        windowUpdateObservation = NotificationCenter.default.addObserver(
+            forName: NSWindow.didUpdateNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.adoptTrafficLights() }
         }
     }
 
@@ -432,15 +446,83 @@ final class DocumentStageViewController: NSViewController {
 /// Trägt die aus der Titelleiste umgehängten Ampel-Knöpfe (siehe
 /// `DocumentStageViewController.adoptTrafficLights()`).
 ///
-/// Eigene Klasse nur wegen des Tracking-Bereichs: In der Titelleiste sorgt
-/// AppKits eigener Container dafür, dass alle drei Symbole (×, −, ⤢)
-/// erscheinen, sobald die Maus über *einen* der Knöpfe fährt. Diese
-/// Gruppenlogik hängt an jenem Container und geht beim Umhängen verloren —
-/// hier wird sie nachgebildet.
+/// Übernimmt zwei Aufgaben, die AppKits eigener Titelleisten-Container
+/// erledigt hatte und die beim Umhängen verloren gehen:
+///
+/// 1. Das Anordnen der Knöpfe. Bewusst von Hand in `layout()` statt über
+///    Constraints: AppKit setzt die Rahmen der Ampel-Knöpfe auch dann noch
+///    gelegentlich selbst (z. B. beim Aktivieren des Fensters), und ein
+///    Auto-Layout-Durchlauf, der das wieder geradezieht, folgt nicht
+///    zuverlässig. Hier wird jede fremde Verschiebung über die
+///    Rahmen-Benachrichtigung bemerkt und sofort zurückgesetzt.
+/// 2. Den Gruppen-Hover: In der Titelleiste erscheinen alle drei Symbole
+///    (×, −, ⤢), sobald die Maus über *einen* der Knöpfe fährt.
 @MainActor
 final class TrafficLightHostView: NSView {
 
+    private static let buttonSize: CGFloat = 14
+    private static let gap: CGFloat = 6
+
+    private var buttons: [NSButton] = []
+    private var frameObservations: [NSObjectProtocol] = []
     private var hoverArea: NSTrackingArea?
+
+    deinit {
+        frameObservations.forEach(NotificationCenter.default.removeObserver)
+    }
+
+    override var intrinsicContentSize: NSSize {
+        guard !buttons.isEmpty else {
+            return NSSize(width: 3 * Self.buttonSize + 2 * Self.gap, height: Self.buttonSize)
+        }
+        let count = CGFloat(buttons.count)
+        return NSSize(
+            width: count * Self.buttonSize + (count - 1) * Self.gap,
+            height: Self.buttonSize
+        )
+    }
+
+    /// Hängt die übergebenen Fenster-Knöpfe hier herein (in Reihenfolge von
+    /// links nach rechts).
+    func adopt(_ buttons: [NSButton]) {
+        let center = NotificationCenter.default
+        frameObservations.forEach(center.removeObserver)
+        frameObservations.removeAll()
+
+        self.buttons = buttons
+        for button in buttons {
+            button.removeFromSuperview()
+            button.translatesAutoresizingMaskIntoConstraints = true
+            addSubview(button)
+            button.postsFrameChangedNotifications = true
+            frameObservations.append(center.addObserver(
+                forName: NSView.frameDidChangeNotification,
+                object: button,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.needsLayout = true }
+            })
+        }
+        invalidateIntrinsicContentSize()
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        let y = ((bounds.height - Self.buttonSize) / 2).rounded()
+        for (index, button) in buttons.enumerated() {
+            let ziel = NSRect(
+                x: CGFloat(index) * (Self.buttonSize + Self.gap),
+                y: y,
+                width: Self.buttonSize,
+                height: Self.buttonSize
+            )
+            // Nur bei Abweichung zuweisen: Sonst löste jede Zuweisung wieder
+            // die eigene Rahmen-Benachrichtigung aus und das Layout liefe
+            // endlos im Kreis.
+            if button.frame != ziel { button.frame = ziel }
+        }
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -458,7 +540,7 @@ final class TrafficLightHostView: NSView {
     override func mouseExited(with event: NSEvent) { setSymbolsVisible(false) }
 
     private func setSymbolsVisible(_ visible: Bool) {
-        for case let button as NSButton in subviews {
+        for button in buttons {
             button.isHighlighted = visible
         }
     }

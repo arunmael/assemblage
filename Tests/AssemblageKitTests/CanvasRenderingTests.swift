@@ -92,6 +92,31 @@ final class CanvasRenderingTests: XCTestCase {
         )
     }
 
+    /// Eine reine Grössenänderung baut den Ebenenbaum nicht neu auf. Der
+    /// sichtbare Leinwandgrund und die darüberliegenden Bedienhilfen müssen
+    /// der neuen View-Grösse trotzdem unmittelbar folgen — sonst ändert sich
+    /// beim Verkleinern/Vergrössern der Leinwand optisch nichts.
+    func testCanvasResizeWithoutStructureChangeResizesVisibleLayers() throws {
+        let document = AssemblageModel.Document(
+            canvas: CanvasSize(width: 400, height: 300),
+            layers: [shapeLayer(name: "Bleibt", hex: "#FF0000", x: 100, y: 100)]
+        )
+        let view = CanvasView(document: document, images: ImageStore(resources: DocumentResources()))
+        let rootLayers = try XCTUnwrap(view.layer?.sublayers)
+        XCTAssertEqual(rootLayers.count, 2)
+        let canvasLayer = rootLayers[0]
+        let overlayLayer = rootLayers[1]
+
+        var resizedDocument = document
+        resizedDocument.canvas = CanvasSize(width: 900, height: 700)
+        view.update(to: resizedDocument)
+
+        let expectedFrame = CGRect(x: 0, y: 0, width: 900, height: 700)
+        XCTAssertEqual(view.frame, expectedFrame)
+        XCTAssertEqual(canvasLayer.frame, expectedFrame)
+        XCTAssertEqual(overlayLayer.frame, expectedFrame)
+    }
+
     // MARK: - Koordinatensystem
 
     /// Der entscheidende Test für Phase 0: Eine Ebene bei y = 100 muss **oben**
