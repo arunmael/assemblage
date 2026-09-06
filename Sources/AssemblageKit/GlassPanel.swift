@@ -25,6 +25,11 @@ final class GlassPanel: NSView {
     private var fixedCornerRadius: CGFloat
     private let effectView = NSVisualEffectView()
     private let tint = NSView()
+    /// Maskiert wie `effectView`/`tint`, aus demselben Grund: Ohne eigene
+    /// Maskierung lief Inhalt, der die verfügbare Höhe sprengt (z. B. ein
+    /// zu langer Hinweistext im Eigenschaften-Panel), einfach über die
+    /// abgerundete Ecke hinaus auf den nackten Fensterhintergrund weiter,
+    /// statt sauber am Panelrand abgeschnitten zu werden.
     private let contentContainer = NSView()
 
     /// Die eigentliche Inhaltsansicht des Panels (z. B. ein `NSStackView`
@@ -60,6 +65,8 @@ final class GlassPanel: NSView {
         tint.wantsLayer = true
         tint.layer?.backgroundColor = AssemblageTheme.glassBackground.cgColor
 
+        contentContainer.wantsLayer = true
+
         for view in [effectView, tint, contentContainer] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
@@ -94,5 +101,7 @@ final class GlassPanel: NSView {
         effectView.layer?.masksToBounds = true
         tint.layer?.cornerRadius = radius
         tint.layer?.masksToBounds = true
+        contentContainer.layer?.cornerRadius = radius
+        contentContainer.layer?.masksToBounds = true
     }
 }

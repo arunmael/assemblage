@@ -165,15 +165,22 @@ final class ToolbarController: NSObject, NSMenuItemValidation {
 
         // Freistellen ist ein einmaliger Befehl und kein vierter Canvas-Modus.
         // Der bestehende Befehlscontroller blockiert doppelte laufende Aufrufe.
-        removeSubjectButton?.isEnabled = ToolSelection.isAvailable(
-            .brush,
-            forSelected: selectedLayer
-        )
+        let removeSubjectAvailable = ToolSelection.isAvailable(.brush, forSelected: selectedLayer)
+        removeSubjectButton?.isEnabled = removeSubjectAvailable
+        // Ohne diese Zeile sah der Knopf bei fehlender Bildauswahl weiterhin
+        // vollständig anklickbar aus (randlose Knöpfe dimmen bei
+        // `isEnabled = false` nicht von selbst) — ein Klick tat dann
+        // sichtbar nichts, ohne erkennbar zu sein, warum.
+        removeSubjectButton?.alphaValue = removeSubjectAvailable ? 1 : 0.35
         updateSettingsBarVisibility()
     }
 
     /// Ersetzt den Inhalt des Einstellungs-Streifens passend zum aktiven
     /// Werkzeug und blendet ihn nur ein, wenn es überhaupt Regler gibt.
+    /// Meldet den Sichtbarkeitswechsel zusätzlich nach aussen, damit
+    /// `DocumentStageViewController` das Eigenschaften-Panel darunter aus dem
+    /// Weg rücken kann — sonst überlappten sich beide Panels bei Pinsel/Farbe
+    /// (deren Regler-Streifen höher ist als der feste Standardabstand).
     private func updateSettingsBarVisibility() {
         let content: NSView?
         switch currentTool {
@@ -185,7 +192,13 @@ final class ToolbarController: NSObject, NSMenuItemValidation {
         settingsContent = content
         settingsBar?.content = content
         settingsBar?.isHidden = content == nil
+        onSettingsBarVisibilityChange?(content != nil)
     }
+
+    /// Sagt, ob der Einstellungs-Streifen gerade sichtbar ist (Pinsel/Lasso/
+    /// Farbe) — `DocumentStageViewController` verschiebt danach den Ankerpunkt
+    /// des Eigenschaften-Panels.
+    var onSettingsBarVisibilityChange: ((Bool) -> Void)?
 
     // MARK: - Zugang für Tests
 
@@ -346,7 +359,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation {
 
         let text = makeCommandPill(label: "Text", icon: .insertText, action: #selector(insertText(_:)))
         let shape = makeShapePillMenu()
-        let grid = makeCommandPill(label: "Raster", icon: .collageGrid, action: nil)
+        let grid = makeGridPillMenu()
 
         let stack = NSStackView(views: [warp, divider, removeSubject, text, shape, grid])
         stack.orientation = .horizontal
@@ -366,6 +379,10 @@ final class ToolbarController: NSObject, NSMenuItemValidation {
         field.isBordered = false
         field.drawsBackground = false
         field.font = .systemFont(ofSize: 12.5)
+        // Ohne das hier zeichnet AppKit beim Fokussieren/Tippen ein
+        // deutliches Rechteck um das Feld — hier unerwünscht, weil die
+        // Werkzeugleisten-Pille selbst schon die sichtbare Umrandung ist.
+        field.focusRingType = .none
         field.translatesAutoresizingMaskIntoConstraints = false
         field.widthAnchor.constraint(equalToConstant: 150).isActive = true
 
@@ -412,6 +429,37 @@ final class ToolbarController: NSObject, NSMenuItemValidation {
         }
 
         let label = NSTextField(labelWithString: "Form")
+        label.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        label.textColor = AssemblageTheme.textPrimary
+
+        let stack = NSStackView(views: [button, label])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 4
+        return stack
+    }
+
+    /// „Raster" — Collage-Vorlagen (2×2, 3×3, Polaroid-Stapel). Vorher ohne
+    /// Aktion verdrahtet, weshalb ein Klick sichtbar nichts tat.
+    private func makeGridPillMenu() -> NSView {
+        let button = NSPopUpButton(frame: .zero, pullsDown: true)
+        button.bezelStyle = .texturedRounded
+        button.isBordered = false
+        button.translatesAutoresizingMaskIntoConstraints = false
+
+        let title = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        title.image = MockupIcons.image(.collageGrid, pointSize: 16, tintColor: AssemblageTheme.textPrimary)
+        button.menu?.addItem(title)
+
+        let grid2x2 = NSMenuItem(title: "Raster 2×2", action: #selector(DocumentWindowController.applyGrid2x2Template(_:)), keyEquivalent: "")
+        let grid3x3 = NSMenuItem(title: "Raster 3×3", action: #selector(DocumentWindowController.applyGrid3x3Template(_:)), keyEquivalent: "")
+        let polaroid = NSMenuItem(title: "Polaroid-Stapel", action: #selector(DocumentWindowController.applyPolaroidStackTemplate(_:)), keyEquivalent: "")
+        for item in [grid2x2, grid3x3, polaroid] {
+            item.target = commandTarget
+            button.menu?.addItem(item)
+        }
+
+        let label = NSTextField(labelWithString: "Raster")
         label.font = .systemFont(ofSize: 12.5, weight: .semibold)
         label.textColor = AssemblageTheme.textPrimary
 
@@ -623,23 +671,10 @@ final class ToolbarController: NSObject, NSMenuItemValidation {
 
     // MARK: - Zoom- und Verlaufsleiste
 
-    /// Die Zoom-Pille unten links im Mockup.
+    /// Die Zoom-Pille — nur Prozentzahl und Minus/Plus, ohne Beschriftung
+    /// (auf ausdrücklichen Wunsch ohne „Einpassen"-Text; „An Fenster
+    /// anpassen" bleibt über Menü/Zoom-Menü in der Werkzeugleiste erreichbar).
     func buildZoomBar() -> GlassPanel {
-        let fit = NSTextField(labelWithString: "Einpassen")
-        fit.font = .systemFont(ofSize: 12, weight: .semibold)
-        fit.textColor = AssemblageTheme.textPrimary
-        let fitButton = NSButton(title: "", target: self, action: #selector(zoomToFit(_:)))
-        fitButton.isBordered = false
-        fitButton.isTransparent = false
-        fitButton.addSubview(fit)
-        fit.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            fit.leadingAnchor.constraint(equalTo: fitButton.leadingAnchor),
-            fit.trailingAnchor.constraint(equalTo: fitButton.trailingAnchor),
-            fit.topAnchor.constraint(equalTo: fitButton.topAnchor),
-            fit.bottomAnchor.constraint(equalTo: fitButton.bottomAnchor)
-        ])
-
         let percent = NSTextField(labelWithString: "100 %")
         percent.font = .systemFont(ofSize: 12, weight: .semibold)
         percent.textColor = AssemblageTheme.textSecondary
@@ -648,16 +683,10 @@ final class ToolbarController: NSObject, NSMenuItemValidation {
         }
         percent.stringValue = "\(canvasViewController?.zoomPercent ?? 100) %"
 
-        let divider = NSBox()
-        divider.boxType = .separator
-        divider.translatesAutoresizingMaskIntoConstraints = false
-        divider.widthAnchor.constraint(equalToConstant: 1).isActive = true
-        divider.heightAnchor.constraint(equalToConstant: 22).isActive = true
-
         let minus = plainIconButton(icon: .zoomOut, pointSize: 13, label: "Verkleinern", action: #selector(zoomOut(_:)))
         let plus = plainIconButton(icon: .zoomIn, pointSize: 13, label: "Vergrössern", action: #selector(zoomIn(_:)))
 
-        let stack = NSStackView(views: [fitButton, percent, divider, minus, plus])
+        let stack = NSStackView(views: [percent, minus, plus])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 10
