@@ -153,7 +153,8 @@ final class BrushModeTests: XCTestCase {
     /// die Maskenschicht hängt schon vor dem Loslassen.
     func testStrokeIsVisibleImmediately() throws {
         canvas.brushLayerID = bildID
-        let schicht = try XCTUnwrap(canvas.layer?.sublayers?.first?.sublayers?.first)
+        let container = try XCTUnwrap(canvas.layer?.sublayers?.first?.sublayers?.first)
+        let schicht = try XCTUnwrap(container as? ImageContentLayer).bitmap
         XCTAssertNil(schicht.mask, "vorher keine Maske")
 
         canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 100, y: 100))

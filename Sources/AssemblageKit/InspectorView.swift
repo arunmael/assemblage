@@ -242,6 +242,7 @@ struct InspectorView: View {
 
     // MARK: - Bildebene
 
+    @ViewBuilder
     private func imageSection(_ content: ImageLayerContent) -> some View {
         Section("Bild") {
             LabeledContent("Datei", value: (content.originalFileReference as NSString).lastPathComponent)
@@ -260,6 +261,48 @@ struct InspectorView: View {
                 editing.resetAdjustments()
             }
             .disabled(content.adjustments == .neutral)
+        }
+
+        Section("Rahmen") {
+            valueSlider(
+                "Stärke",
+                value: layerBinding(
+                    fallback: content.borderWidth,
+                    actionName: "Rahmenstärke ändern",
+                    get: { layer in
+                        guard case .image(let image) = layer.content else { return content.borderWidth }
+                        return image.borderWidth
+                    }
+                ) { layer, value in
+                    guard case .image(var image) = layer.content else { return }
+                    image.borderWidth = value
+                    layer.content = .image(image)
+                },
+                range: 0...40,
+                actionName: "Rahmenstärke ändern",
+                valueText: { String(format: "%.0f pt", $0) }
+            )
+            colorPicker(
+                "Farbe",
+                fallback: content.borderColorHex,
+                actionName: "Rahmenfarbe ändern",
+                get: { layer in
+                    guard case .image(let image) = layer.content else { return content.borderColorHex }
+                    return image.borderColorHex
+                }
+            ) { layer, hex in
+                guard case .image(var image) = layer.content else { return }
+                image.borderColorHex = hex
+                layer.content = .image(image)
+            }
+
+            if let clipShape = content.clipShape {
+                LabeledContent("Formzuschnitt", value: shapeName(clipShape))
+                Button("Zuschnitt aufheben") {
+                    guard let id = state.selectedLayerID else { return }
+                    ImageInShapeCommand.removeClipShape(from: id, in: state)
+                }
+            }
         }
     }
 
@@ -557,6 +600,10 @@ struct InspectorView: View {
         case .shape(let content): return content.fillColorHex
         case .image: return nil
         }
+    }
+
+    private func shapeName(_ shape: ShapeKind) -> String {
+        NewLayerKind.allCases.first { $0.shapeKind == shape }?.localizedName ?? shape.rawValue
     }
 
     private func color(from hex: String) -> Color {

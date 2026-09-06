@@ -98,6 +98,19 @@ enum ShapePath {
         pfad.closeSubpath()
         return pfad
     }
+
+    /// Der Umriss, dem der Rahmen einer Bildebene folgt: der Formzuschnitt,
+    /// sonst das Bildrechteck.
+    static func borderPath(for content: ImageLayerContent, in rect: CGRect) -> CGPath? {
+        guard rect.width > 0, rect.height > 0 else { return nil }
+        guard let clipShape = content.clipShape else {
+            return CGPath(rect: rect, transform: nil)
+        }
+        return cgPath(
+            for: ShapeLayerContent(kind: clipShape, size: Size(rect.size)),
+            in: rect
+        )
+    }
 }
 
 /// Textsatz für Textebenen (Plan 5.6).
@@ -152,9 +165,12 @@ enum MaskRendering {
     static func alphaMaskImage(
         for layer: Layer,
         cropRect: Rect?,
-        resources: DocumentResources
+        resources: DocumentResources,
+        displayedSize: CGSize = .zero
     ) -> CGImage? {
-        guard let bild = maskImage(for: layer, cropRect: cropRect, resources: resources) else { return nil }
+        guard let bild = maskImage(
+            for: layer, cropRect: cropRect, resources: resources, displayedSize: displayedSize
+        ) else { return nil }
 
         // `CIMaskToAlpha` macht aus Helligkeit Deckung — genau die Umrechnung,
         // die Core Animation erwartet.
@@ -170,9 +186,12 @@ enum MaskRendering {
     static func grayMaskImage(
         for layer: Layer,
         cropRect: Rect?,
-        resources: DocumentResources
+        resources: DocumentResources,
+        displayedSize: CGSize = .zero
     ) -> CGImage? {
-        guard let bild = maskImage(for: layer, cropRect: cropRect, resources: resources) else { return nil }
+        guard let bild = maskImage(
+            for: layer, cropRect: cropRect, resources: resources, displayedSize: displayedSize
+        ) else { return nil }
 
         guard let kontext = CGContext(
             data: nil,
@@ -192,6 +211,29 @@ enum MaskRendering {
     /// Deckung liegt hier in der **Helligkeit**: Weiss sichtbar, Schwarz
     /// ausgeblendet.
     private static func maskImage(
+        for layer: Layer,
+        cropRect: Rect?,
+        resources: DocumentResources,
+        displayedSize: CGSize
+    ) -> CGImage? {
+        let gemalt = paintedMaskImage(for: layer, cropRect: cropRect, resources: resources)
+
+        // Der Formzuschnitt („Bild in Form") ist eine zweite Maske. Beide
+        // laufen hier zusammen, statt dass die Form ein eigener Zeichenweg
+        // wäre: So gilt sie automatisch überall, wo schon eine Maske gilt —
+        // auf der Leinwand ebenso wie beim Export, der dieselbe Quelle über
+        // `grayMaskImage` benutzt.
+        guard let form = clipShapeMaskImage(
+            for: layer, cropRect: cropRect, referenz: gemalt, displayedSize: displayedSize
+        ) else {
+            return gemalt
+        }
+        guard let gemalt else { return form }
+        return multiplied(gemalt, form) ?? gemalt
+    }
+
+    /// Die von Hand gemalte bzw. automatisch erzeugte Maske.
+    private static func paintedMaskImage(
         for layer: Layer,
         cropRect: Rect?,
         resources: DocumentResources
@@ -215,5 +257,94 @@ enum MaskRendering {
         // läuft auf der GPU und behandelt Farbräume richtig.
         let umgekehrt = CIImage(cgImage: bild).applyingFilter("CIColorInvert")
         return RenderContext.shared.createCGImage(umgekehrt, from: umgekehrt.extent) ?? bild
+    }
+
+    /// Der Umriss aus `ImageLayerContent.clipShape`, weiss auf schwarz — die
+    /// Helligkeitskonvention, die `maskImage` durchgehend benutzt.
+    ///
+    /// Die Pixelgrösse richtet sich nach der schon vorhandenen Maske, damit
+    /// beide ohne Skalierung übereinanderpassen; ohne eine solche gibt der
+    /// sichtbare Bildausschnitt das Mass vor.
+    private static func clipShapeMaskImage(
+        for layer: Layer,
+        cropRect: Rect?,
+        referenz: CGImage?,
+        displayedSize: CGSize
+    ) -> CGImage? {
+        guard case .image(let inhalt) = layer.content,
+              let form = inhalt.clipShape
+        else { return nil }
+
+        // Reihenfolge der Bezugsgrössen: die vorhandene Maske (dann passen
+        // beide ohne Skalierung übereinander), sonst der Zuschnitt, sonst die
+        // dargestellte Grösse. Nur das Seitenverhältnis muss stimmen — die
+        // Maske wird beim Anwenden ohnehin auf die Ebene gestreckt.
+        let (breite, hoehe) = maskPixelSize(
+            referenz: referenz, cropRect: cropRect, displayedSize: displayedSize
+        )
+        guard breite > 0, hoehe > 0 else { return nil }
+
+        guard let kontext = CGContext(
+            data: nil,
+            width: breite,
+            height: hoehe,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ) else { return nil }
+
+        kontext.setFillColor(gray: 0, alpha: 1)
+        kontext.fill(CGRect(x: 0, y: 0, width: breite, height: hoehe))
+        kontext.setFillColor(gray: 1, alpha: 1)
+
+        // Derselbe Pfadbau wie für eine echte Formebene — `ShapePath` ist die
+        // eine Stelle, an der ein Umriss entsteht. Eckenradius und Zackenzahl
+        // sind hier die Vorgabewerte; eine Bildebene führt sie nicht mit.
+        let flaeche = CGRect(x: 0, y: 0, width: breite, height: hoehe)
+        let vorlage = ShapeLayerContent(
+            kind: form,
+            size: Size(width: Double(breite), height: Double(hoehe))
+        )
+        guard let pfad = ShapePath.cgPath(for: vorlage, in: flaeche) else { return nil }
+        kontext.addPath(pfad)
+        kontext.fillPath()
+        return kontext.makeImage()
+    }
+
+    /// Wie gross die Formmaske in Pixeln angelegt wird.
+    ///
+    /// Ohne Bezug aus Maske oder Zuschnitt wird die dargestellte Grösse
+    /// verdoppelt, damit der Umriss auch auf einem Retina-Bildschirm glatt
+    /// bleibt, und nach oben gedeckelt, damit eine sehr gross gezogene Ebene
+    /// keine übermässige Bitmap anlegt.
+    private static func maskPixelSize(
+        referenz: CGImage?,
+        cropRect: Rect?,
+        displayedSize: CGSize
+    ) -> (Int, Int) {
+        if let referenz { return (referenz.width, referenz.height) }
+        if let cropRect, cropRect.width > 0, cropRect.height > 0 {
+            return (Int(cropRect.width.rounded()), Int(cropRect.height.rounded()))
+        }
+        guard displayedSize.width > 0, displayedSize.height > 0 else { return (0, 0) }
+        let obergrenze: CGFloat = 2048
+        let faktor = min(2, obergrenze / max(displayedSize.width, displayedSize.height))
+        return (
+            max(1, Int((displayedSize.width * faktor).rounded())),
+            max(1, Int((displayedSize.height * faktor).rounded()))
+        )
+    }
+
+    /// Multipliziert zwei Helligkeitsmasken — sichtbar bleibt, was in beiden
+    /// hell ist. Genau das erwartet man, wenn ein freigestelltes Motiv
+    /// zusätzlich in eine Form gesetzt wird.
+    private static func multiplied(_ a: CGImage, _ b: CGImage) -> CGImage? {
+        let hintergrund = CIImage(cgImage: a)
+        let vordergrund = CIImage(cgImage: b)
+        let ergebnis = vordergrund.applyingFilter(
+            "CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: hintergrund]
+        )
+        return RenderContext.shared.createCGImage(ergebnis, from: hintergrund.extent)
     }
 }

@@ -515,7 +515,8 @@ enum DocumentExporter {
             height: contentSize.height
         )
         drawContent(layer.content, texture: layer.texture, in: rect, resources: resources,
-                    context: context, mask: maskImage(for: layer, resources: resources))
+                    context: context,
+                    mask: maskImage(for: layer, resources: resources, displayedSize: contentSize))
 
         context.restoreGState()
     }
@@ -555,7 +556,7 @@ enum DocumentExporter {
             in: sourceRect,
             resources: resources,
             context: sourceContext,
-            mask: maskImage(for: layer, resources: resources)
+            mask: maskImage(for: layer, resources: resources, displayedSize: sourceRect.size)
         )
         guard let sourceImage = sourceContext.makeImage() else { return }
 
@@ -790,7 +791,7 @@ enum DocumentExporter {
             in: CGRect(origin: .zero, size: contentSize),
             resources: resources,
             context: sourceContext,
-            mask: maskImage(for: layer, resources: resources)
+            mask: maskImage(for: layer, resources: resources, displayedSize: contentSize)
         )
         guard let sourceImage = sourceContext.makeImage() else { return nil }
 
@@ -928,14 +929,20 @@ enum DocumentExporter {
     /// Die wirksame Maske einer Ebene (Plan 5.4), bereits auf den Zuschnitt
     /// beschnitten und bei Bedarf umgekehrt. `nil` heisst „keine Maske" und
     /// nicht „alles ausblenden".
-    private static func maskImage(for layer: Layer, resources: DocumentResources) -> CGImage? {
+    private static func maskImage(
+        for layer: Layer,
+        resources: DocumentResources,
+        displayedSize: CGSize
+    ) -> CGImage? {
         let ausschnitt: Rect?
         if case .image(let inhalt) = layer.content {
             ausschnitt = inhalt.cropRect
         } else {
             ausschnitt = nil
         }
-        return MaskRendering.grayMaskImage(for: layer, cropRect: ausschnitt, resources: resources)
+        return MaskRendering.grayMaskImage(
+            for: layer, cropRect: ausschnitt, resources: resources, displayedSize: displayedSize
+        )
     }
 
     private static func drawContent(
@@ -954,7 +961,6 @@ enum DocumentExporter {
             context.saveGState()
             context.clip(to: rect, mask: mask)
         }
-        defer { if mask != nil { context.restoreGState() } }
 
         switch content {
         case .image(let image):
@@ -967,6 +973,17 @@ enum DocumentExporter {
 
         if let texture {
             drawTexture(texture, over: content, in: rect, resources: resources, context: context)
+        }
+
+        if mask != nil {
+            context.restoreGState()
+        }
+
+        // Der Rahmen kommt nach Inhalt, Textur und Maske. Er darf nicht von
+        // der Ebenenmaske abgeschnitten werden, weil sonst gerade seine
+        // äussere Hälfte verschwände.
+        if case .image(let image) = content {
+            drawImageBorder(image, in: rect, context: context)
         }
     }
 
@@ -1073,6 +1090,28 @@ enum DocumentExporter {
         context.translateBy(x: -rect.midX, y: -rect.midY)
         context.draw(drawnImage, in: rect)
         context.restoreGState()
+    }
+
+    private static func drawImageBorder(
+        _ content: ImageLayerContent,
+        in rect: CGRect,
+        context: CGContext
+    ) {
+        guard content.borderWidth > 0,
+              let path = ShapePath.borderPath(for: content, in: rect)
+        else { return }
+
+        context.saveGState()
+        defer { context.restoreGState() }
+        // Der Pfad selbst bleibt kanonisch. Durch den Pfad-Clip und die
+        // doppelte Strichbreite bleibt nur die innere Hälfte sichtbar; der
+        // Rahmen ragt deshalb niemals über die Ebenengrenze hinaus.
+        context.addPath(path)
+        context.clip()
+        context.addPath(path)
+        context.setStrokeColor((RGBA(hex: content.borderColorHex) ?? .white).cgColor)
+        context.setLineWidth(content.borderWidth * 2)
+        context.strokePath()
     }
 
     private static func drawText(_ content: TextLayerContent, in rect: CGRect, context: CGContext) {

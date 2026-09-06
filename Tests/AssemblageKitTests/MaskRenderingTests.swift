@@ -170,7 +170,8 @@ final class MaskRenderingTests: XCTestCase {
         let (document, resources) = try dokument(maske: LayerMask(source: .manualBrush))
         let ansicht = CanvasView(document: document, images: ImageStore(resources: resources))
 
-        let schicht = try XCTUnwrap(ansicht.layer?.sublayers?.first?.sublayers?.first)
+        let container = try XCTUnwrap(ansicht.layer?.sublayers?.first?.sublayers?.first)
+        let schicht = try XCTUnwrap(container as? ImageContentLayer).bitmap
         let maske = try XCTUnwrap(schicht.mask, "ohne Maskenschicht wirkt die Maske nicht")
         XCTAssertEqual(maske.bounds.size, schicht.bounds.size, "Maske und Ebene müssen deckungsgleich sein")
     }
@@ -181,7 +182,8 @@ final class MaskRenderingTests: XCTestCase {
         )
         let ansicht = CanvasView(document: document, images: ImageStore(resources: resources))
 
-        let schicht = try XCTUnwrap(ansicht.layer?.sublayers?.first?.sublayers?.first)
+        let container = try XCTUnwrap(ansicht.layer?.sublayers?.first?.sublayers?.first)
+        let schicht = try XCTUnwrap(container as? ImageContentLayer).bitmap
         XCTAssertNil(schicht.mask)
     }
 }

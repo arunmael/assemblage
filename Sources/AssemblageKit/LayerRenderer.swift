@@ -52,8 +52,9 @@ struct LayerRenderer {
             // Der Platzhalter für ein fehlendes Original ist eine schlichte
             // CALayer; taucht die Datei wieder auf, muss neu gebaut werden.
             guard !(renderedLayer is CATextLayer), !(renderedLayer is CAShapeLayer) else { return false }
+            guard let bild = renderedLayer as? ImageContentLayer else { return false }
             let originalExists = images.image(named: image.originalFileReference) != nil
-            return originalExists == (renderedLayer.contents != nil)
+            return originalExists == (bild.bitmap.contents != nil)
         }
     }
 
@@ -142,7 +143,12 @@ struct LayerRenderer {
         // kostet also keinen zweiten Dekodiervorgang.
         let silhouette = makeContentLayer(for: layer.content)
         silhouette.frame = CGRect(origin: .zero, size: renderedLayer.bounds.size)
-        schicht.mask = silhouette
+        if case .image(let image) = layer.content {
+            applyImageLayout(image, to: silhouette)
+        }
+        // Nur der Bildinhalt bildet die Silhouette — ein Rahmen gehört nicht
+        // zur Form des Motivs.
+        schicht.mask = (silhouette as? ImageContentLayer)?.bitmap ?? silhouette
     }
 
     /// Hängt die Ebenenmaske als `CALayer.mask` an (Plan 5.4).
@@ -158,6 +164,10 @@ struct LayerRenderer {
             renderedLayer.mask = nil
             return
         }
+        // Die Maske gehört an den Bildinhalt, nicht an die Hülle: Sonst
+        // schnitte sie den Rahmen gleich mit weg, der ja gerade den Rand
+        // zeigen soll.
+        let maskTarget = (renderedLayer as? ImageContentLayer)?.bitmap ?? renderedLayer
         let ausschnitt: Rect?
         if case .image(let inhalt) = layer.content {
             ausschnitt = inhalt.cropRect
@@ -168,9 +178,10 @@ struct LayerRenderer {
         guard let maskenbild = MaskRendering.alphaMaskImage(
             for: layer,
             cropRect: ausschnitt,
-            resources: images.resources
+            resources: images.resources,
+            displayedSize: renderedLayer.bounds.size
         ) else {
-            renderedLayer.mask = nil
+            maskTarget.mask = nil
             return
         }
 
@@ -179,8 +190,8 @@ struct LayerRenderer {
         maske.contentsGravity = .resize
         // Deckungsgleich mit der Ebene: Die Maske liegt im selben
         // Koordinatensystem wie ihr Inhalt.
-        maske.frame = CGRect(origin: .zero, size: renderedLayer.bounds.size)
-        renderedLayer.mask = maske
+        maske.frame = CGRect(origin: .zero, size: maskTarget.bounds.size)
+        maskTarget.mask = maske
     }
 
     /// Überträgt alles, was unabhängig vom Ebenentyp gilt — und frischt den
@@ -249,8 +260,12 @@ struct LayerRenderer {
         case .text, .shape: contentsScale * max(abs(layer.transform.scaleX), abs(layer.transform.scaleY), 1)
         }
 
+        if case .image(let image) = layer.content {
+            applyImageLayout(image, to: renderedLayer)
+        }
+
         applyEffects(layer.effects, to: renderedLayer)
-        applyTexture(layer, to: renderedLayer)
+        applyTexture(layer, to: (renderedLayer as? ImageContentLayer)?.bitmap ?? renderedLayer)
         applyCommonProperties(layer, to: renderedLayer)
 
         // Anpassungen als Filterkette an die Schicht hängen statt das Bild neu
@@ -259,7 +274,11 @@ struct LayerRenderer {
         // macht das sofortige Feedback aus Plan 4.4 möglich.
         if case .image(let inhalt) = layer.content {
             let kette = AdjustmentPipeline.filters(for: inhalt.adjustments)
-            renderedLayer.filters = kette.isEmpty ? nil : kette
+            // Wie bei Maske und Textur: an den Inhalt, damit der Rahmen
+            // unverfälscht bleibt.
+            let filterTarget = (renderedLayer as? ImageContentLayer)?.bitmap ?? renderedLayer
+            filterTarget.filters = kette.isEmpty ? nil : kette
+            if filterTarget !== renderedLayer { renderedLayer.filters = nil }
         } else {
             renderedLayer.filters = nil
         }
@@ -327,28 +346,41 @@ struct LayerRenderer {
             guard let bild = images.image(named: image.originalFileReference),
                   let pixelSize = images.pixelSize(named: image.originalFileReference)
             else { return }
-            renderedLayer.contents = bild
-            applyCrop(image.cropRect, imageSize: pixelSize, to: renderedLayer)
+            guard let schicht = renderedLayer as? ImageContentLayer else { return }
+            schicht.bitmap.contents = bild
+            applyCrop(image.cropRect, imageSize: pixelSize, to: schicht.bitmap)
         }
     }
 
     private func makeImageLayer(_ content: ImageLayerContent) -> CALayer {
-        guard let image = images.image(named: content.originalFileReference),
-              let pixelSize = images.pixelSize(named: content.originalFileReference)
-        else {
-            return Self.makePlaceholderLayer()
+        let schicht = ImageContentLayer()
+        if let image = images.image(named: content.originalFileReference),
+           let pixelSize = images.pixelSize(named: content.originalFileReference) {
+            schicht.bitmap.contents = image
+            applyCrop(content.cropRect, imageSize: pixelSize, to: schicht.bitmap)
+        } else {
+            ImageContentLayer.markAsPlaceholder(schicht.bitmap)
         }
+        return schicht
+    }
 
-        let layer = CALayer()
-        layer.contents = image
-        // `.resize` und nicht `.resizeAspect`: die Ebene hat bereits exakt das
-        // Seitenverhältnis ihres Inhalts, ein Einpassen würde nur Rundungs-
-        // ränder erzeugen.
-        layer.contentsGravity = .resize
-        layer.magnificationFilter = .trilinear
-        layer.minificationFilter = .trilinear
-        applyCrop(content.cropRect, imageSize: pixelSize, to: layer)
-        return layer
+    /// Legt Inhalt und Rahmen auf die Grösse der Ebene und zeichnet den
+    /// Rahmen — oder nimmt ihn weg, wenn keiner eingestellt ist.
+    private func applyImageLayout(_ content: ImageLayerContent, to container: CALayer) {
+        guard let schicht = container as? ImageContentLayer else { return }
+        schicht.layoutContents()
+
+        guard content.borderWidth > 0, let pfad = ShapePath.borderPath(
+            for: content, in: CGRect(origin: .zero, size: schicht.bounds.size)
+        ) else {
+            schicht.clearBorder()
+            return
+        }
+        schicht.drawBorder(
+            pfad,
+            width: content.borderWidth,
+            color: (RGBA(hex: content.borderColorHex) ?? .white).cgColor
+        )
     }
 
     /// Zuschnitt nicht-destruktiv (Plan 5.3): Core Animation zeigt einen

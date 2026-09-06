@@ -256,6 +256,35 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
         ForegroundMaskingCommandController.perform(in: document, host: window)
     }
 
+    /// Setzt die ausgewählte Bildebene in die darunterliegende Form.
+    @IBAction func fitImageIntoShape(_ sender: Any?) {
+        applySelectedImageToShape(fit: .cover)
+    }
+
+    @IBAction func stretchImageIntoShape(_ sender: Any?) {
+        applySelectedImageToShape(fit: .stretch)
+    }
+
+    @IBAction func removeImageClipShape(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state,
+              let imageID = state.selectedLayerID
+        else { return }
+        ImageInShapeCommand.removeClipShape(from: imageID, in: state)
+    }
+
+    private func applySelectedImageToShape(fit: ImageInShapeCommand.Fit) {
+        guard let state = (document as? AssemblageDocument)?.state,
+              let image = state.selectedLayer,
+              case .image = image.content,
+              let shape = ImageInShapeCommand.topmostShapeLayer(
+                  at: Point(x: image.transform.x, y: image.transform.y),
+                  excluding: image.id,
+                  in: state.document
+              )
+        else { return }
+        ImageInShapeCommand.apply(imageLayerID: image.id, shapeLayerID: shape.id, fit: fit, to: state)
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(undo(_:)) {
             guard let document = document as? AssemblageDocument else { return false }
@@ -309,6 +338,26 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
         if menuItem.action == #selector(removeSubjectBackground(_:)) {
             guard let document = document as? AssemblageDocument else { return false }
             return ForegroundMaskingCommandController.canPerform(in: document)
+        }
+
+        if menuItem.action == #selector(fitImageIntoShape(_:))
+            || menuItem.action == #selector(stretchImageIntoShape(_:)) {
+            guard let state = (document as? AssemblageDocument)?.state,
+                  let image = state.selectedLayer,
+                  case .image = image.content
+            else { return false }
+            return ImageInShapeCommand.topmostShapeLayer(
+                at: Point(x: image.transform.x, y: image.transform.y),
+                excluding: image.id,
+                in: state.document
+            ) != nil
+        }
+
+        if menuItem.action == #selector(removeImageClipShape(_:)) {
+            guard let layer = (document as? AssemblageDocument)?.state.selectedLayer,
+                  case .image(let image) = layer.content
+            else { return false }
+            return image.clipShape != nil
         }
 
         if menuItem.action == #selector(selectDistortTool(_:)) {

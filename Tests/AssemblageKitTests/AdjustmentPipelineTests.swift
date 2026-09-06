@@ -230,7 +230,8 @@ final class AdjustmentWiringTests: XCTestCase {
         let (mitAnpassung, resources) = try dokumentMitFoto(ImageAdjustments(brightness: 0.5))
         let ansicht = CanvasView(document: mitAnpassung, images: ImageStore(resources: resources))
 
-        let schicht = try XCTUnwrap(ansicht.layer?.sublayers?.first?.sublayers?.first)
+        let container = try XCTUnwrap(ansicht.layer?.sublayers?.first?.sublayers?.first)
+        let schicht = try XCTUnwrap(container as? ImageContentLayer).bitmap
         let filter = try XCTUnwrap(schicht.filters as? [CIFilter])
         XCTAssertFalse(filter.isEmpty)
     }
@@ -241,7 +242,8 @@ final class AdjustmentWiringTests: XCTestCase {
         let (ohne, resources) = try dokumentMitFoto(.neutral)
         let ansicht = CanvasView(document: ohne, images: ImageStore(resources: resources))
 
-        let schicht = try XCTUnwrap(ansicht.layer?.sublayers?.first?.sublayers?.first)
+        let container = try XCTUnwrap(ansicht.layer?.sublayers?.first?.sublayers?.first)
+        let schicht = try XCTUnwrap(container as? ImageContentLayer).bitmap
         XCTAssertNil(schicht.filters)
     }
 
@@ -260,7 +262,8 @@ final class AdjustmentWiringTests: XCTestCase {
         }
         ansicht.update(to: zurueckgesetzt)
 
-        let schicht = try XCTUnwrap(ansicht.layer?.sublayers?.first?.sublayers?.first)
+        let container = try XCTUnwrap(ansicht.layer?.sublayers?.first?.sublayers?.first)
+        let schicht = try XCTUnwrap(container as? ImageContentLayer).bitmap
         XCTAssertNil(schicht.filters)
     }
 

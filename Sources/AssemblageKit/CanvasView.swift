@@ -60,6 +60,8 @@ final class CanvasView: NSView {
     private let handleShapes = CAShapeLayer()
     /// Die Ausrichtungslinien beim Ziehen (Plan 5.3).
     private let guideShapes = CAShapeLayer()
+    /// Zielrahmen beim Ziehen eines Bildes über eine Form.
+    private let shapeDropHighlight = CAShapeLayer()
     /// Gestrichelter Pfad einer laufenden Lasso-Auswahl.
     private let lassoPreviewShape = CAShapeLayer()
 
@@ -82,6 +84,7 @@ final class CanvasView: NSView {
     static let snapDistance: Double = 8
 
     private var drag: CanvasDrag?
+    private var dropTargetShapeID: UUID?
     /// Zeigt an, dass ein gezogenes Bild hier angenommen würde
     /// (aus Anpassungen.md).
     private lazy var dropHighlight = DropHighlightController(view: self)
@@ -219,6 +222,7 @@ final class CanvasView: NSView {
         cropPreviewLayer.contentsGravity = .resize
         cropPreviewLayer.isHidden = true
         overlayLayer.addSublayer(guideShapes)
+        overlayLayer.addSublayer(shapeDropHighlight)
         overlayLayer.addSublayer(lassoPreviewShape)
         overlayLayer.addSublayer(handleShapes)
         guideShapes.fillColor = nil
@@ -226,6 +230,9 @@ final class CanvasView: NSView {
         // müssen sich von der Auswahlfarbe unterscheiden, sonst hält man sie
         // für einen Teil des Rahmens.
         guideShapes.strokeColor = NSColor.systemPink.cgColor
+        shapeDropHighlight.fillColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
+        shapeDropHighlight.strokeColor = NSColor.controlAccentColor.cgColor
+        shapeDropHighlight.lineDashPattern = [5, 3]
         lassoPreviewShape.fillColor = nil
         lassoPreviewShape.strokeColor = NSColor.controlAccentColor.cgColor
         lassoPreviewShape.lineDashPattern = [6, 4]
@@ -954,12 +961,16 @@ final class CanvasView: NSView {
         let alpha = CIImage(cgImage: maske).applyingFilter("CIMaskToAlpha")
         guard let alphaBild = RenderContext.shared.createCGImage(alpha, from: alpha.extent) else { return }
 
-        let schicht = gerendert.mask ?? CALayer()
+        // Bildebenen halten ihren Rahmen ausserhalb des maskierten Inhalts.
+        // Die Pinselvorschau muss deshalb dieselbe Schicht bemalen wie
+        // `LayerRenderer.applyMask` — den Inhalt, nicht die Hülle.
+        let ziel = (gerendert as? ImageContentLayer)?.bitmap ?? gerendert
+        let schicht = ziel.mask ?? CALayer()
         withoutAnimation {
             schicht.contents = alphaBild
             schicht.contentsGravity = .resize
-            schicht.frame = CGRect(origin: .zero, size: gerendert.bounds.size)
-            gerendert.mask = schicht
+            schicht.frame = CGRect(origin: .zero, size: ziel.bounds.size)
+            ziel.mask = schicht
         }
     }
 
@@ -1132,8 +1143,10 @@ final class CanvasView: NSView {
         // die Ebene unter dem Griff wegspringen lassen, statt zu helfen.
         if case .move = laufend.kind {
             neu = einrasten(neu, of: laufend)
+            updateShapeDropTarget(for: laufend, center: Point(x: neu.x, y: neu.y))
         } else {
             zeigeAusrichtungslinien([])
+            updateShapeDropHighlight(nil)
         }
 
         // Die Undo-Klammer erst beim ersten echten Ziehen öffnen: Ein blosser
@@ -1200,6 +1213,33 @@ final class CanvasView: NSView {
         withoutAnimation {
             guideShapes.path = pfad
             guideShapes.lineWidth = 1 / zoomScale
+        }
+    }
+
+    private func updateShapeDropTarget(for drag: CanvasDrag, center: Point) {
+        guard case .image = document.layer(withID: drag.layerID)?.content else {
+            updateShapeDropHighlight(nil)
+            return
+        }
+        let target = ImageInShapeCommand.topmostShapeLayer(
+            at: center, excluding: drag.layerID, in: document
+        )
+        updateShapeDropHighlight(target)
+    }
+
+    private func updateShapeDropHighlight(_ layer: Layer?) {
+        dropTargetShapeID = layer?.id
+        guard let layer, case .shape(let shape) = layer.content else {
+            withoutAnimation { shapeDropHighlight.path = nil }
+            return
+        }
+        let corners = layer.transform.corners(contentSize: shape.size)
+        let path = CGMutablePath()
+        path.addLines(between: corners.map { CGPoint(x: $0.x, y: $0.y) })
+        path.closeSubpath()
+        withoutAnimation {
+            shapeDropHighlight.path = path
+            shapeDropHighlight.lineWidth = 2 / zoomScale
         }
     }
 
@@ -1276,10 +1316,19 @@ final class CanvasView: NSView {
 
         // Die Linien sind eine Hilfe *während* des Ziehens; danach wären sie
         // nur noch Striche ohne Bezug.
+        let shapeID = dropTargetShapeID
         zeigeAusrichtungslinien([])
+        updateShapeDropHighlight(nil)
         defer { drag = nil }
         guard let laufend = drag, laufend.hasPassedThreshold else { return }
-        interactionDelegate?.canvasView(self, didEndInteractionNamed: laufend.kind.actionName)
+        if case .move = laufend.kind, let shapeID {
+            interactionDelegate?.canvasView(
+                self, didDropImageLayerWithID: laufend.layerID, ontoShapeWithID: shapeID
+            )
+            interactionDelegate?.canvasView(self, didEndInteractionNamed: "Bild in Form einsetzen")
+        } else {
+            interactionDelegate?.canvasView(self, didEndInteractionNamed: laufend.kind.actionName)
+        }
     }
 
     // MARK: - Bildschirmauflösung

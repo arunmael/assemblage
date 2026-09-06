@@ -22,6 +22,9 @@ protocol CanvasInteractionDelegate: AnyObject {
 
     func canvasView(_ canvasView: CanvasView, didEndInteractionNamed actionName: String)
 
+    /// Eine verschobene Bildebene wurde über einer Form losgelassen.
+    func canvasView(_ canvasView: CanvasView, didDropImageLayerWithID imageID: UUID, ontoShapeWithID shapeID: UUID)
+
     /// Auf die Leinwand gezogene Bilder (Plan 5.1). Der Canvas nimmt sie nur
     /// entgegen; was damit geschieht, entscheidet das Dokument.
     func canvasView(_ canvasView: CanvasView, didReceiveDropFrom pasteboard: NSPasteboard)
@@ -72,6 +75,8 @@ extension CanvasInteractionDelegate {
     func canvasView(_ canvasView: CanvasView, didPaintColorForLayerWithID id: UUID, pngData: Data) {}
 
     func canvasView(_ canvasView: CanvasView, didFillLassoForLayerWithID id: UUID, pngData: Data) {}
+
+    func canvasView(_ canvasView: CanvasView, didDropImageLayerWithID imageID: UUID, ontoShapeWithID shapeID: UUID) {}
 }
 
 /// Ein laufender Pinselstrich (Plan 5.4).

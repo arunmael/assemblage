@@ -254,6 +254,14 @@ extension CanvasViewController: CanvasInteractionDelegate, CanvasKeyboardCommand
         state.owner?.endInteraction(actionName: actionName)
     }
 
+    func canvasView(
+        _ canvasView: CanvasView,
+        didDropImageLayerWithID imageID: UUID,
+        ontoShapeWithID shapeID: UUID
+    ) {
+        ImageInShapeCommand.apply(imageLayerID: imageID, shapeLayerID: shapeID, fit: .cover, to: state)
+    }
+
     func canvasView(_ canvasView: CanvasView, didChangeCropOfLayerWithID id: UUID, to crop: Rect) {
         guard let ebene = state.document.layer(withID: id),
               case .image(let inhalt) = ebene.content,

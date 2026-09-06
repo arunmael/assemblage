@@ -26,6 +26,12 @@ final class ContentUpdateTests: XCTestCase {
         try XCTUnwrap(view.layer?.sublayers?.first?.sublayers?.first)
     }
 
+    /// Die Schicht, die das Bild selbst trägt. Ein Rahmen liegt bewusst
+    /// daneben statt darunter, deshalb ist der Inhalt eine Ebene tiefer.
+    private func bildschicht(_ view: CanvasView) throws -> CALayer {
+        try XCTUnwrap(schicht(view) as? ImageContentLayer).bitmap
+    }
+
     // MARK: - Text
 
     func testChangingTextUpdatesTheCanvas() throws {
@@ -216,7 +222,7 @@ final class ContentUpdateTests: XCTestCase {
         ))
         view.update(to: document)
 
-        let schicht = try schicht(view)
+        let schicht = try bildschicht(view)
         XCTAssertEqual(schicht.contentsRect.width, 0.5, accuracy: 0.01, "der Zuschnitt muss ankommen")
     }
 
@@ -246,10 +252,11 @@ final class ContentUpdateTests: XCTestCase {
             content: .image(ImageLayerContent(originalFileReference: referenz, cropRect: crop))
         ))
         XCTAssertEqual(zugeschnitten.bounds.size, CGSize(width: 4_096, height: 8))
-        XCTAssertEqual(zugeschnitten.contentsRect.origin.x, 0.25, accuracy: 0.0001)
-        XCTAssertEqual(zugeschnitten.contentsRect.origin.y, 0.25, accuracy: 0.0001)
-        XCTAssertEqual(zugeschnitten.contentsRect.width, 0.5, accuracy: 0.0001)
-        XCTAssertEqual(zugeschnitten.contentsRect.height, 0.5, accuracy: 0.0001)
+        let bitmap = try XCTUnwrap(zugeschnitten as? ImageContentLayer).bitmap
+        XCTAssertEqual(bitmap.contentsRect.origin.x, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(bitmap.contentsRect.origin.y, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(bitmap.contentsRect.width, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(bitmap.contentsRect.height, 0.5, accuracy: 0.0001)
     }
 
     // MARK: - Keine unnötigen Neuaufbauten

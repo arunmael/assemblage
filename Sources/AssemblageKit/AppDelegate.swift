@@ -112,6 +112,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         foregroundMask.keyEquivalentModifierMask = [.command, .shift]
         menu.addItem(foregroundMask)
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Bild in Form einsetzen",
+                     action: #selector(DocumentWindowController.fitImageIntoShape(_:)),
+                     keyEquivalent: "")
+        menu.addItem(withTitle: "Bild in Form ziehen",
+                     action: #selector(DocumentWindowController.stretchImageIntoShape(_:)),
+                     keyEquivalent: "")
+        menu.addItem(withTitle: "Form-Zuschnitt aufheben",
+                     action: #selector(DocumentWindowController.removeImageClipShape(_:)),
+                     keyEquivalent: "")
         return menu
     }
 

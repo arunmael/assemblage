@@ -103,6 +103,7 @@ extension ImageLayerContent {
     // auch die automatisch erzeugten CodingKeys.
     enum CodingKeys: String, CodingKey {
         case originalFileReference, cropRect, adjustments
+        case clipShape, borderWidth, borderColorHex
     }
 
     public init(from decoder: Decoder) throws {
@@ -110,7 +111,10 @@ extension ImageLayerContent {
         self.init(
             originalFileReference: try container.decode(String.self, forKey: .originalFileReference),
             cropRect: try container.decodeIfPresent(Rect.self, forKey: .cropRect),
-            adjustments: try container.value(.adjustments, or: .neutral)
+            adjustments: try container.value(.adjustments, or: .neutral),
+            clipShape: try container.decodeIfPresent(ShapeKind.self, forKey: .clipShape),
+            borderWidth: try container.value(.borderWidth, or: 0),
+            borderColorHex: try container.value(.borderColorHex, or: "#FFFFFF")
         )
     }
 }

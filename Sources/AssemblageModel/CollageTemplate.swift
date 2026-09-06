@@ -207,47 +207,15 @@ extension CollageTemplate {
         )
     }
 
-    /// Schneidet den Inhalt mittig auf das Seitenverhältnis des Zielfachs zu
-    /// und skaliert danach auf beiden Achsen gleich. So füllt das Bild sein
-    /// Fach ohne Verzerrung und ohne leere Balken.
+    /// Leitet an den gemeinsamen Einpass-Helfer weiter — dieselbe Rechnung
+    /// benutzt „Bild in Form".
     private func fill(
         contentSize: Size,
         frame: Rect,
         rotationDegrees: Double
     ) -> (transform: Transform2D, cropRect: Rect?) {
-        let contentRatio = contentSize.width / contentSize.height
-        let frameRatio = frame.width / frame.height
-        let crop: Rect
-
-        if contentRatio > frameRatio {
-            let width = contentSize.height * frameRatio
-            crop = Rect(
-                x: (contentSize.width - width) / 2,
-                y: 0,
-                width: width,
-                height: contentSize.height
-            )
-        } else {
-            let height = contentSize.width / frameRatio
-            crop = Rect(
-                x: 0,
-                y: (contentSize.height - height) / 2,
-                width: contentSize.width,
-                height: height
-            )
-        }
-
-        let scale = frame.width / crop.width
-        let wholeImage = Rect(x: 0, y: 0, width: contentSize.width, height: contentSize.height)
-        return (
-            Transform2D(
-                x: frame.x + frame.width / 2,
-                y: frame.y + frame.height / 2,
-                scaleX: scale,
-                scaleY: scale,
-                rotationDegrees: rotationDegrees
-            ),
-            crop == wholeImage ? nil : crop
+        ContentPlacement.fill(
+            contentSize: contentSize, frame: frame, rotationDegrees: rotationDegrees
         )
     }
 }

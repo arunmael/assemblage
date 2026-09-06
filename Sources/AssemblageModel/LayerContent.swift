@@ -9,10 +9,34 @@ public struct ImageLayerContent: Codable, Equatable, Sendable {
     public var cropRect: Rect?
     public var adjustments: ImageAdjustments
 
-    public init(originalFileReference: String, cropRect: Rect? = nil, adjustments: ImageAdjustments = .neutral) {
+    /// Der Umriss, auf den das Bild beschnitten wird — „Bild in eine Form
+    /// setzen". `nil` = rechteckig wie bisher.
+    ///
+    /// Bewusst hier und nicht als zweite Maske neben `Layer.mask`: Eine
+    /// gemalte Maske und ein Formzuschnitt sollen sich überlagern können
+    /// (erst freistellen, dann in eine Form setzen). Beide laufen deshalb
+    /// beim Zeichnen durch dieselbe Stelle zusammen.
+    public var clipShape: ShapeKind?
+
+    /// Rahmenstärke in Punkten; 0 = kein Rahmen. Der Rahmen folgt
+    /// `clipShape`, sonst dem Bildrechteck.
+    public var borderWidth: Double
+    public var borderColorHex: String
+
+    public init(
+        originalFileReference: String,
+        cropRect: Rect? = nil,
+        adjustments: ImageAdjustments = .neutral,
+        clipShape: ShapeKind? = nil,
+        borderWidth: Double = 0,
+        borderColorHex: String = "#FFFFFF"
+    ) {
         self.originalFileReference = originalFileReference
         self.cropRect = cropRect
         self.adjustments = adjustments
+        self.clipShape = clipShape
+        self.borderWidth = borderWidth
+        self.borderColorHex = borderColorHex
     }
 }
 
