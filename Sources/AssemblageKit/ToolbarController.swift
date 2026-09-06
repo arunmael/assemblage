@@ -55,7 +55,7 @@ struct ToolSelection {
 /// dem Canvas platziert — das Mockup zeigt keine native Titelleisten-
 /// Werkzeugleiste, sondern eigenständige, abgerundete Glas-Cluster.
 @MainActor
-final class ToolbarController: NSObject, NSMenuItemValidation {
+final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelegate {
 
     private let state: DocumentState
     private weak var canvasViewController: CanvasViewController?
@@ -68,6 +68,13 @@ final class ToolbarController: NSObject, NSMenuItemValidation {
     private var selectedLayer: Layer?
     private var toolButtons: [CanvasTool: NSButton] = [:]
     private weak var removeSubjectButton: NSButton?
+
+    /// Die Werkzeugsuche (Anpassungen.md / Nutzer-Rückmeldung): ein
+    /// Ergebnis-Popover, das beim Tippen sowohl Werkzeuge als auch
+    /// Ebenennamen durchsucht.
+    private weak var searchField: NSTextField?
+    private var searchPopover: NSPopover?
+    private var searchResultActions: [Int: () -> Void] = [:]
 
     /// Der schwebende Einstellungs-Streifen unterhalb der Werkzeugleiste, der
     /// nur bei Pinsel/Lasso/Farbe erscheint — im Mockup nicht vorgesehen
@@ -383,8 +390,10 @@ final class ToolbarController: NSObject, NSMenuItemValidation {
         // deutliches Rechteck um das Feld — hier unerwünscht, weil die
         // Werkzeugleisten-Pille selbst schon die sichtbare Umrandung ist.
         field.focusRingType = .none
+        field.delegate = self
         field.translatesAutoresizingMaskIntoConstraints = false
         field.widthAnchor.constraint(equalToConstant: 150).isActive = true
+        searchField = field
 
         let stack = NSStackView(views: [icon, field])
         stack.orientation = .horizontal
@@ -393,6 +402,160 @@ final class ToolbarController: NSObject, NSMenuItemValidation {
         stack.edgeInsets = NSEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
 
         return wrapInGlassPanel(stack, cornerRadius: AssemblageTheme.toolClusterCornerRadius)
+    }
+
+    // MARK: - Werkzeugsuche
+
+    /// Ein einzelner Treffer im Such-Popover: entweder ein Werkzeug/Befehl
+    /// (mit Icon) oder eine Ebene (ohne Icon, dafür mit Typ als Untertitel).
+    private struct SearchResult {
+        let title: String
+        let subtitle: String?
+        let icon: MockupIcon?
+        let action: () -> Void
+    }
+
+    /// Alle über die Suche erreichbaren Werkzeuge und Befehle — dieselben
+    /// Aktionen wie ihre Knöpfe in der Werkzeugleiste, nur zusätzlich über
+    /// den Namen auffindbar (auch die im Cluster nicht sichtbaren wie Lasso
+    /// und Farbpinsel).
+    private func searchableTools() -> [SearchResult] {
+        [
+            SearchResult(title: "Auswählen", subtitle: nil, icon: .select) { [weak self] in self?.toggle(.select) },
+            SearchResult(title: "Zuschneiden", subtitle: nil, icon: .crop) { [weak self] in self?.toggle(.crop) },
+            SearchResult(title: "Pinsel", subtitle: nil, icon: .brush) { [weak self] in self?.toggle(.brush) },
+            SearchResult(title: "Bild ausschneiden", subtitle: "Lasso", icon: .removeSubject) { [weak self] in self?.toggle(.lasso) },
+            SearchResult(title: "Farbe malen", subtitle: nil, icon: .brush) { [weak self] in self?.toggle(.paint) },
+            SearchResult(title: "Verziehen", subtitle: nil, icon: .warp) { [weak self] in self?.toggle(.distort) },
+            SearchResult(title: "Freistellen", subtitle: nil, icon: .removeSubject) { [weak self] in self?.removeSubject(nil) },
+            SearchResult(title: "Text einfügen", subtitle: nil, icon: .insertText) { [weak self] in self?.insertText(nil) },
+            SearchResult(title: "Rechteck einfügen", subtitle: "Form", icon: .insertShape) { [weak self] in
+                self?.commandTarget?.insertRectangleLayer(nil)
+            },
+            SearchResult(title: "Ellipse einfügen", subtitle: "Form", icon: .insertShape) { [weak self] in
+                self?.commandTarget?.insertEllipseLayer(nil)
+            },
+            SearchResult(title: "Raster 2×2", subtitle: "Vorlage", icon: .collageGrid) { [weak self] in
+                self?.commandTarget?.applyGrid2x2Template(nil)
+            },
+            SearchResult(title: "Raster 3×3", subtitle: "Vorlage", icon: .collageGrid) { [weak self] in
+                self?.commandTarget?.applyGrid3x3Template(nil)
+            },
+            SearchResult(title: "Polaroid-Stapel", subtitle: "Vorlage", icon: .collageGrid) { [weak self] in
+                self?.commandTarget?.applyPolaroidStackTemplate(nil)
+            },
+            SearchResult(title: "Teilen", subtitle: "Exportieren…", icon: .share) { [weak self] in
+                self?.commandTarget?.exportDocument(nil)
+            },
+            SearchResult(title: "Vergrössern", subtitle: "Zoom", icon: .zoomIn) { [weak self] in self?.canvasViewController?.zoomIn() },
+            SearchResult(title: "Verkleinern", subtitle: "Zoom", icon: .zoomOut) { [weak self] in self?.canvasViewController?.zoomOut() },
+            SearchResult(title: "An Fenster anpassen", subtitle: "Zoom", icon: nil) { [weak self] in self?.canvasViewController?.zoomToFit() }
+        ]
+    }
+
+    private func searchableLayers(matching query: String) -> [SearchResult] {
+        LayerListEditing(state: state).layersInListOrder
+            .filter { $0.name.lowercased().contains(query) }
+            .map { layer in
+                SearchResult(title: layer.name, subtitle: layerTypeName(layer), icon: nil) { [weak self] in
+                    self?.state.selectedLayerID = layer.id
+                }
+            }
+    }
+
+    private func layerTypeName(_ layer: Layer) -> String {
+        switch layer.content {
+        case .image: "Bild"
+        case .text: "Text"
+        case .shape: "Form"
+        }
+    }
+
+    /// Läuft bei jeder Texteingabe im Suchfeld (`NSTextFieldDelegate`).
+    func controlTextDidChange(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField, field === searchField else { return }
+        let query = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else {
+            searchPopover?.performClose(nil)
+            return
+        }
+
+        let layerMatches = searchableLayers(matching: query)
+        let toolMatches = searchableTools().filter { $0.title.lowercased().contains(query) }
+
+        guard !layerMatches.isEmpty || !toolMatches.isEmpty else {
+            searchPopover?.performClose(nil)
+            return
+        }
+
+        showSearchResults(layers: layerMatches, tools: toolMatches, anchor: field)
+    }
+
+    /// Schliesst das Popover, wenn das Suchfeld den Fokus verliert, ohne
+    /// dass ein Ergebnis angeklickt wurde.
+    func controlTextDidEndEditing(_ obj: Notification) {
+        searchPopover?.performClose(nil)
+    }
+
+    private func showSearchResults(layers: [SearchResult], tools: [SearchResult], anchor: NSView) {
+        searchResultActions.removeAll()
+        var tag = 0
+        var rows: [NSView] = []
+
+        func addSection(_ title: String, _ results: [SearchResult]) {
+            guard !results.isEmpty else { return }
+            let header = NSTextField(labelWithString: title.uppercased())
+            header.font = .systemFont(ofSize: 10, weight: .bold)
+            header.textColor = AssemblageTheme.textTertiary
+            rows.append(header)
+            for result in results.prefix(6) {
+                rows.append(makeResultRow(result, tag: &tag))
+            }
+        }
+        addSection("Ebenen", layers)
+        addSection("Werkzeuge", tools)
+
+        let stack = NSStackView(views: rows)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4
+        stack.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        for row in rows {
+            row.translatesAutoresizingMaskIntoConstraints = false
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+
+        let content = NSViewController()
+        content.view = stack
+        stack.widthAnchor.constraint(equalToConstant: 220).isActive = true
+
+        let popover = searchPopover ?? NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = content
+        searchPopover = popover
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+    }
+
+    private func makeResultRow(_ result: SearchResult, tag: inout Int) -> NSButton {
+        let button = NSButton(title: result.subtitle.map { "\(result.title)  ·  \($0)" } ?? result.title, target: self, action: #selector(searchResultTapped(_:)))
+        button.isBordered = false
+        button.alignment = .left
+        button.font = .systemFont(ofSize: 12.5)
+        button.contentTintColor = AssemblageTheme.textPrimary
+        if let icon = result.icon {
+            button.image = MockupIcons.image(icon, pointSize: 14, tintColor: AssemblageTheme.textPrimary)
+            button.imagePosition = .imageLeading
+        }
+        button.tag = tag
+        searchResultActions[tag] = result.action
+        tag += 1
+        return button
+    }
+
+    @objc private func searchResultTapped(_ sender: NSButton) {
+        searchResultActions[sender.tag]?()
+        searchPopover?.performClose(nil)
+        searchField?.stringValue = ""
     }
 
     private func makeShareButton() -> NSView {
