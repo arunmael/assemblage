@@ -629,8 +629,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         return panel
     }
 
-    /// Ein sichtbares Form-Icon, dessen Menü genau die drei Formen aus Plan
-    /// 5.7 anbietet. So belegen die Formen nicht drei Plätze in der Leiste.
+    /// Ein sichtbares Form-Icon, dessen Menü alle verfügbaren Formen anbietet.
     private func makeShapePillMenu() -> NSView {
         let button = NSPopUpButton(frame: .zero, pullsDown: true)
         button.bezelStyle = .texturedRounded
@@ -641,10 +640,17 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         title.image = MockupIcons.image(.insertShape, pointSize: 16, tintColor: AssemblageTheme.textPrimary)
         button.menu?.addItem(title)
 
-        let rectangle = NSMenuItem(title: "Rechteck", action: #selector(DocumentWindowController.insertRectangleLayer(_:)), keyEquivalent: "")
-        let rounded = NSMenuItem(title: "Abgerundetes Rechteck", action: #selector(DocumentWindowController.insertRoundedRectangleLayer(_:)), keyEquivalent: "")
-        let ellipse = NSMenuItem(title: "Ellipse", action: #selector(DocumentWindowController.insertEllipseLayer(_:)), keyEquivalent: "")
-        for item in [rectangle, rounded, ellipse] {
+        let shapeKinds = NewLayerKind.allCases.filter { $0 != .text }
+        for (index, kind) in shapeKinds.enumerated() {
+            if index == 3 {
+                button.menu?.addItem(.separator())
+            }
+            let item = NSMenuItem(
+                title: kind.localizedName,
+                action: #selector(DocumentWindowController.insertShapeFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            item.representedObject = kind
             item.target = commandTarget
             button.menu?.addItem(item)
         }
@@ -655,8 +661,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         return button
     }
 
-    /// „Raster" — Collage-Vorlagen (2×2, 3×3, Polaroid-Stapel). Vorher ohne
-    /// Aktion verdrahtet, weshalb ein Klick sichtbar nichts tat.
+    /// „Raster" — alle kuratierten Collage-Vorlagen.
     private func makeGridPillMenu() -> NSView {
         let button = NSPopUpButton(frame: .zero, pullsDown: true)
         button.bezelStyle = .texturedRounded
@@ -667,10 +672,13 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         title.image = MockupIcons.image(.collageGrid, pointSize: 16, tintColor: AssemblageTheme.textPrimary)
         button.menu?.addItem(title)
 
-        let grid2x2 = NSMenuItem(title: "Raster 2×2", action: #selector(DocumentWindowController.applyGrid2x2Template(_:)), keyEquivalent: "")
-        let grid3x3 = NSMenuItem(title: "Raster 3×3", action: #selector(DocumentWindowController.applyGrid3x3Template(_:)), keyEquivalent: "")
-        let polaroid = NSMenuItem(title: "Polaroid-Stapel", action: #selector(DocumentWindowController.applyPolaroidStackTemplate(_:)), keyEquivalent: "")
-        for item in [grid2x2, grid3x3, polaroid] {
+        for template in CollageTemplate.allCases {
+            let item = NSMenuItem(
+                title: template.localizedName,
+                action: #selector(DocumentWindowController.applyTemplateFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            item.representedObject = template
             item.target = commandTarget
             button.menu?.addItem(item)
         }

@@ -22,6 +22,17 @@ public enum ShapeTemplate: String, Codable, CaseIterable, Sendable {
     case lightningBolt
     case cloud
     case shield
+
+    case pill
+    case chevron
+    case bookmark
+    case burst
+    case teardrop
+    case heptagon
+    case decagon
+    case arrowDouble
+    case house
+    case flag
 }
 
 public enum ShapeGeometry {
@@ -249,6 +260,139 @@ public enum ShapeGeometry {
                 Point(x: 0.0, y: 0.5)
             ]
             return fitToRect(points, size: size)
+
+        case .pill:
+            // Die Rundungen liegen immer an den Schmalseiten der Kapsel.
+            let radius = min(size.width, size.height) / 2.0
+            let steps = 16
+            var points: [Point] = []
+            if size.width >= size.height {
+                for i in 0...steps {
+                    let angle = -Double.pi / 2.0 + Double(i) * Double.pi / Double(steps)
+                    points.append(Point(
+                        x: size.width - radius + radius * cos(angle),
+                        y: radius + radius * sin(angle)
+                    ))
+                }
+                for i in 1...steps {
+                    let angle = Double.pi / 2.0 + Double(i) * Double.pi / Double(steps)
+                    points.append(Point(
+                        x: radius + radius * cos(angle),
+                        y: radius + radius * sin(angle)
+                    ))
+                }
+            } else {
+                for i in 0...steps {
+                    let angle = Double(i) * Double.pi / Double(steps)
+                    points.append(Point(
+                        x: radius + radius * cos(angle),
+                        y: size.height - radius + radius * sin(angle)
+                    ))
+                }
+                for i in 1...steps {
+                    let angle = Double.pi + Double(i) * Double.pi / Double(steps)
+                    points.append(Point(
+                        x: radius + radius * cos(angle),
+                        y: radius + radius * sin(angle)
+                    ))
+                }
+            }
+            return points
+
+        case .chevron:
+            return [
+                Point(x: 0.0, y: 0.0),
+                Point(x: size.width * 0.55, y: 0.0),
+                Point(x: size.width, y: size.height * 0.5),
+                Point(x: size.width * 0.55, y: size.height),
+                Point(x: 0.0, y: size.height),
+                Point(x: size.width * 0.45, y: size.height * 0.5)
+            ]
+
+        case .bookmark:
+            return [
+                Point(x: 0.0, y: 0.0),
+                Point(x: size.width, y: 0.0),
+                Point(x: size.width, y: size.height),
+                Point(x: size.width * 0.5, y: size.height * 0.72),
+                Point(x: 0.0, y: size.height)
+            ]
+
+        case .burst:
+            let totalPoints = 24
+            var points: [Point] = []
+            for i in 0..<totalPoints {
+                let angle = -Double.pi / 2.0 + Double(i) * (2.0 * Double.pi / Double(totalPoints))
+                let radius = i.isMultiple(of: 2) ? 1.0 : 0.62
+                points.append(Point(x: radius * cos(angle), y: radius * sin(angle)))
+            }
+            return fitToRect(points, size: size)
+
+        case .teardrop:
+            // Spitze und ein weiter Kreisbogen ergeben eine glatte Tropfenkontur.
+            let radius = min(size.width, size.height) * 0.38
+            let radiusX = min(size.width * 0.42, radius * 1.35)
+            let center = Point(x: size.width * 0.5, y: size.height * 0.62)
+            var points = [Point(x: size.width * 0.5, y: 0.0)]
+            let steps = 40
+            for i in 0...steps {
+                let angle = -Double.pi * 0.35 + Double(i) * (Double.pi * 1.7 / Double(steps))
+                points.append(Point(
+                    x: center.x + radiusX * cos(angle),
+                    y: center.y + radius * sin(angle)
+                ))
+            }
+            return points
+
+        case .heptagon:
+            var points: [Point] = []
+            for i in 0..<7 {
+                let angle = -Double.pi / 2.0 + Double(i) * (2.0 * Double.pi / 7.0)
+                points.append(Point(x: cos(angle), y: sin(angle)))
+            }
+            return fitToRect(points, size: size)
+
+        case .decagon:
+            var points: [Point] = []
+            for i in 0..<10 {
+                let angle = -Double.pi / 2.0 + Double(i) * (2.0 * Double.pi / 10.0)
+                points.append(Point(x: cos(angle), y: sin(angle)))
+            }
+            return fitToRect(points, size: size)
+
+        case .arrowDouble:
+            return [
+                Point(x: 0.0, y: size.height * 0.5),
+                Point(x: size.width * 0.25, y: 0.0),
+                Point(x: size.width * 0.25, y: size.height * 0.3),
+                Point(x: size.width * 0.75, y: size.height * 0.3),
+                Point(x: size.width * 0.75, y: 0.0),
+                Point(x: size.width, y: size.height * 0.5),
+                Point(x: size.width * 0.75, y: size.height),
+                Point(x: size.width * 0.75, y: size.height * 0.7),
+                Point(x: size.width * 0.25, y: size.height * 0.7),
+                Point(x: size.width * 0.25, y: size.height)
+            ]
+
+        case .house:
+            return [
+                Point(x: size.width * 0.5, y: 0.0),
+                Point(x: size.width, y: size.height * 0.42),
+                Point(x: size.width, y: size.height),
+                Point(x: 0.0, y: size.height),
+                Point(x: 0.0, y: size.height * 0.42)
+            ]
+
+        case .flag:
+            return [
+                Point(x: 0.0, y: 0.0),
+                Point(x: size.width * 0.12, y: 0.0),
+                Point(x: size.width * 0.12, y: size.height * 0.05),
+                Point(x: size.width, y: size.height * 0.22),
+                Point(x: size.width * 0.12, y: size.height * 0.45),
+                Point(x: size.width * 0.12, y: size.height),
+                Point(x: 0.0, y: size.height)
+            ]
         }
     }
 

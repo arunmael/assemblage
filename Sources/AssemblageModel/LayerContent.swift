@@ -74,6 +74,16 @@ public enum ShapeKind: String, Codable, Sendable, CaseIterable {
     case lightningBolt
     case cloud
     case shield
+    case pill
+    case chevron
+    case bookmark
+    case burst
+    case teardrop
+    case heptagon
+    case decagon
+    case arrowDouble
+    case house
+    case flag
 
     /// Die Vorlage hinter dieser Form — `nil` bei den drei Grundformen, die
     /// Core Graphics direkt kennt und die deshalb keinen Streckenzug brauchen.

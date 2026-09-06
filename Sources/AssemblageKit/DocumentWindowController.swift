@@ -147,9 +147,23 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
     @IBAction func insertRoundedRectangleLayer(_ sender: Any?) { insertLayer(.roundedRectangle) }
     @IBAction func insertEllipseLayer(_ sender: Any?) { insertLayer(.ellipse) }
 
+    /// Fügt die Form ein, die der Menüeintrag in `representedObject` trägt.
+    /// Eine generische Aktion statt einer Methode je Form: Bei 30 Formen
+    /// wären das sonst 30 fast gleiche Methoden.
+    @IBAction func insertShapeFromMenu(_ sender: Any?) {
+        guard let kind = (sender as? NSMenuItem)?.representedObject as? NewLayerKind else { return }
+        insertLayer(kind)
+    }
+
     @IBAction func applyGrid2x2Template(_ sender: Any?) { applyTemplate(.grid2x2) }
     @IBAction func applyGrid3x3Template(_ sender: Any?) { applyTemplate(.grid3x3) }
     @IBAction func applyPolaroidStackTemplate(_ sender: Any?) { applyTemplate(.polaroidStack) }
+
+    /// Wendet das Raster an, das der Menüeintrag in `representedObject` trägt.
+    @IBAction func applyTemplateFromMenu(_ sender: Any?) {
+        guard let template = (sender as? NSMenuItem)?.representedObject as? CollageTemplate else { return }
+        applyTemplate(template)
+    }
     @IBAction func removeGridTemplate(_ sender: Any?) {
         guard let state = (document as? AssemblageDocument)?.state else { return }
         CollageTemplateCommand.removeTemplate(from: state)
@@ -336,10 +350,15 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
             #selector(applyGrid2x2Template(_:)),
             #selector(applyGrid3x3Template(_:)),
             #selector(applyPolaroidStackTemplate(_:)),
+            #selector(applyTemplateFromMenu(_:)),
             #selector(removeGridTemplate(_:))
            ].contains(action) {
             guard let state = (document as? AssemblageDocument)?.state else { return false }
             return CollageTemplateCommand.canApply(to: state)
+        }
+
+        if menuItem.action == #selector(insertShapeFromMenu(_:)) {
+            return true
         }
 
         return true

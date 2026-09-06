@@ -144,6 +144,7 @@ final class CollageTemplateCommandTests: XCTestCase {
             #selector(DocumentWindowController.applyGrid2x2Template(_:)),
             #selector(DocumentWindowController.applyGrid3x3Template(_:)),
             #selector(DocumentWindowController.applyPolaroidStackTemplate(_:)),
+            #selector(DocumentWindowController.applyTemplateFromMenu(_:)),
             #selector(DocumentWindowController.removeGridTemplate(_:))
         ]
 

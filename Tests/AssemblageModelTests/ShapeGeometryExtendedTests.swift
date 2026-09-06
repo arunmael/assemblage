@@ -80,7 +80,7 @@ final class ShapeGeometryExtendedTests: XCTestCase {
     }
     
     func testTotalTemplateCount() {
-        // Stellt sicher, dass alle 17 definierten Formen im System registriert sind
-        XCTAssertEqual(ShapeTemplate.allCases.count, 17, "Die Gesamtanzahl der Formen entspricht nicht exakt 17")
+        // Drei Grundformen plus diese 27 Vorlagen ergeben 30 Formen im Menü.
+        XCTAssertEqual(ShapeTemplate.allCases.count, 27, "Die Gesamtanzahl der Vorlagen entspricht nicht exakt 27")
     }
 }

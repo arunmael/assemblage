@@ -5,6 +5,13 @@ public enum CollageTemplate: CaseIterable, Sendable {
     case grid2x2
     case grid3x3
     case polaroidStack
+    case grid1x2
+    case grid2x1
+    case grid2x3
+    case grid3x2
+    case grid4x4
+    case featureLeft
+    case featureTop
 
     /// Wie viele Bilder die Vorlage aufnimmt.
     public var capacity: Int {
@@ -12,6 +19,27 @@ public enum CollageTemplate: CaseIterable, Sendable {
         case .grid2x2: 4
         case .grid3x3: 9
         case .polaroidStack: 5
+        case .grid1x2, .grid2x1: 2
+        case .grid2x3, .grid3x2: 6
+        case .grid4x4: 16
+        case .featureLeft: 3
+        case .featureTop: 4
+        }
+    }
+
+    /// Beschriftung für Menüs.
+    public var localizedName: String {
+        switch self {
+        case .grid2x2: "Raster 2×2"
+        case .grid3x3: "Raster 3×3"
+        case .polaroidStack: "Polaroid-Stapel"
+        case .grid1x2: "Zwei nebeneinander"
+        case .grid2x1: "Zwei übereinander"
+        case .grid2x3: "Raster 2×3"
+        case .grid3x2: "Raster 3×2"
+        case .grid4x4: "Raster 4×4"
+        case .featureLeft: "Gross links, zwei rechts"
+        case .featureTop: "Gross oben, drei unten"
         }
     }
 }
@@ -52,7 +80,73 @@ extension CollageTemplate {
             )
         case .polaroidStack:
             return polaroidPlacement(index: index, contentSize: contentSize, canvas: canvas)
+        case .grid1x2:
+            return gridPlacement(index: index, columns: 2, rows: 1, contentSize: contentSize, canvas: canvas)
+        case .grid2x1:
+            return gridPlacement(index: index, columns: 1, rows: 2, contentSize: contentSize, canvas: canvas)
+        case .grid2x3:
+            return gridPlacement(index: index, columns: 2, rows: 3, contentSize: contentSize, canvas: canvas)
+        case .grid3x2:
+            return gridPlacement(index: index, columns: 3, rows: 2, contentSize: contentSize, canvas: canvas)
+        case .grid4x4:
+            return gridPlacement(index: index, columns: 4, rows: 4, contentSize: contentSize, canvas: canvas)
+        case .featureLeft:
+            return featureLeftPlacement(index: index, contentSize: contentSize, canvas: canvas)
+        case .featureTop:
+            return featureTopPlacement(index: index, contentSize: contentSize, canvas: canvas)
         }
+    }
+
+    private func featureLeftPlacement(
+        index: Int,
+        contentSize: Size,
+        canvas: CanvasSize
+    ) -> (transform: Transform2D, cropRect: Rect?) {
+        let gap = min(canvas.width, canvas.height) * 0.02
+        let usableWidth = canvas.width - 3.0 * gap
+        let usableHeight = canvas.height - 2.0 * gap
+        let leftWidth = usableWidth * 0.6
+        let rightWidth = usableWidth - leftWidth
+        let rightHeight = (usableHeight - gap) / 2.0
+        let frame: Rect
+
+        if index == 0 {
+            frame = Rect(x: gap, y: gap, width: leftWidth, height: usableHeight)
+        } else {
+            frame = Rect(
+                x: 2.0 * gap + leftWidth,
+                y: gap + Double(index - 1) * (rightHeight + gap),
+                width: rightWidth,
+                height: rightHeight
+            )
+        }
+        return fill(contentSize: contentSize, frame: frame, rotationDegrees: 0)
+    }
+
+    private func featureTopPlacement(
+        index: Int,
+        contentSize: Size,
+        canvas: CanvasSize
+    ) -> (transform: Transform2D, cropRect: Rect?) {
+        let gap = min(canvas.width, canvas.height) * 0.02
+        let usableWidth = canvas.width - 2.0 * gap
+        let usableHeight = canvas.height - 3.0 * gap
+        let topHeight = usableHeight * 0.6
+        let bottomHeight = usableHeight - topHeight
+        let bottomWidth = (usableWidth - 2.0 * gap) / 3.0
+        let frame: Rect
+
+        if index == 0 {
+            frame = Rect(x: gap, y: gap, width: usableWidth, height: topHeight)
+        } else {
+            frame = Rect(
+                x: gap + Double(index - 1) * (bottomWidth + gap),
+                y: 2.0 * gap + topHeight,
+                width: bottomWidth,
+                height: bottomHeight
+            )
+        }
+        return fill(contentSize: contentSize, frame: frame, rotationDegrees: 0)
     }
 
     private func gridPlacement(

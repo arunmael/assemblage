@@ -7,7 +7,29 @@ final class CollageTemplateTests: XCTestCase {
         XCTAssertEqual(CollageTemplate.grid2x2.capacity, 4)
         XCTAssertEqual(CollageTemplate.grid3x3.capacity, 9)
         XCTAssertEqual(CollageTemplate.polaroidStack.capacity, 5)
-        XCTAssertEqual(CollageTemplate.allCases.count, 3)
+        XCTAssertEqual(CollageTemplate.grid1x2.capacity, 2)
+        XCTAssertEqual(CollageTemplate.grid2x1.capacity, 2)
+        XCTAssertEqual(CollageTemplate.grid2x3.capacity, 6)
+        XCTAssertEqual(CollageTemplate.grid3x2.capacity, 6)
+        XCTAssertEqual(CollageTemplate.grid4x4.capacity, 16)
+        XCTAssertEqual(CollageTemplate.featureLeft.capacity, 3)
+        XCTAssertEqual(CollageTemplate.featureTop.capacity, 4)
+        XCTAssertEqual(CollageTemplate.allCases.count, 10)
+    }
+
+    func testJedeVorlageHatEineBeschriftungUndAllePlaetze() {
+        let content = Size(width: 1_200, height: 800)
+        let canvas = CanvasSize(width: 1_000, height: 800)
+
+        for template in CollageTemplate.allCases {
+            XCTAssertFalse(template.localizedName.isEmpty, "\(template)")
+            for index in 0..<template.capacity {
+                XCTAssertNotNil(
+                    template.placement(forIndex: index, contentSize: content, canvas: canvas),
+                    "\(template), Platz \(index)"
+                )
+            }
+        }
     }
 
     func testZweiMalZweiLiegtInVierQuadrantenOhneUeberlappung() throws {

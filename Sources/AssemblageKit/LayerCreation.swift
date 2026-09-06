@@ -24,6 +24,16 @@ enum NewLayerKind: Equatable, CaseIterable {
     case lightningBolt
     case cloud
     case shield
+    case pill
+    case chevron
+    case bookmark
+    case burst
+    case teardrop
+    case heptagon
+    case decagon
+    case arrowDouble
+    case house
+    case flag
 
     /// Beschriftung für Menü und Werkzeugleiste.
     var localizedName: String {
@@ -49,6 +59,16 @@ enum NewLayerKind: Equatable, CaseIterable {
         case .lightningBolt: "Blitz"
         case .cloud: "Wolke"
         case .shield: "Schild"
+        case .pill: "Kapsel"
+        case .chevron: "Winkel"
+        case .bookmark: "Lesezeichen"
+        case .burst: "Explosion"
+        case .teardrop: "Tropfen"
+        case .heptagon: "Siebeneck"
+        case .decagon: "Zehneck"
+        case .arrowDouble: "Doppelpfeil"
+        case .house: "Haus"
+        case .flag: "Fahne"
         }
     }
 
@@ -79,6 +99,16 @@ enum NewLayerKind: Equatable, CaseIterable {
         case .lightningBolt: .lightningBolt
         case .cloud: .cloud
         case .shield: .shield
+        case .pill: .pill
+        case .chevron: .chevron
+        case .bookmark: .bookmark
+        case .burst: .burst
+        case .teardrop: .teardrop
+        case .heptagon: .heptagon
+        case .decagon: .decagon
+        case .arrowDouble: .arrowDouble
+        case .house: .house
+        case .flag: .flag
         }
     }
 }
@@ -116,7 +146,8 @@ enum LayerCreation {
 
         switch shapeKind {
         case .triangle, .pentagon, .hexagon, .star, .heart,
-             .diamond, .octagon, .rightTriangle, .crescent, .lightningBolt, .shield:
+             .diamond, .octagon, .rightTriangle, .crescent, .lightningBolt, .shield,
+             .burst, .teardrop, .heptagon, .decagon, .house:
             // In ein breitgezogenes Rechteck gepresst wirken diese Formen verzerrt,
             // weil sie um einen Mittelpunkt herum gedacht sind.
             let side = shortSide * 0.32
