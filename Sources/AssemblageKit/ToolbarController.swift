@@ -44,31 +44,18 @@ struct ToolSelection {
     }
 }
 
-private extension NSToolbarItem.Identifier {
-    static let selectTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Auswaehlen")
-    static let cropTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Zuschneiden")
-    static let brushTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Pinsel")
-    static let lassoTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Lasso")
-    static let distortTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Verziehen")
-    static let removeSubject = NSToolbarItem.Identifier("Assemblage.Werkzeug.Freistellen")
-    static let insertText = NSToolbarItem.Identifier("Assemblage.Einfuegen.Text")
-    static let insertShape = NSToolbarItem.Identifier("Assemblage.Einfuegen.Form")
-    static let brushSettings = NSToolbarItem.Identifier("Assemblage.Pinsel.Einstellungen")
-    static let lassoSettings = NSToolbarItem.Identifier("Assemblage.Lasso.Einstellungen")
-    static let paintTool = NSToolbarItem.Identifier("Assemblage.Werkzeug.Farbe")
-    static let paintSettings = NSToolbarItem.Identifier("Assemblage.Farbe.Einstellungen")
-    static let zoom = NSToolbarItem.Identifier("Assemblage.Zoom")
-    static let share = NSToolbarItem.Identifier("Assemblage.Teilen")
-}
-
-/// Bindet die testbare Werkzeuglogik an `NSToolbar` und den Canvas.
+/// Bindet die testbare Werkzeuglogik an die schwebende Liquid-Glass-
+/// Werkzeugleiste (aus dem Claude-Design-Mockup „Assemblage UI") und den
+/// Canvas.
 ///
 /// Der Controller besitzt keinen Dokumentzustand neben `DocumentState`: Er
 /// übersetzt nur Auswahl und Bedienung in die bereits vorhandenen Canvas-Modi.
+/// Anders als zuvor baut er keine `NSToolbar` mehr, sondern liefert fertige
+/// `NSView`s, die `DocumentStageViewController` als schwebende Panels über
+/// dem Canvas platziert — das Mockup zeigt keine native Titelleisten-
+/// Werkzeugleiste, sondern eigenständige, abgerundete Glas-Cluster.
 @MainActor
-final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation {
-
-    let toolbar: NSToolbar
+final class ToolbarController: NSObject, NSMenuItemValidation {
 
     private let state: DocumentState
     private weak var canvasViewController: CanvasViewController?
@@ -81,15 +68,13 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
     private var selectedLayer: Layer?
     private var toolButtons: [CanvasTool: NSButton] = [:]
     private weak var removeSubjectButton: NSButton?
-    /// Die aufklappende Werkzeug-Seitenleiste, falls das Fenster eine hat.
-    /// Sie spiegelt denselben Zustand wie die Knöpfe oben — eine zweite
-    /// Zustandshaltung wäre genau die Art Dopplung, die auseinanderläuft.
-    weak var sidebar: ToolSidebarView? {
-        didSet {
-            sidebar?.onSelect = { [weak self] tool in self?.toggle(tool) }
-            updatePresentation()
-        }
-    }
+
+    /// Der schwebende Einstellungs-Streifen unterhalb der Werkzeugleiste, der
+    /// nur bei Pinsel/Lasso/Farbe erscheint — im Mockup nicht vorgesehen
+    /// (dort gibt es weder Lasso noch Farbpinsel), aber ohne ihn gäbe es für
+    /// diese bestehenden Werkzeuge keine Bedienelemente mehr.
+    private weak var settingsBar: GlassPanel?
+    private var settingsContent: NSView?
 
     private var brush = MaskBrush(diameter: 60, hardness: 0.5, mode: .hide) {
         didSet { reportToolState() }
@@ -103,6 +88,7 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
     private var paintBrush = PaintBrush(diameter: 30, hardness: 0.8, colorHex: "#000000", opacity: 1) {
         didSet { reportToolState() }
     }
+
     init(
         state: DocumentState,
         canvasViewController: CanvasViewController,
@@ -111,14 +97,7 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
         self.state = state
         self.canvasViewController = canvasViewController
         self.commandTarget = commandTarget
-        toolbar = NSToolbar(identifier: "Assemblage.DocumentWerkzeugleiste")
         super.init()
-
-        toolbar.delegate = self
-        toolbar.displayMode = .iconOnly
-        toolbar.sizeMode = .regular
-        toolbar.allowsUserCustomization = false
-        toolbar.autosavesConfiguration = false
 
         state.$document
             .combineLatest(state.$selectedLayerID)
@@ -127,11 +106,6 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
                 self?.selectionDidChange(to: layer)
             }
             .store(in: &observations)
-    }
-
-    func install(on window: NSWindow) {
-        window.toolbar = toolbar
-        updatePresentation()
     }
 
     // MARK: - Werkzeugzustand
@@ -178,17 +152,15 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
 
     private func updatePresentation() {
         for (tool, button) in toolButtons {
-            button.isEnabled = ToolSelection.isAvailable(tool, forSelected: selectedLayer)
-            button.state = tool == currentTool ? .on : .off
-        }
-
-        if let sidebar {
-            sidebar.selectedTool = currentTool
-            sidebar.availableTools = Set(
-                ToolSidebarView.allTools.filter {
-                    ToolSelection.isAvailable($0, forSelected: selectedLayer)
-                }
-            )
+            let available = ToolSelection.isAvailable(tool, forSelected: selectedLayer)
+            button.isEnabled = available
+            button.alphaValue = available ? 1 : 0.35
+            let isActive = tool == currentTool
+            button.state = isActive ? .on : .off
+            button.layer?.backgroundColor = isActive
+                ? AssemblageTheme.accentSoft.cgColor
+                : NSColor.clear.cgColor
+            button.contentTintColor = isActive ? AssemblageTheme.accentDark : AssemblageTheme.textPrimary
         }
 
         // Freistellen ist ein einmaliger Befehl und kein vierter Canvas-Modus.
@@ -197,45 +169,23 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
             .brush,
             forSelected: selectedLayer
         )
-        updateBrushSettingsVisibility()
-        updateLassoSettingsVisibility()
-        updatePaintSettingsVisibility()
+        updateSettingsBarVisibility()
     }
 
-    private func updateLassoSettingsVisibility() {
-        let index = toolbar.items.firstIndex { $0.itemIdentifier == .lassoSettings }
-        if currentTool == .lasso, index == nil {
-            let zoomIndex = toolbar.items.firstIndex { $0.itemIdentifier == .zoom }
-                ?? toolbar.items.count
-            toolbar.insertItem(withItemIdentifier: .lassoSettings, at: zoomIndex)
-        } else if currentTool != .lasso, let index {
-            toolbar.removeItem(at: index)
+    /// Ersetzt den Inhalt des Einstellungs-Streifens passend zum aktiven
+    /// Werkzeug und blendet ihn nur ein, wenn es überhaupt Regler gibt.
+    private func updateSettingsBarVisibility() {
+        let content: NSView?
+        switch currentTool {
+        case .brush: content = makeBrushSettingsView()
+        case .lasso: content = makeLassoSettingsView()
+        case .paint: content = makePaintSettingsView()
+        case .select, .crop, .distort: content = nil
         }
+        settingsContent = content
+        settingsBar?.content = content
+        settingsBar?.isHidden = content == nil
     }
-
-    private func updateBrushSettingsVisibility() {
-        let index = toolbar.items.firstIndex { $0.itemIdentifier == .brushSettings }
-        if currentTool == .brush, index == nil {
-            let zoomIndex = toolbar.items.firstIndex { $0.itemIdentifier == .zoom }
-                ?? toolbar.items.count
-            toolbar.insertItem(withItemIdentifier: .brushSettings, at: zoomIndex)
-        } else if currentTool != .brush, let index {
-            toolbar.removeItem(at: index)
-        }
-    }
-
-    private func updatePaintSettingsVisibility() {
-        let index = toolbar.items.firstIndex { $0.itemIdentifier == .paintSettings }
-        if currentTool == .paint, index == nil {
-            let zoomIndex = toolbar.items.firstIndex { $0.itemIdentifier == .zoom }
-                ?? toolbar.items.count
-            toolbar.insertItem(withItemIdentifier: .paintSettings, at: zoomIndex)
-        } else if currentTool != .paint, let index {
-            toolbar.removeItem(at: index)
-        }
-    }
-
-    // MARK: - Pinsel
 
     // MARK: - Zugang für Tests
 
@@ -257,6 +207,18 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
         paintBrush = neu
         canvasViewController?.setPaintBrush(paintBrush)
     }
+
+    /// Für Tests der schwebenden Werkzeugleiste: derselbe Weg wie ein
+    /// Mausklick auf den Werkzeugknopf, ohne ein echtes Ereignis zu bauen.
+    func simulateToolTapForTesting(_ tool: CanvasTool) {
+        toggle(tool)
+    }
+
+    var availableToolsForTesting: Set<CanvasTool> {
+        Set(CanvasTool.allToolbarCases.filter { ToolSelection.isAvailable($0, forSelected: selectedLayer) })
+    }
+
+    var currentToolForTesting: CanvasTool { currentTool }
 
     @objc private func diameterChanged(_ sender: NSSlider) {
         brush.diameter = sender.doubleValue
@@ -313,213 +275,6 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
         return true
     }
 
-    // MARK: - NSToolbarDelegate
-
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [
-            .selectTool,
-            .cropTool,
-            .brushTool,
-            .lassoTool,
-            .paintTool,
-            .distortTool,
-            .removeSubject,
-            .insertText,
-            .insertShape,
-            .flexibleSpace,
-            .zoom,
-            .share
-        ]
-    }
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarDefaultItemIdentifiers(toolbar) + [.brushSettings, .lassoSettings, .paintSettings, .space]
-    }
-
-    func toolbar(
-        _ toolbar: NSToolbar,
-        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
-        willBeInsertedIntoToolbar flag: Bool
-    ) -> NSToolbarItem? {
-        switch itemIdentifier {
-        case .selectTool:
-            return makeToolItem(
-                identifier: itemIdentifier,
-                tool: .select,
-                label: "Auswählen und verschieben",
-                symbolName: "cursorarrow",
-                action: #selector(selectTool(_:))
-            )
-        case .cropTool:
-            return makeToolItem(
-                identifier: itemIdentifier,
-                tool: .crop,
-                label: "Zuschneiden",
-                symbolName: "crop",
-                action: #selector(cropTool(_:))
-            )
-        case .brushTool:
-            return makeToolItem(
-                identifier: itemIdentifier,
-                tool: .brush,
-                label: "Pinsel-Maske",
-                symbolName: "paintbrush",
-                action: #selector(brushTool(_:))
-            )
-        case .lassoTool:
-            let symbolName = NSImage(systemSymbolName: "lasso", accessibilityDescription: nil) == nil
-                ? "scissors" : "lasso"
-            return makeToolItem(
-                identifier: itemIdentifier,
-                tool: .lasso,
-                label: "Bild ausschneiden",
-                symbolName: symbolName,
-                action: #selector(lassoTool(_:))
-            )
-        case .paintTool:
-            return makeToolItem(
-                identifier: itemIdentifier,
-                tool: .paint,
-                label: "Farbe malen",
-                symbolName: "paintpalette",
-                action: #selector(paintTool(_:))
-            )
-        case .distortTool:
-            return makeToolItem(
-                identifier: itemIdentifier,
-                tool: .distort,
-                label: "Verziehen",
-                symbolName: "skew",
-                action: #selector(distortTool(_:))
-            )
-        case .removeSubject:
-            return makeRemoveSubjectItem(identifier: itemIdentifier)
-        case .insertText:
-            return makeCommandItem(
-                identifier: itemIdentifier,
-                label: "Text einfügen",
-                symbolName: "textformat",
-                action: #selector(insertText(_:))
-            )
-        case .insertShape:
-            return makeShapeItem(identifier: itemIdentifier)
-        case .brushSettings:
-            return makeBrushSettingsItem(identifier: itemIdentifier)
-        case .lassoSettings:
-            return makeLassoSettingsItem(identifier: itemIdentifier)
-        case .paintSettings:
-            return makePaintSettingsItem(identifier: itemIdentifier)
-        case .zoom:
-            return makeZoomItem(identifier: itemIdentifier)
-        case .share:
-            return makeShareItem(identifier: itemIdentifier)
-        default:
-            return nil
-        }
-    }
-
-    private func makeToolItem(
-        identifier: NSToolbarItem.Identifier,
-        tool: CanvasTool,
-        label: String,
-        symbolName: String,
-        action: Selector
-    ) -> NSToolbarItem {
-        let button = toolbarButton(label: label, symbolName: symbolName, action: action)
-        button.setButtonType(.toggle)
-        button.isEnabled = ToolSelection.isAvailable(tool, forSelected: selectedLayer)
-        button.state = tool == currentTool ? .on : .off
-        toolButtons[tool] = button
-
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        item.label = label
-        item.paletteLabel = label
-        item.toolTip = label
-        item.view = button
-        return item
-    }
-
-    private func makeRemoveSubjectItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
-        let label = "Motiv freistellen"
-        let button = toolbarButton(
-            label: label,
-            symbolName: "person.crop.rectangle",
-            action: #selector(removeSubject(_:))
-        )
-        removeSubjectButton = button
-
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        item.label = label
-        item.paletteLabel = label
-        item.toolTip = label
-        item.view = button
-        return item
-    }
-
-    private func makeCommandItem(
-        identifier: NSToolbarItem.Identifier,
-        label: String,
-        symbolName: String,
-        action: Selector
-    ) -> NSToolbarItem {
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        item.label = label
-        item.paletteLabel = label
-        item.toolTip = label
-        item.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label)
-        item.target = self
-        item.action = action
-        return item
-    }
-
-    /// Ein sichtbares Form-Icon, dessen Menü genau die drei Formen aus Plan
-    /// 5.7 anbietet. So belegen die Formen nicht drei Plätze in der Leiste.
-    private func makeShapeItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
-        let label = "Form einfügen"
-        let item = NSMenuToolbarItem(itemIdentifier: identifier)
-        item.label = label
-        item.paletteLabel = label
-        item.toolTip = label
-        item.image = NSImage(systemSymbolName: "square.on.circle", accessibilityDescription: label)
-
-        let menu = NSMenu(title: label)
-        menu.addItem(withTitle: "Rechteck", action: #selector(DocumentWindowController.insertRectangleLayer(_:)), keyEquivalent: "")
-        menu.addItem(withTitle: "Abgerundetes Rechteck", action: #selector(DocumentWindowController.insertRoundedRectangleLayer(_:)), keyEquivalent: "")
-        menu.addItem(withTitle: "Ellipse", action: #selector(DocumentWindowController.insertEllipseLayer(_:)), keyEquivalent: "")
-        for menuItem in menu.items { menuItem.target = commandTarget }
-        item.menu = menu
-        return item
-    }
-
-    private func toolbarButton(label: String, symbolName: String, action: Selector) -> NSButton {
-        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label)
-            ?? NSImage(size: NSSize(width: 22, height: 22))
-        let button = NSButton(image: image, target: self, action: action)
-        button.bezelStyle = .toolbar
-        button.controlSize = .large
-        button.toolTip = label
-        button.setAccessibilityLabel(label)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44),
-            button.heightAnchor.constraint(greaterThanOrEqualToConstant: 36)
-        ])
-        return button
-    }
-
-    /// Der Apple-typische Teilen-Knopf (aus Anpassungen.md). Ein Export-Weg
-    /// existierte bereits ueber die Ablage-Menue-Zeile "Exportieren..." -
-    /// nur ohne sichtbaren Knopf im Fenster, weshalb er leicht zu uebersehen war.
-    private func makeShareItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
-        let button = toolbarButton(label: "Teilen", symbolName: "square.and.arrow.up", action: #selector(shareDocument(_:)))
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        item.label = "Teilen"
-        item.paletteLabel = "Teilen"
-        item.toolTip = "Teilen"
-        item.view = button
-        return item
-    }
-
     /// Öffnet den normalen Export-Dialog (Format/Qualität/Grösse + Sichern-
     /// Panel) — der Knopf selbst trägt zwar Apples Teilen-Symbol (aus
     /// Anpassungen.md: „nutze dafür bitte den normalen Apple Teilen Button"),
@@ -530,42 +285,232 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
         commandTarget?.exportDocument(sender)
     }
 
-    private func makeBrushSettingsItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
+    // MARK: - Schwebende Werkzeugleiste (Liquid-Glass-Mockup)
+
+    /// Baut die komplette obere rechte Zeile: Werkzeug-Cluster, Sekundär-
+    /// Cluster, Suchfeld, Teilen-Knopf — exakt die vier Gruppen aus dem
+    /// Mockup, im selben Abstand (14 pt).
+    func buildFloatingToolbarRow() -> NSView {
+        let row = NSStackView(views: [
+            makePrimaryToolCluster(),
+            makeSecondaryToolCluster(),
+            makeSearchField(),
+            makeShareButton()
+        ])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 14
+        row.translatesAutoresizingMaskIntoConstraints = false
+        return row
+    }
+
+    /// Der Einstellungs-Streifen für Pinsel/Lasso/Farbe — eine eigene
+    /// schwebende Pille direkt unter der Werkzeugleiste, nur sichtbar,
+    /// solange eines dieser drei Werkzeuge aktiv ist.
+    func buildToolSettingsBar() -> GlassPanel {
+        let bar = GlassPanel(cornerRadius: AssemblageTheme.toolClusterCornerRadius)
+        settingsBar = bar
+        updateSettingsBarVisibility()
+        return bar
+    }
+
+    private func makePrimaryToolCluster() -> NSView {
+        let select = makeToolButton(tool: .select, label: "Auswählen (V)", icon: .select, size: 38, action: #selector(selectTool(_:)))
+        let crop = makeToolButton(tool: .crop, label: "Zuschneiden (C)", icon: .crop, size: 38, action: #selector(cropTool(_:)))
+        let brush = makeToolButton(tool: .brush, label: "Pinsel (B)", icon: .brush, size: 38, action: #selector(brushTool(_:)))
+        // Lasso und Farbpinsel haben im Mockup keinen eigenen Platz — es kennt
+        // beide Werkzeuge nicht. Damit sie erreichbar bleiben, stehen sie im
+        // selben visuellen Stil direkt daneben.
+        let lasso = makeToolButton(tool: .lasso, label: "Bild ausschneiden", icon: .removeSubject, size: 38, action: #selector(lassoTool(_:)))
+        let paint = makeToolButton(tool: .paint, label: "Farbe malen", icon: .brush, size: 38, action: #selector(paintTool(_:)))
+
+        let stack = NSStackView(views: [select, crop, brush, lasso, paint])
+        stack.orientation = .horizontal
+        stack.spacing = 4
+        stack.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
+
+        return wrapInGlassPanel(stack, cornerRadius: AssemblageTheme.toolClusterCornerRadius)
+    }
+
+    private func makeSecondaryToolCluster() -> NSView {
+        let warp = makeToolButton(tool: .distort, label: "Verziehen", icon: .warp, size: 36, action: #selector(distortTool(_:)))
+
+        let divider = NSBox()
+        divider.boxType = .separator
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        divider.widthAnchor.constraint(equalToConstant: 1).isActive = true
+        divider.heightAnchor.constraint(equalToConstant: 22).isActive = true
+
+        let removeSubject = makePillButton(label: "Freistellen", icon: .removeSubject, action: #selector(removeSubject(_:)))
+        removeSubjectButton = removeSubject.subviews.compactMap { $0 as? NSButton }.first
+
+        let text = makeCommandPill(label: "Text", icon: .insertText, action: #selector(insertText(_:)))
+        let shape = makeShapePillMenu()
+        let grid = makeCommandPill(label: "Raster", icon: .collageGrid, action: nil)
+
+        let stack = NSStackView(views: [warp, divider, removeSubject, text, shape, grid])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
+
+        return wrapInGlassPanel(stack, cornerRadius: AssemblageTheme.toolClusterCornerRadius)
+    }
+
+    private func makeSearchField() -> NSView {
+        let icon = NSImageView(image: MockupIcons.image(.search, pointSize: 15, tintColor: AssemblageTheme.textTertiary))
+        icon.translatesAutoresizingMaskIntoConstraints = false
+
+        let field = NSTextField()
+        field.placeholderString = "Werkzeug suchen…"
+        field.isBordered = false
+        field.drawsBackground = false
+        field.font = .systemFont(ofSize: 12.5)
+        field.translatesAutoresizingMaskIntoConstraints = false
+        field.widthAnchor.constraint(equalToConstant: 150).isActive = true
+
+        let stack = NSStackView(views: [icon, field])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+
+        return wrapInGlassPanel(stack, cornerRadius: AssemblageTheme.toolClusterCornerRadius)
+    }
+
+    private func makeShareButton() -> NSView {
+        let button = plainIconButton(icon: .share, pointSize: 17, label: "Teilen", action: #selector(shareDocument(_:)))
+        button.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 44).isActive = true
+
+        let panel = GlassPanel(cornerRadius: 16)
+        panel.content = button
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        panel.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        panel.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        return panel
+    }
+
+    /// Ein sichtbares Form-Icon, dessen Menü genau die drei Formen aus Plan
+    /// 5.7 anbietet. So belegen die Formen nicht drei Plätze in der Leiste.
+    private func makeShapePillMenu() -> NSView {
+        let button = NSPopUpButton(frame: .zero, pullsDown: true)
+        button.bezelStyle = .texturedRounded
+        button.isBordered = false
+        button.translatesAutoresizingMaskIntoConstraints = false
+
+        let title = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        title.image = MockupIcons.image(.insertShape, pointSize: 16, tintColor: AssemblageTheme.textPrimary)
+        button.menu?.addItem(title)
+
+        let rectangle = NSMenuItem(title: "Rechteck", action: #selector(DocumentWindowController.insertRectangleLayer(_:)), keyEquivalent: "")
+        let rounded = NSMenuItem(title: "Abgerundetes Rechteck", action: #selector(DocumentWindowController.insertRoundedRectangleLayer(_:)), keyEquivalent: "")
+        let ellipse = NSMenuItem(title: "Ellipse", action: #selector(DocumentWindowController.insertEllipseLayer(_:)), keyEquivalent: "")
+        for item in [rectangle, rounded, ellipse] {
+            item.target = commandTarget
+            button.menu?.addItem(item)
+        }
+
+        let label = NSTextField(labelWithString: "Form")
+        label.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        label.textColor = AssemblageTheme.textPrimary
+
+        let stack = NSStackView(views: [button, label])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 4
+        return stack
+    }
+
+    // MARK: - Bausteine
+
+    private func makeToolButton(
+        tool: CanvasTool,
+        label: String,
+        icon: MockupIcon,
+        size: CGFloat,
+        action: Selector
+    ) -> NSButton {
+        let button = NSButton(title: "", target: self, action: action)
+        button.image = MockupIcons.image(icon, pointSize: 18, tintColor: AssemblageTheme.textPrimary)
+        button.isBordered = false
+        button.setButtonType(.toggle)
+        button.toolTip = label
+        button.setAccessibilityLabel(label)
+        button.wantsLayer = true
+        button.layer?.cornerRadius = AssemblageTheme.toolButtonCornerRadius
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.widthAnchor.constraint(equalToConstant: size).isActive = true
+        button.heightAnchor.constraint(equalToConstant: size).isActive = true
+        button.isEnabled = ToolSelection.isAvailable(tool, forSelected: selectedLayer)
+        toolButtons[tool] = button
+        return button
+    }
+
+    /// Ein Icon+Text-Knopf wie „Freistellen"/„Text"/„Raster" im Mockup.
+    private func makeCommandPill(label: String, icon: MockupIcon, action: Selector?) -> NSView {
+        makePillButton(label: label, icon: icon, action: action)
+    }
+
+    private func makePillButton(label: String, icon: MockupIcon, action: Selector?) -> NSView {
+        let button = plainIconButton(icon: icon, pointSize: 16, label: label, action: action)
+        let text = NSTextField(labelWithString: label)
+        text.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        text.textColor = AssemblageTheme.textPrimary
+
+        let stack = NSStackView(views: [button, text])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 6
+        return stack
+    }
+
+    private func plainIconButton(icon: MockupIcon, pointSize: CGFloat, label: String, action: Selector?) -> NSButton {
+        let button = NSButton(
+            image: MockupIcons.image(icon, pointSize: pointSize, tintColor: AssemblageTheme.textPrimary),
+            target: action == nil ? nil : self,
+            action: action
+        )
+        button.isBordered = false
+        button.toolTip = label
+        button.setAccessibilityLabel(label)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.widthAnchor.constraint(equalToConstant: pointSize).isActive = true
+        button.heightAnchor.constraint(equalToConstant: pointSize).isActive = true
+        return button
+    }
+
+    private func wrapInGlassPanel(_ content: NSView, cornerRadius: CGFloat) -> NSView {
+        let panel = GlassPanel(cornerRadius: cornerRadius)
+        panel.content = content
+        return panel
+    }
+
+    // MARK: - Werkzeug-Einstellungen (Pinsel/Lasso/Farbe)
+
+    private func makeBrushSettingsView() -> NSView {
         let diameter = NSSlider(
-            value: brush.diameter,
-            minValue: 1,
-            maxValue: 500,
-            target: self,
-            action: #selector(diameterChanged(_:))
+            value: brush.diameter, minValue: 1, maxValue: 500,
+            target: self, action: #selector(diameterChanged(_:))
         )
         diameter.isContinuous = true
-        diameter.toolTip = "Pinselgrösse"
-        diameter.setAccessibilityLabel("Pinselgrösse")
         diameter.translatesAutoresizingMaskIntoConstraints = false
         diameter.widthAnchor.constraint(equalToConstant: 130).isActive = true
 
         let hardness = NSSlider(
-            value: brush.hardness,
-            minValue: 0,
-            maxValue: 1,
-            target: self,
-            action: #selector(hardnessChanged(_:))
+            value: brush.hardness, minValue: 0, maxValue: 1,
+            target: self, action: #selector(hardnessChanged(_:))
         )
         hardness.isContinuous = true
-        hardness.toolTip = "Pinselhärte"
-        hardness.setAccessibilityLabel("Pinselhärte")
         hardness.translatesAutoresizingMaskIntoConstraints = false
         hardness.widthAnchor.constraint(equalToConstant: 110).isActive = true
 
         let mode = NSSegmentedControl(
-            labels: ["Abdecken", "Zurückholen"],
-            trackingMode: .selectOne,
-            target: self,
-            action: #selector(brushModeChanged(_:))
+            labels: ["Abdecken", "Zurückholen"], trackingMode: .selectOne,
+            target: self, action: #selector(brushModeChanged(_:))
         )
         mode.selectedSegment = brush.mode == .hide ? 0 : 1
         mode.controlSize = .large
-        mode.setAccessibilityLabel("Pinselmodus")
 
         let stack = NSStackView(views: [
             labelledControl("Grösse", control: diameter),
@@ -574,35 +519,25 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
         ])
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = 12
-        stack.edgeInsets = NSEdgeInsets(top: 4, left: 6, bottom: 4, right: 6)
-
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        item.label = "Pinsel-Einstellungen"
-        item.paletteLabel = "Pinsel-Einstellungen"
-        item.view = stack
-        return item
+        stack.spacing = 14
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
+        return stack
     }
 
-    private func makeLassoSettingsItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
+    private func makeLassoSettingsView() -> NSView {
         let mode = NSSegmentedControl(
-            labels: ["Abdecken", "Zurückholen"],
-            trackingMode: .selectOne,
-            target: self,
-            action: #selector(lassoModeChanged(_:))
+            labels: ["Abdecken", "Zurückholen"], trackingMode: .selectOne,
+            target: self, action: #selector(lassoModeChanged(_:))
         )
         mode.selectedSegment = lassoMode == .hide ? 0 : 1
         mode.controlSize = .large
-        mode.setAccessibilityLabel("Lassomodus")
 
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        item.label = "Lasso-Einstellungen"
-        item.paletteLabel = "Lasso-Einstellungen"
-        item.view = mode
-        return item
+        let stack = NSStackView(views: [mode])
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
+        return stack
     }
 
-    private func makePaintSettingsItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
+    private func makePaintSettingsView() -> NSView {
         let farbe = NSColorWell()
         let anfangsfarbe = RGBA(hex: paintBrush.colorHex) ?? .black
         farbe.color = NSColor(
@@ -611,45 +546,28 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
         )
         farbe.target = self
         farbe.action = #selector(paintColorChanged(_:))
-        farbe.toolTip = "Malfarbe"
-        farbe.setAccessibilityLabel("Malfarbe")
 
         let diameter = NSSlider(
-            value: paintBrush.diameter,
-            minValue: 1,
-            maxValue: 300,
-            target: self,
-            action: #selector(paintDiameterChanged(_:))
+            value: paintBrush.diameter, minValue: 1, maxValue: 300,
+            target: self, action: #selector(paintDiameterChanged(_:))
         )
         diameter.isContinuous = true
-        diameter.toolTip = "Pinselgrösse"
-        diameter.setAccessibilityLabel("Pinselgrösse")
         diameter.translatesAutoresizingMaskIntoConstraints = false
         diameter.widthAnchor.constraint(equalToConstant: 110).isActive = true
 
         let hardness = NSSlider(
-            value: paintBrush.hardness,
-            minValue: 0,
-            maxValue: 1,
-            target: self,
-            action: #selector(paintHardnessChanged(_:))
+            value: paintBrush.hardness, minValue: 0, maxValue: 1,
+            target: self, action: #selector(paintHardnessChanged(_:))
         )
         hardness.isContinuous = true
-        hardness.toolTip = "Pinselhärte"
-        hardness.setAccessibilityLabel("Pinselhärte")
         hardness.translatesAutoresizingMaskIntoConstraints = false
         hardness.widthAnchor.constraint(equalToConstant: 90).isActive = true
 
         let opacity = NSSlider(
-            value: paintBrush.opacity,
-            minValue: 0,
-            maxValue: 1,
-            target: self,
-            action: #selector(paintOpacityChanged(_:))
+            value: paintBrush.opacity, minValue: 0, maxValue: 1,
+            target: self, action: #selector(paintOpacityChanged(_:))
         )
         opacity.isContinuous = true
-        opacity.toolTip = "Deckkraft"
-        opacity.setAccessibilityLabel("Deckkraft")
         opacity.translatesAutoresizingMaskIntoConstraints = false
         opacity.widthAnchor.constraint(equalToConstant: 90).isActive = true
 
@@ -661,14 +579,9 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
         ])
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = 12
-        stack.edgeInsets = NSEdgeInsets(top: 4, left: 6, bottom: 4, right: 6)
-
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        item.label = "Farbpinsel-Einstellungen"
-        item.paletteLabel = "Farbpinsel-Einstellungen"
-        item.view = stack
-        return item
+        stack.spacing = 14
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
+        return stack
     }
 
     @objc private func paintColorChanged(_ sender: NSColorWell) {
@@ -699,6 +612,8 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
 
     private func labelledControl(_ label: String, control: NSView) -> NSView {
         let field = NSTextField(labelWithString: label)
+        field.font = .systemFont(ofSize: 11)
+        field.textColor = AssemblageTheme.textSecondary
         let stack = NSStackView(views: [field, control])
         stack.orientation = .horizontal
         stack.alignment = .centerY
@@ -706,26 +621,105 @@ final class ToolbarController: NSObject, NSToolbarDelegate, NSMenuItemValidation
         return stack
     }
 
-    private func makeZoomItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
-        let definitions: [(String, String, Selector)] = [
-            ("Verkleinern", "minus.magnifyingglass", #selector(zoomOut(_:))),
-            ("Vergrössern", "plus.magnifyingglass", #selector(zoomIn(_:))),
-            ("Tatsächliche Grösse", "1.magnifyingglass", #selector(zoomToActualSize(_:))),
-            ("An Fenster anpassen", "arrow.down.right.and.arrow.up.left", #selector(zoomToFit(_:)))
-        ]
-        let item = NSMenuToolbarItem(itemIdentifier: identifier)
-        item.label = "Zoom"
-        item.paletteLabel = "Zoom"
-        item.toolTip = "Zoom"
-        item.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Zoom")
-        let menu = NSMenu(title: "Zoom")
-        for (label, symbol, action) in definitions {
-            let menuItem = NSMenuItem(title: label, action: action, keyEquivalent: "")
-            menuItem.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
-            menuItem.target = self
-            menu.addItem(menuItem)
+    // MARK: - Zoom- und Verlaufsleiste
+
+    /// Die Zoom-Pille unten links im Mockup.
+    func buildZoomBar() -> GlassPanel {
+        let fit = NSTextField(labelWithString: "Einpassen")
+        fit.font = .systemFont(ofSize: 12, weight: .semibold)
+        fit.textColor = AssemblageTheme.textPrimary
+        let fitButton = NSButton(title: "", target: self, action: #selector(zoomToFit(_:)))
+        fitButton.isBordered = false
+        fitButton.isTransparent = false
+        fitButton.addSubview(fit)
+        fit.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            fit.leadingAnchor.constraint(equalTo: fitButton.leadingAnchor),
+            fit.trailingAnchor.constraint(equalTo: fitButton.trailingAnchor),
+            fit.topAnchor.constraint(equalTo: fitButton.topAnchor),
+            fit.bottomAnchor.constraint(equalTo: fitButton.bottomAnchor)
+        ])
+
+        let percent = NSTextField(labelWithString: "100 %")
+        percent.font = .systemFont(ofSize: 12, weight: .semibold)
+        percent.textColor = AssemblageTheme.textSecondary
+        canvasViewController?.onZoomPercentChange = { [weak percent] value in
+            percent?.stringValue = "\(value) %"
         }
-        item.menu = menu
-        return item
+        percent.stringValue = "\(canvasViewController?.zoomPercent ?? 100) %"
+
+        let divider = NSBox()
+        divider.boxType = .separator
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        divider.widthAnchor.constraint(equalToConstant: 1).isActive = true
+        divider.heightAnchor.constraint(equalToConstant: 22).isActive = true
+
+        let minus = plainIconButton(icon: .zoomOut, pointSize: 13, label: "Verkleinern", action: #selector(zoomOut(_:)))
+        let plus = plainIconButton(icon: .zoomIn, pointSize: 13, label: "Vergrössern", action: #selector(zoomIn(_:)))
+
+        let stack = NSStackView(views: [fitButton, percent, divider, minus, plus])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 14)
+
+        let panel = GlassPanel(cornerRadius: 0, isPill: true)
+        panel.content = stack
+        return panel
     }
+
+    /// Die Verlaufsleiste unten rechts im Mockup — Widerrufen/Wiederholen
+    /// laufen über dieselbe Responder-Kette wie die Menüzeilen, damit die
+    /// bestehende Tastenwiederholungs-/Undo-Logik in
+    /// `DocumentWindowController.undo(_:)` unverändert greift.
+    func buildUndoBar() -> GlassPanel {
+        let undo = plainIconButton(icon: .undo, pointSize: 16, label: "Zurück (⌘Z)", action: #selector(undoTapped(_:)))
+        let redo = plainIconButton(icon: .redo, pointSize: 16, label: "Vor (⌘⇧Z)", action: #selector(redoTapped(_:)))
+
+        let history = NSStackView(views: [10, 16, 8, 14].map { height -> NSView in
+            let bar = NSView()
+            bar.wantsLayer = true
+            bar.layer?.backgroundColor = AssemblageTheme.textPrimary.cgColor
+            bar.layer?.cornerRadius = 1.5
+            bar.translatesAutoresizingMaskIntoConstraints = false
+            bar.widthAnchor.constraint(equalToConstant: 3).isActive = true
+            bar.heightAnchor.constraint(equalToConstant: height).isActive = true
+            return bar
+        })
+        history.orientation = .horizontal
+        history.alignment = .centerY
+        history.spacing = 2
+        history.toolTip = "Verlaufs-Timeline"
+
+        let dividerLeading = NSBox()
+        dividerLeading.boxType = .separator
+        let dividerTrailing = NSBox()
+        dividerTrailing.boxType = .separator
+
+        let stack = NSStackView(views: [undo, dividerLeading, history, dividerTrailing, redo])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.distribution = .fillEqually
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+
+        let panel = GlassPanel(cornerRadius: 0, isPill: true)
+        panel.content = stack
+        return panel
+    }
+
+    @objc private func undoTapped(_ sender: Any?) {
+        NSApp.sendAction(#selector(DocumentWindowController.undo(_:)), to: nil, from: sender)
+    }
+
+    @objc private func redoTapped(_ sender: Any?) {
+        NSApp.sendAction(Selector(("redo:")), to: nil, from: sender)
+    }
+}
+
+extension CanvasTool {
+    /// Die Werkzeuge, die eine eigene Schaltfläche in der schwebenden
+    /// Werkzeugleiste haben (alle ausser dem impliziten `.select`, das schon
+    /// als Rückfall aller anderen Werkzeuge zählt — hier trotzdem mit drin,
+    /// weil es ebenfalls einen Knopf hat).
+    static let allToolbarCases: [CanvasTool] = [.select, .crop, .brush, .lasso, .paint, .distort]
 }
