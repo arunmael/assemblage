@@ -109,8 +109,14 @@ public enum ShapeKind: String, Codable, Sendable, CaseIterable {
     case house
     case flag
 
+    /// Ein von Hand gezeichneter Zug. Der Umriss steckt nicht in einer
+    /// Vorlage, sondern in `ShapeLayerContent.path` — deshalb hat diese Art
+    /// bewusst kein Gegenstück in `ShapeTemplate`.
+    case freehand
+
     /// Die Vorlage hinter dieser Form — `nil` bei den drei Grundformen, die
-    /// Core Graphics direkt kennt und die deshalb keinen Streckenzug brauchen.
+    /// Core Graphics direkt kennt und die deshalb keinen Streckenzug brauchen,
+    /// und bei `.freehand`, das seinen Umriss selbst mitbringt.
     public var template: ShapeTemplate? { ShapeTemplate(rawValue: rawValue) }
 }
 
@@ -134,6 +140,23 @@ public struct ShapeLayerContent: Codable, Equatable, Sendable {
     /// Breite des Rands in Punkten. `0` heisst: kein Rand — der bisherige,
     /// unveränderte Normalfall.
     public var strokeWidth: Double
+    /// Der gezeichnete Umriss. Nur für `.freehand` von Bedeutung; alle
+    /// anderen Arten leiten ihren Umriss aus `kind` und `size` ab — genau wie
+    /// `cornerRadius` nur das abgerundete Rechteck und `pointCount` nur den
+    /// Stern betrifft.
+    ///
+    /// Die Punkte liegen im eigenen Rechteck der Ebene (Ursprung oben links,
+    /// Ausdehnung `size`), nicht in Leinwandkoordinaten: Die Lage führt
+    /// `Transform2D`, sonst wäre ein Zug doppelt verschoben.
+    public var path: VectorPath?
+
+    /// Ein offener Zug hat kein Innen — er wird nur gestrichen, nicht
+    /// gefüllt. Eine Fläche für ihn zu berechnen hiesse, Anfang und Ende
+    /// stillschweigend zu verbinden; das Ergebnis sähe wie ein Klecks aus.
+    public var isStrokeOnly: Bool {
+        guard kind == .freehand, let path else { return false }
+        return path.subpaths.contains { !$0.isClosed }
+    }
 
     public init(
         kind: ShapeKind,
@@ -142,7 +165,8 @@ public struct ShapeLayerContent: Codable, Equatable, Sendable {
         fillColorHex: String = "#FFFFFF",
         pointCount: Int = 5,
         strokeColorHex: String = "#000000",
-        strokeWidth: Double = 0
+        strokeWidth: Double = 0,
+        path: VectorPath? = nil
     ) {
         self.kind = kind
         self.size = size
@@ -151,6 +175,7 @@ public struct ShapeLayerContent: Codable, Equatable, Sendable {
         self.pointCount = pointCount
         self.strokeColorHex = strokeColorHex
         self.strokeWidth = strokeWidth
+        self.path = path
     }
 }
 

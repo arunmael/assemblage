@@ -40,6 +40,12 @@ struct InspectorView: View {
                 toolSection(title: "Farbe malen", hint: "Ziehe auf der Leinwand, um mit Farbe auf dieser Ebene zu malen.") {
                     paintSpecification
                 }
+            case .freehand:
+                Section("Freihand zeichnen") {
+                    Text("Ziehe auf der Leinwand, um einen neuen Vektorstrich anzulegen.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             case .distort:
                 toolSection(title: "Verziehen", hint: "Ziehe eine Ecke oder Kantenmitte, um die Ebene zu verzerren — Kantenmitten können die Fläche auch krümmen.") {
                     distortSpecification

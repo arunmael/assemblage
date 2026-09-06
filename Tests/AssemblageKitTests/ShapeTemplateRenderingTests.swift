@@ -86,16 +86,41 @@ final class ShapeTemplateRenderingTests: XCTestCase {
                       "die untere Mitte liegt innerhalb")
     }
 
-    /// Der Pfad muss für jede Vorlage entstehen — sonst wäre eine Form
+    /// Der Pfad muss für jede Formart entstehen — sonst wäre eine Form
     /// unsichtbar, ohne dass irgendetwas fehlschlüge.
+    ///
+    /// `.freehand` ist die eine Ausnahme, und zwar dem Wesen nach: Sein
+    /// Umriss lässt sich nicht aus Art und Grösse ableiten, er wird gezeichnet
+    /// und in `path` mitgeführt. Ohne diesen Pfad gibt es nichts zu zeichnen —
+    /// deshalb wird er hier eigens mit einem geprüft.
     func testEveryKindProducesAPath() throws {
-        for art in ShapeKind.allCases {
+        let rahmen = CGRect(x: 0, y: 0, width: 40, height: 30)
+
+        for art in ShapeKind.allCases where art != .freehand {
             let inhalt = ShapeLayerContent(kind: art, size: Size(width: 40, height: 30))
             XCTAssertNotNil(
-                ShapePath.cgPath(for: inhalt, in: CGRect(x: 0, y: 0, width: 40, height: 30)),
+                ShapePath.cgPath(for: inhalt, in: rahmen),
                 "\(art) liefert keinen Pfad"
             )
         }
+
+        let ohnePfad = ShapeLayerContent(kind: .freehand, size: Size(width: 40, height: 30))
+        XCTAssertNil(
+            ShapePath.cgPath(for: ohnePfad, in: rahmen),
+            "ohne gezeichneten Zug gibt es bei .freehand nichts zu zeichnen"
+        )
+
+        let gezeichnet = ShapeLayerContent(
+            kind: .freehand,
+            size: Size(width: 40, height: 30),
+            path: FreehandStroke.path(from: [
+                Point(x: 0, y: 0), Point(x: 20, y: 10), Point(x: 40, y: 30)
+            ])
+        )
+        XCTAssertNotNil(
+            ShapePath.cgPath(for: gezeichnet, in: rahmen),
+            "mit gezeichnetem Zug muss ein Pfad entstehen"
+        )
     }
 
     func testEmptyRectHasNoPath() {

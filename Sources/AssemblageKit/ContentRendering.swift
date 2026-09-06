@@ -76,6 +76,8 @@ enum ShapePath {
             )
         case .ellipse:
             return CGPath(ellipseIn: rect, transform: nil)
+        case .freehand:
+            return freehandPath(for: content, in: rect)
         default:
             break
         }
@@ -97,6 +99,46 @@ enum ShapePath {
         }
         pfad.closeSubpath()
         return pfad
+    }
+
+    /// Der von Hand gezeichnete Zug aus `ShapeLayerContent.path`.
+    ///
+    /// Die gespeicherten Anker liegen im Rechteck `0…size`; hier werden sie
+    /// auf `rect` gestreckt, damit sich ein Zug wie jede andere Form über die
+    /// Ebenengrösse skalieren lässt.
+    private static func freehandPath(for content: ShapeLayerContent, in rect: CGRect) -> CGPath? {
+        guard let pfad = content.path, !pfad.isEmpty,
+              content.size.width > 0, content.size.height > 0
+        else { return nil }
+
+        let sx = rect.width / content.size.width
+        let sy = rect.height / content.size.height
+        func abbilden(_ punkt: Point) -> CGPoint {
+            CGPoint(x: rect.minX + punkt.x * sx, y: rect.minY + punkt.y * sy)
+        }
+
+        let ergebnis = CGMutablePath()
+        for teil in pfad.subpaths where teil.anchors.count >= 2 {
+            ergebnis.move(to: abbilden(teil.anchors[0].point))
+            for index in 1..<teil.anchors.count {
+                let vorher = teil.anchors[index - 1]
+                let jetzt = teil.anchors[index]
+                ergebnis.addCurve(
+                    to: abbilden(jetzt.point),
+                    control1: abbilden(vorher.controlOut),
+                    control2: abbilden(jetzt.controlIn)
+                )
+            }
+            if teil.isClosed, let erster = teil.anchors.first, let letzter = teil.anchors.last {
+                ergebnis.addCurve(
+                    to: abbilden(erster.point),
+                    control1: abbilden(letzter.controlOut),
+                    control2: abbilden(erster.controlIn)
+                )
+                ergebnis.closeSubpath()
+            }
+        }
+        return ergebnis.isEmpty ? nil : ergebnis
     }
 
     /// Der Umriss, dem der Rahmen einer Bildebene folgt: der Formzuschnitt,

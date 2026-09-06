@@ -1146,9 +1146,16 @@ enum DocumentExporter {
         context.translateBy(x: rect.midX, y: rect.midY)
         context.scaleBy(x: 1, y: -1)
         context.translateBy(x: -rect.midX, y: -rect.midY)
-        context.addPath(path)
-        context.setFillColor((RGBA(hex: content.fillColorHex) ?? .white).cgColor)
-        context.fillPath()
+        if content.isStrokeOnly {
+            // Ein offener Zug wird nur gestrichen (siehe `isStrokeOnly`);
+            // `fillPath()` verbräuchte hier nur den Pfad.
+            context.setLineCap(.round)
+            context.setLineJoin(.round)
+        } else {
+            context.addPath(path)
+            context.setFillColor((RGBA(hex: content.fillColorHex) ?? .white).cgColor)
+            context.fillPath()
+        }
 
         // Rand nach der Füllung: `fillPath()` verbraucht den Pfad, deshalb
         // erneut hinzufügen. `strokeWidth == 0` heisst „kein Rand" (aus

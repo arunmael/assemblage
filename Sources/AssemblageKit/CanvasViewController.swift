@@ -16,6 +16,8 @@ final class CanvasViewController: NSViewController {
     /// Zoom zurücksetzen.
     private var hasPerformedInitialFit = false
     var selectToolFromKeyboard: ((CanvasTool) -> Bool)?
+    private var freehandColorHex = "#1D3557"
+    private var freehandStrokeWidth = 6.0
 
     init(state: DocumentState) {
         self.state = state
@@ -121,36 +123,49 @@ final class CanvasViewController: NSViewController {
 
         switch tool {
         case .select:
+            canvasView.freehandIsActive = false
             canvasView.croppingLayerID = nil
             canvasView.brushLayerID = nil
             canvasView.lassoLayerID = nil
             canvasView.paintLayerID = nil
             canvasView.distortingLayerID = nil
         case .crop:
+            canvasView.freehandIsActive = false
             canvasView.brushLayerID = nil
             canvasView.lassoLayerID = nil
             canvasView.paintLayerID = nil
             canvasView.distortingLayerID = nil
             canvasView.croppingLayerID = imageLayerID
         case .brush:
+            canvasView.freehandIsActive = false
             canvasView.croppingLayerID = nil
             canvasView.lassoLayerID = nil
             canvasView.paintLayerID = nil
             canvasView.distortingLayerID = nil
             canvasView.brushLayerID = imageLayerID
         case .lasso:
+            canvasView.freehandIsActive = false
             canvasView.croppingLayerID = nil
             canvasView.brushLayerID = nil
             canvasView.paintLayerID = nil
             canvasView.distortingLayerID = nil
             canvasView.lassoLayerID = imageLayerID
         case .paint:
+            canvasView.freehandIsActive = false
             canvasView.croppingLayerID = nil
             canvasView.brushLayerID = nil
             canvasView.lassoLayerID = nil
             canvasView.distortingLayerID = nil
             canvasView.paintLayerID = imageLayerID
+        case .freehand:
+            canvasView.croppingLayerID = nil
+            canvasView.brushLayerID = nil
+            canvasView.lassoLayerID = nil
+            canvasView.paintLayerID = nil
+            canvasView.distortingLayerID = nil
+            canvasView.freehandIsActive = true
         case .distort:
+            canvasView.freehandIsActive = false
             canvasView.croppingLayerID = nil
             canvasView.brushLayerID = nil
             canvasView.lassoLayerID = nil
@@ -173,6 +188,15 @@ final class CanvasViewController: NSViewController {
     func setPaintBrush(_ brush: PaintBrush) {
         loadViewIfNeeded()
         canvasView?.paintBrush = brush
+    }
+
+    /// Übergibt Farbe und Breite an Vorschau und Einfügebefehl.
+    func setFreehand(colorHex: String, width: Double) {
+        freehandColorHex = colorHex
+        freehandStrokeWidth = width
+        loadViewIfNeeded()
+        canvasView?.freehandColorHex = colorHex
+        canvasView?.freehandStrokeWidth = width
     }
 
     /// Passt die Leinwand mit etwas Luft ins Fenster ein.
@@ -341,6 +365,15 @@ extension CanvasViewController: CanvasInteractionDelegate, CanvasKeyboardCommand
                 ebene.content = .image(inhalt)
             }
         }
+    }
+
+    func canvasView(_ canvasView: CanvasView, didDrawFreehand rawPoints: [Point]) {
+        FreehandDrawCommand.insert(
+            rawPoints: rawPoints,
+            strokeColorHex: freehandColorHex,
+            strokeWidth: freehandStrokeWidth,
+            into: state
+        )
     }
 
     func canvasView(_ canvasView: CanvasView, didReceiveDropFrom pasteboard: NSPasteboard) {

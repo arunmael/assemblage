@@ -59,6 +59,9 @@ protocol CanvasInteractionDelegate: AnyObject {
     /// Bildauflösung — anders als `didPaintMaskForLayerWithID` verändert er
     /// nicht die Maske, sondern den sichtbaren Inhalt der Ebene selbst.
     func canvasView(_ canvasView: CanvasView, didPaintColorForLayerWithID id: UUID, pngData: Data)
+
+    /// Rohpunkte eines abgeschlossenen Freihandzugs in Leinwandkoordinaten.
+    func canvasView(_ canvasView: CanvasView, didDrawFreehand rawPoints: [Point])
 }
 
 extension CanvasInteractionDelegate {
@@ -73,6 +76,8 @@ extension CanvasInteractionDelegate {
     func canvasView(_ canvasView: CanvasView, didFinishEditingTextOfLayerWithID id: UUID, text: String) {}
 
     func canvasView(_ canvasView: CanvasView, didPaintColorForLayerWithID id: UUID, pngData: Data) {}
+
+    func canvasView(_ canvasView: CanvasView, didDrawFreehand rawPoints: [Point]) {}
 
     func canvasView(_ canvasView: CanvasView, didFillLassoForLayerWithID id: UUID, pngData: Data) {}
 

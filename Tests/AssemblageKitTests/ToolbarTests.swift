@@ -28,6 +28,7 @@ final class ToolbarTests: XCTestCase {
 
     func testAvailabilityWithoutSelection() {
         XCTAssertTrue(ToolSelection.isAvailable(.select, forSelected: nil))
+        XCTAssertTrue(ToolSelection.isAvailable(.freehand, forSelected: nil))
         XCTAssertFalse(ToolSelection.isAvailable(.crop, forSelected: nil))
         XCTAssertFalse(ToolSelection.isAvailable(.brush, forSelected: nil))
         XCTAssertFalse(ToolSelection.isAvailable(.lasso, forSelected: nil))
@@ -38,6 +39,7 @@ final class ToolbarTests: XCTestCase {
     func testImageToolsAreUnavailableForTextAndShapeLayers() {
         for layer in [textLayer, shapeLayer] {
             XCTAssertTrue(ToolSelection.isAvailable(.select, forSelected: layer))
+            XCTAssertTrue(ToolSelection.isAvailable(.freehand, forSelected: layer))
             XCTAssertFalse(ToolSelection.isAvailable(.crop, forSelected: layer))
             XCTAssertFalse(ToolSelection.isAvailable(.brush, forSelected: layer))
             XCTAssertFalse(ToolSelection.isAvailable(.lasso, forSelected: layer))
@@ -47,7 +49,7 @@ final class ToolbarTests: XCTestCase {
     }
 
     func testAllToolsAreAvailableForImageLayer() {
-        for tool in [CanvasTool.select, .crop, .brush, .lasso, .paint, .distort] {
+        for tool in [CanvasTool.select, .crop, .brush, .lasso, .paint, .freehand, .distort] {
             XCTAssertTrue(ToolSelection.isAvailable(tool, forSelected: imageLayer))
         }
     }

@@ -423,7 +423,15 @@ struct LayerRenderer {
 
     private func applyShape(_ content: ShapeLayerContent, to layer: CAShapeLayer) {
         layer.path = ShapePath.cgPath(for: content, in: CGRect(origin: .zero, size: content.size.cgSize))
-        layer.fillColor = (RGBA(hex: content.fillColorHex) ?? .white).cgColor
+        layer.fillColor = content.isStrokeOnly
+            ? nil
+            : (RGBA(hex: content.fillColorHex) ?? .white).cgColor
+        // Runde Enden lassen einen gezeichneten Zug wie einen Stiftstrich
+        // aussehen; abgeschnittene Ecken sähen an jedem Knick gekerbt aus.
+        if content.kind == .freehand {
+            layer.lineCap = .round
+            layer.lineJoin = .round
+        }
         // `strokeWidth == 0` heisst „kein Rand" — `CAShapeLayer` zeichnet bei
         // Breite 0 ohnehin nichts, aber `strokeColor = nil` macht die Absicht
         // zusätzlich explizit und spart eine (wirkungslose) Farbzuweisung.

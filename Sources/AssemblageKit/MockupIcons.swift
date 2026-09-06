@@ -372,7 +372,7 @@ private func cgPath(circleCenterX cx: CGFloat, y cy: CGFloat, radius r: CGFloat)
 // MARK: - Mockup icons
 
 enum MockupIcon: CaseIterable {
-    case select, crop, brush, lasso, paintDrop, warp, removeSubject, insertText, insertShape, collageGrid
+    case select, crop, brush, lasso, paintDrop, pen, warp, removeSubject, insertText, insertShape, collageGrid
     case search, share, layersAdd, eyeVisible, duplicate, delete, chevronDown
     case mirrorHorizontal, mirrorVertical, zoomOut, zoomIn, undo, timeline, redo
 }
@@ -428,6 +428,8 @@ enum MockupIcons {
             )
         case .paintDrop:
             return paths("M12 3.5s5.8 6.2 5.8 9.9A5.8 5.8 0 016.2 13.4C6.2 9.7 12 3.5 12 3.5z")
+        case .pen:
+            return paths("M4 20l1.2-4.2L16 5a2.1 2.1 0 013 3L8.2 18.8z", "M14.5 6.5l3 3")
         case .warp:
             return paths("M3 9V3h6", "M21 15v6h-6", "M3 3l7 7", "M21 21l-7-7")
         case .removeSubject:

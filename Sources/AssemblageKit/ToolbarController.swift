@@ -12,6 +12,7 @@ enum CanvasTool: Equatable {
     case brush
     case lasso
     case paint
+    case freehand
     case distort
 }
 
@@ -22,7 +23,7 @@ struct ToolSelection {
     /// Ist das Werkzeug bei dieser Auswahl überhaupt benutzbar?
     static func isAvailable(_ tool: CanvasTool, forSelected layer: Layer?) -> Bool {
         switch tool {
-        case .select:
+        case .select, .freehand:
             return true
         case .crop, .brush, .lasso, .paint:
             guard let layer, case .image = layer.content else { return false }
@@ -104,6 +105,9 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         didSet { reportToolState() }
     }
 
+    private var freehandColorHex = "#1D3557"
+    private var freehandStrokeWidth = 6.0
+
     init(
         state: DocumentState,
         canvasViewController: CanvasViewController,
@@ -144,6 +148,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
     @objc private func brushTool(_ sender: Any?) { toggle(.brush) }
     @objc private func lassoTool(_ sender: Any?) { toggle(.lasso) }
     @objc private func paintTool(_ sender: Any?) { toggle(.paint) }
+    @objc private func freehandTool(_ sender: Any?) { toggle(.freehand) }
     @objc private func distortTool(_ sender: Any?) { toggle(.distort) }
 
     private func toggle(_ tool: CanvasTool) {
@@ -169,6 +174,8 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
             canvasViewController?.setBrush(brush)
         } else if currentTool == .lasso {
             canvasViewController?.setLassoMode(lassoMode)
+        } else if currentTool == .freehand {
+            canvasViewController?.setFreehand(colorHex: freehandColorHex, width: freehandStrokeWidth)
         }
     }
 
@@ -209,6 +216,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         case .brush: content = makeBrushSettingsView()
         case .lasso: content = makeLassoSettingsView()
         case .paint: content = makePaintSettingsView()
+        case .freehand: content = makeFreehandSettingsView()
         case .select, .crop, .distort: content = nil
         }
         settingsContent = content
@@ -394,6 +402,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         let brush = makeToolButton(tool: .brush, label: "Pinsel (B)", icon: .brush, size: 36, action: #selector(brushTool(_:)))
         let lasso = makeToolButton(tool: .lasso, label: "Bild ausschneiden", icon: .lasso, size: 36, action: #selector(lassoTool(_:)))
         let paint = makeToolButton(tool: .paint, label: "Farbe malen", icon: .paintDrop, size: 36, action: #selector(paintTool(_:)))
+        let freehand = makeToolButton(tool: .freehand, label: "Freihand zeichnen", icon: .pen, size: 36, action: #selector(freehandTool(_:)))
 
         let divider = NSBox()
         divider.boxType = .separator
@@ -408,7 +417,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         let shape = makeShapePillMenu()
         let grid = makeGridPillMenu()
 
-        let stack = NSStackView(views: [brush, lasso, paint, divider, removeSubject, text, shape, grid])
+        let stack = NSStackView(views: [brush, lasso, paint, freehand, divider, removeSubject, text, shape, grid])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 10
@@ -472,6 +481,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
             SearchResult(title: "Pinsel", subtitle: nil, icon: .brush) { [weak self] in self?.toggle(.brush) },
             SearchResult(title: "Bild ausschneiden", subtitle: "Lasso", icon: .removeSubject) { [weak self] in self?.toggle(.lasso) },
             SearchResult(title: "Farbe malen", subtitle: nil, icon: .brush) { [weak self] in self?.toggle(.paint) },
+            SearchResult(title: "Freihand zeichnen", subtitle: nil, icon: .pen) { [weak self] in self?.toggle(.freehand) },
             SearchResult(title: "Verziehen", subtitle: nil, icon: .warp) { [weak self] in self?.toggle(.distort) },
             SearchResult(title: "Freistellen", subtitle: nil, icon: .removeSubject) { [weak self] in self?.removeSubject(nil) },
             SearchResult(title: "Text einfügen", subtitle: nil, icon: .insertText) { [weak self] in self?.insertText(nil) },
@@ -816,6 +826,51 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         return stack
     }
 
+    private func makeFreehandSettingsView() -> NSView {
+        let farbe = NSColorWell()
+        let anfangsfarbe = RGBA(hex: freehandColorHex) ?? .black
+        farbe.color = NSColor(
+            srgbRed: anfangsfarbe.red, green: anfangsfarbe.green,
+            blue: anfangsfarbe.blue, alpha: anfangsfarbe.alpha
+        )
+        farbe.target = self
+        farbe.action = #selector(freehandColorChanged(_:))
+
+        let breite = NSSlider(
+            value: freehandStrokeWidth, minValue: 1, maxValue: 40,
+            target: self, action: #selector(freehandWidthChanged(_:))
+        )
+        breite.isContinuous = true
+        breite.translatesAutoresizingMaskIntoConstraints = false
+        breite.widthAnchor.constraint(equalToConstant: 130).isActive = true
+
+        let stack = NSStackView(views: [
+            farbe,
+            labelledControl("Strichbreite", control: breite)
+        ])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 14
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
+        return stack
+    }
+
+    @objc private func freehandColorChanged(_ sender: NSColorWell) {
+        guard let umgerechnet = sender.color.usingColorSpace(.sRGB) else { return }
+        freehandColorHex = RGBA(
+            red: Double(umgerechnet.redComponent),
+            green: Double(umgerechnet.greenComponent),
+            blue: Double(umgerechnet.blueComponent),
+            alpha: Double(umgerechnet.alphaComponent)
+        ).hexString
+        canvasViewController?.setFreehand(colorHex: freehandColorHex, width: freehandStrokeWidth)
+    }
+
+    @objc private func freehandWidthChanged(_ sender: NSSlider) {
+        freehandStrokeWidth = sender.doubleValue
+        canvasViewController?.setFreehand(colorHex: freehandColorHex, width: freehandStrokeWidth)
+    }
+
     private func makePaintSettingsView() -> NSView {
         let farbe = NSColorWell()
         let anfangsfarbe = RGBA(hex: paintBrush.colorHex) ?? .black
@@ -1023,5 +1078,5 @@ extension CanvasTool {
     /// Werkzeugleiste haben (alle ausser dem impliziten `.select`, das schon
     /// als Rückfall aller anderen Werkzeuge zählt — hier trotzdem mit drin,
     /// weil es ebenfalls einen Knopf hat).
-    static let allToolbarCases: [CanvasTool] = [.select, .crop, .brush, .lasso, .paint, .distort]
+    static let allToolbarCases: [CanvasTool] = [.select, .crop, .brush, .lasso, .paint, .freehand, .distort]
 }

@@ -64,6 +64,8 @@ final class CanvasView: NSView {
     private let shapeDropHighlight = CAShapeLayer()
     /// Gestrichelter Pfad einer laufenden Lasso-Auswahl.
     private let lassoPreviewShape = CAShapeLayer()
+    /// Sichtbarer Strich, solange ein neuer Freihandzug aufgenommen wird.
+    private let freehandPreviewShape = CAShapeLayer()
 
     /// Kantenlänge der gezeichneten Griffe, in Bildschirmpunkten.
     ///
@@ -93,6 +95,7 @@ final class CanvasView: NSView {
     private var stroke: BrushStroke?
     private var lassoStroke: LassoStroke?
     private var colorStroke: ColorStroke?
+    private var freehandPoints: [Point]?
     private var trackingArea: NSTrackingArea?
     private var textEditor: NSTextView?
     private var editingTextLayerID: UUID?
@@ -154,6 +157,26 @@ final class CanvasView: NSView {
     /// Einstellungen des Farbpinsels. Werden von aussen gesetzt
     /// (Werkzeugleiste) und hier nur verwendet.
     var paintBrush = PaintBrush(diameter: 30, hardness: 0.8, colorHex: "#000000", opacity: 1)
+
+    /// Das Freihandwerkzeug erzeugt eine neue Vektorebene und braucht daher
+    /// im Gegensatz zu den Bildwerkzeugen keine ausgewählte Ebene.
+    var freehandIsActive = false {
+        didSet {
+            guard freehandIsActive != oldValue else { return }
+            freehandPoints = nil
+            zeigeFreihandvorschau([])
+            if freehandIsActive {
+                croppingLayerID = nil
+                brushLayerID = nil
+                lassoLayerID = nil
+                paintLayerID = nil
+                distortingLayerID = nil
+            }
+        }
+    }
+
+    var freehandColorHex = "#1D3557"
+    var freehandStrokeWidth = 6.0
 
     /// Die Ebene, die gerade zugeschnitten wird (Plan 5.3) — oder `nil`.
     ///
@@ -224,6 +247,7 @@ final class CanvasView: NSView {
         overlayLayer.addSublayer(guideShapes)
         overlayLayer.addSublayer(shapeDropHighlight)
         overlayLayer.addSublayer(lassoPreviewShape)
+        overlayLayer.addSublayer(freehandPreviewShape)
         overlayLayer.addSublayer(handleShapes)
         guideShapes.fillColor = nil
         // Kräftiges Magenta wie in anderen Gestaltungsprogrammen: Die Linien
@@ -236,6 +260,9 @@ final class CanvasView: NSView {
         lassoPreviewShape.fillColor = nil
         lassoPreviewShape.strokeColor = NSColor.controlAccentColor.cgColor
         lassoPreviewShape.lineDashPattern = [6, 4]
+        freehandPreviewShape.fillColor = nil
+        freehandPreviewShape.lineCap = .round
+        freehandPreviewShape.lineJoin = .round
         selectionOutline.fillColor = nil
         selectionOutline.strokeColor = NSColor.controlAccentColor.cgColor
         // Weisse Griffe mit farbigem Rand: Sie müssen sowohl auf einem dunklen
@@ -398,6 +425,7 @@ final class CanvasView: NSView {
     var guideLayerForTesting: CAShapeLayer { guideShapes }
     var cropPreviewLayerForTesting: CALayer { cropPreviewLayer }
     var lassoPreviewLayerForTesting: CAShapeLayer { lassoPreviewShape }
+    var freehandPreviewLayerForTesting: CAShapeLayer { freehandPreviewShape }
     var textEditorForTesting: NSTextView? { textEditor }
     func isRenderedLayerHiddenForTesting(_ id: UUID) -> Bool {
         renderedLayers[id]?.isHidden ?? false
@@ -630,6 +658,15 @@ final class CanvasView: NSView {
     /// aus — dieselbe Geste wie in der Fotos-App und in Keynote.
     override func mouseDown(with event: NSEvent) {
         let punkt = canvasPoint(from: event)
+
+        if freehandIsActive {
+            freehandPoints = [punkt]
+            drag = nil
+            cropDrag = nil
+            distortDrag = nil
+            zeigeFreihandvorschau([punkt])
+            return
+        }
 
         // Erreicht ein Klick den Canvas statt des darüberliegenden Editors,
         // liegt er ausserhalb des Eingabefelds und schliesst die Bearbeitung
@@ -1017,6 +1054,30 @@ final class CanvasView: NSView {
         }
     }
 
+    /// Zeichnet den laufenden Zug mit demselben Pfadbau wie die später
+    /// gespeicherte Formebene. Die ganze Leinwand dient als eigenes Rechteck,
+    /// damit die Rohpunkte ohne Skalierung unter dem Mauszeiger bleiben.
+    private func zeigeFreihandvorschau(_ punkte: [Point]) {
+        guard !punkte.isEmpty else {
+            withoutAnimation { freehandPreviewShape.path = nil }
+            return
+        }
+        let groesse = Size(width: Double(bounds.width), height: Double(bounds.height))
+        let inhalt = ShapeLayerContent(
+            kind: .freehand,
+            size: groesse,
+            fillColorHex: "#00000000",
+            strokeColorHex: freehandColorHex,
+            strokeWidth: freehandStrokeWidth,
+            path: FreehandStroke.path(from: punkte)
+        )
+        withoutAnimation {
+            freehandPreviewShape.path = ShapePath.cgPath(for: inhalt, in: bounds)
+            freehandPreviewShape.strokeColor = (RGBA(hex: freehandColorHex) ?? .black).cgColor
+            freehandPreviewShape.lineWidth = freehandStrokeWidth
+        }
+    }
+
 
     /// Dasselbe wie `beginStroke`, nur für den Farbpinsel (aus
     /// Anpassungen.md). Malt auf einer eigenen Ebene: Anders als beim
@@ -1071,6 +1132,12 @@ final class CanvasView: NSView {
         }
     }
     override func mouseDragged(with event: NSEvent) {
+        if var punkte = freehandPoints {
+            punkte.append(canvasPoint(from: event))
+            freehandPoints = punkte
+            zeigeFreihandvorschau(punkte)
+            return
+        }
         if var strich = stroke {
             let punkt = canvasPoint(from: event)
             if let ebene = document.layer(withID: strich.layerID),
@@ -1261,6 +1328,14 @@ final class CanvasView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if var punkte = freehandPoints {
+            freehandPoints = nil
+            let endpunkt = canvasPoint(from: event)
+            if punkte.last != endpunkt { punkte.append(endpunkt) }
+            zeigeFreihandvorschau([])
+            interactionDelegate?.canvasView(self, didDrawFreehand: punkte)
+            return
+        }
         if let strich = stroke {
             stroke = nil
             strich.painter.endStroke()
