@@ -150,6 +150,10 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
     @IBAction func applyGrid2x2Template(_ sender: Any?) { applyTemplate(.grid2x2) }
     @IBAction func applyGrid3x3Template(_ sender: Any?) { applyTemplate(.grid3x3) }
     @IBAction func applyPolaroidStackTemplate(_ sender: Any?) { applyTemplate(.polaroidStack) }
+    @IBAction func removeGridTemplate(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        CollageTemplateCommand.removeTemplate(from: state)
+    }
 
     @IBAction func toggleSelectedLayerVisibility(_ sender: Any?) {
         guard let state = (document as? AssemblageDocument)?.state,
@@ -331,7 +335,8 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
            [
             #selector(applyGrid2x2Template(_:)),
             #selector(applyGrid3x3Template(_:)),
-            #selector(applyPolaroidStackTemplate(_:))
+            #selector(applyPolaroidStackTemplate(_:)),
+            #selector(removeGridTemplate(_:))
            ].contains(action) {
             guard let state = (document as? AssemblageDocument)?.state else { return false }
             return CollageTemplateCommand.canApply(to: state)

@@ -73,4 +73,47 @@ enum CollageTemplateCommand {
             }
         }
     }
+
+    /// Hebt ein angewendetes Raster wieder auf: Jede sichtbare Bildebene
+    /// zeigt danach wieder das ganze Bild, eingepasst in die Leinwand und
+    /// leicht versetzt — genau der Zustand, den ein frischer Import erzeugt.
+    static func removeTemplate(from state: DocumentState) {
+        removeTemplate(from: state) { content in
+            guard state.images.image(named: content.originalFileReference) != nil,
+                  let pixelSize = state.images.pixelSize(named: content.originalFileReference)
+            else { return nil }
+            return Size(pixelSize)
+        }
+    }
+
+    /// Wie `removeTemplate(from:)`, mit injizierbarer Bildgrösse für Tests.
+    static func removeTemplate(
+        from state: DocumentState,
+        imageSize: (ImageLayerContent) -> Size?
+    ) {
+        guard let owner = state.owner else { return }
+        let candidates = state.document.layers.filter { layer in
+            guard layer.isVisible, case .image = layer.content else { return false }
+            return true
+        }
+        let placements: [(id: UUID, transform: Transform2D)] = candidates.enumerated().compactMap { index, layer in
+            guard case .image(let content) = layer.content,
+                  let size = imageSize(content)
+            else { return nil }
+            let fitted = Transform2D.fitting(contentSize: size, into: state.document.canvas)
+            return (layer.id, ImageImporter.cascaded(fitted, index: index, total: candidates.count))
+        }
+        guard !placements.isEmpty else { return }
+
+        owner.modify("Raster aufheben") { document in
+            for item in placements {
+                try? document.updateLayer(id: item.id) { layer in
+                    guard case .image(var content) = layer.content else { return }
+                    content.cropRect = nil
+                    layer.content = .image(content)
+                    layer.transform = item.transform
+                }
+            }
+        }
+    }
 }

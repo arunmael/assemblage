@@ -220,6 +220,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(DocumentWindowController.applyPolaroidStackTemplate(_:)),
             keyEquivalent: ""
         )
+        templates.addItem(.separator())
+        templates.addItem(
+            withTitle: "Raster aufheben",
+            action: #selector(DocumentWindowController.removeGridTemplate(_:)),
+            keyEquivalent: ""
+        )
         let templateItem = NSMenuItem(title: "Collage-Vorlage", action: nil, keyEquivalent: "")
         templateItem.submenu = templates
         menu.addItem(templateItem)

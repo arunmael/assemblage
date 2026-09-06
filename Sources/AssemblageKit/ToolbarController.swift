@@ -325,13 +325,18 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
     /// Baut die komplette obere rechte Zeile: Werkzeug-Cluster, Sekundär-
     /// Cluster, Suchfeld, Teilen-Knopf — exakt die vier Gruppen aus dem
     /// Mockup, im selben Abstand (14 pt).
+    /// Höhe jedes Panels der schwebenden Werkzeugzeile. Der Werkzeug-Cluster
+    /// gibt das Mass vor: 38 pt Knopf plus 6 pt Rand oben und unten.
+    private static let toolbarRowHeight: CGFloat = 50
+
     func buildFloatingToolbarRow() -> NSView {
-        let row = NSStackView(views: [
+        let panels = [
             makePrimaryToolCluster(),
             makeSecondaryToolCluster(),
             makeSearchField(),
             makeShareButton()
-        ])
+        ]
+        let row = NSStackView(views: panels)
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 14
@@ -345,7 +350,17 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         // nicht, und die Stack-eigene liesse ihn auf die kleinste
         // Clusterhöhe (44 pt) zusammenfallen. Massgeblich ist der
         // 50 pt hohe Werkzeug-Cluster.
-        row.heightAnchor.constraint(equalToConstant: 50).isActive = true
+        row.heightAnchor.constraint(equalToConstant: Self.toolbarRowHeight).isActive = true
+
+        // Alle vier Panels gleich hoch. `NSStackView` kennt dafür — anders als
+        // `UIStackView` — keine füllende Ausrichtung: Seine `alignment` legt
+        // nur fest, woran die Ansichten ausgerichtet werden, nicht dass sie
+        // sich dehnen. Die gemeinsame Höhe muss deshalb ausdrücklich gesetzt
+        // werden. `GlassPanel` spannt seinen Inhalt randlos über die volle
+        // Fläche, die Panelhöhe ist also zugleich die Inhaltshöhe.
+        for panel in panels {
+            panel.heightAnchor.constraint(equalTo: row.heightAnchor).isActive = true
+        }
         return row
     }
 
@@ -362,14 +377,9 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
     private func makePrimaryToolCluster() -> NSView {
         let select = makeToolButton(tool: .select, label: "Auswählen (V)", icon: .select, size: 38, action: #selector(selectTool(_:)))
         let crop = makeToolButton(tool: .crop, label: "Zuschneiden (C)", icon: .crop, size: 38, action: #selector(cropTool(_:)))
-        let brush = makeToolButton(tool: .brush, label: "Pinsel (B)", icon: .brush, size: 38, action: #selector(brushTool(_:)))
-        // Lasso und Farbpinsel haben im Mockup keinen eigenen Platz — es kennt
-        // beide Werkzeuge nicht. Damit sie erreichbar bleiben, stehen sie im
-        // selben visuellen Stil direkt daneben.
-        let lasso = makeToolButton(tool: .lasso, label: "Bild ausschneiden", icon: .removeSubject, size: 38, action: #selector(lassoTool(_:)))
-        let paint = makeToolButton(tool: .paint, label: "Farbe malen", icon: .brush, size: 38, action: #selector(paintTool(_:)))
+        let warp = makeToolButton(tool: .distort, label: "Verziehen", icon: .warp, size: 38, action: #selector(distortTool(_:)))
 
-        let stack = NSStackView(views: [select, crop, brush, lasso, paint])
+        let stack = NSStackView(views: [select, crop, warp])
         stack.orientation = .horizontal
         stack.spacing = 4
         stack.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
@@ -378,7 +388,12 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
     }
 
     private func makeSecondaryToolCluster() -> NSView {
-        let warp = makeToolButton(tool: .distort, label: "Verziehen", icon: .warp, size: 36, action: #selector(distortTool(_:)))
+        // Lasso und Farbpinsel haben im Mockup keinen eigenen Platz — es kennt
+        // beide Werkzeuge nicht. Damit sie erreichbar bleiben, stehen sie mit
+        // dem Pinsel im rechten Werkzeug-Cluster.
+        let brush = makeToolButton(tool: .brush, label: "Pinsel (B)", icon: .brush, size: 36, action: #selector(brushTool(_:)))
+        let lasso = makeToolButton(tool: .lasso, label: "Bild ausschneiden", icon: .lasso, size: 36, action: #selector(lassoTool(_:)))
+        let paint = makeToolButton(tool: .paint, label: "Farbe malen", icon: .paintDrop, size: 36, action: #selector(paintTool(_:)))
 
         let divider = NSBox()
         divider.boxType = .separator
@@ -386,14 +401,14 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         divider.widthAnchor.constraint(equalToConstant: 1).isActive = true
         divider.heightAnchor.constraint(equalToConstant: 22).isActive = true
 
-        let removeSubject = makePillButton(label: "Freistellen", icon: .removeSubject, action: #selector(removeSubject(_:)))
+        let removeSubject = makePillButton(label: "Freistellen", icon: .removeSubject, action: #selector(removeSubject(_:)), zeigtTitel: false)
         removeSubjectButton = removeSubject
 
-        let text = makeCommandPill(label: "Text", icon: .insertText, action: #selector(insertText(_:)))
+        let text = makePillButton(label: "Text", icon: .insertText, action: #selector(insertText(_:)), zeigtTitel: false)
         let shape = makeShapePillMenu()
         let grid = makeGridPillMenu()
 
-        let stack = NSStackView(views: [warp, divider, removeSubject, text, shape, grid])
+        let stack = NSStackView(views: [brush, lasso, paint, divider, removeSubject, text, shape, grid])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 10
@@ -590,15 +605,27 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
     }
 
     private func makeShareButton() -> NSView {
-        let button = plainIconButton(icon: .share, pointSize: 17, label: "Teilen", action: #selector(shareDocument(_:)))
-        button.widthAnchor.constraint(equalToConstant: 44).isActive = true
-        button.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        // Die Klickfläche kommt aus `hitSize`; eine zweite, abweichende
+        // Grössenangabe daneben ergäbe zwei widersprüchliche Zwänge.
+        let button = plainIconButton(
+            icon: .share, pointSize: 17, hitSize: 44, label: "Teilen", action: #selector(shareDocument(_:))
+        )
+
+        // Zentrierende Zwischenansicht, weil `GlassPanel` seinen Inhalt an
+        // alle vier Kanten spannt: Ohne sie stiesse die feste Knopfhöhe mit
+        // der Zeilenhöhe des Panels zusammen (siehe `buildFloatingToolbarRow()`).
+        let huelle = NSView()
+        huelle.translatesAutoresizingMaskIntoConstraints = false
+        huelle.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.centerXAnchor.constraint(equalTo: huelle.centerXAnchor),
+            button.centerYAnchor.constraint(equalTo: huelle.centerYAnchor)
+        ])
 
         let panel = GlassPanel(cornerRadius: 16)
-        panel.content = button
+        panel.content = huelle
         panel.translatesAutoresizingMaskIntoConstraints = false
         panel.widthAnchor.constraint(equalToConstant: 44).isActive = true
-        panel.heightAnchor.constraint(equalToConstant: 44).isActive = true
         return panel
     }
 
@@ -610,7 +637,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         button.isBordered = false
         button.translatesAutoresizingMaskIntoConstraints = false
 
-        let title = NSMenuItem(title: "Form", action: nil, keyEquivalent: "")
+        let title = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         title.image = MockupIcons.image(.insertShape, pointSize: 16, tintColor: AssemblageTheme.textPrimary)
         button.menu?.addItem(title)
 
@@ -636,7 +663,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         button.isBordered = false
         button.translatesAutoresizingMaskIntoConstraints = false
 
-        let title = NSMenuItem(title: "Raster", action: nil, keyEquivalent: "")
+        let title = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         title.image = MockupIcons.image(.collageGrid, pointSize: 16, tintColor: AssemblageTheme.textPrimary)
         button.menu?.addItem(title)
 
@@ -647,6 +674,10 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
             item.target = commandTarget
             button.menu?.addItem(item)
         }
+        button.menu?.addItem(.separator())
+        let remove = NSMenuItem(title: "Raster aufheben", action: #selector(DocumentWindowController.removeGridTemplate(_:)), keyEquivalent: "")
+        remove.target = commandTarget
+        button.menu?.addItem(remove)
 
         button.font = .systemFont(ofSize: 12.5, weight: .semibold)
         button.toolTip = "Raster"
@@ -680,14 +711,10 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
     }
 
     /// Ein Icon+Text-Knopf wie „Freistellen"/„Text"/„Raster" im Mockup.
-    private func makeCommandPill(label: String, icon: MockupIcon, action: Selector?) -> NSButton {
-        makePillButton(label: label, icon: icon, action: action)
-    }
-
-    private func makePillButton(label: String, icon: MockupIcon, action: Selector?) -> NSButton {
-        let button = NSButton(title: label, target: action == nil ? nil : self, action: action)
+    private func makePillButton(label: String, icon: MockupIcon, action: Selector?, zeigtTitel: Bool = true) -> NSButton {
+        let button = NSButton(title: zeigtTitel ? label : "", target: action == nil ? nil : self, action: action)
         button.image = MockupIcons.image(icon, pointSize: 16, tintColor: AssemblageTheme.textPrimary)
-        button.imagePosition = .imageLeading
+        button.imagePosition = zeigtTitel ? .imageLeading : .imageOnly
         button.imageHugsTitle = true
         button.isBordered = false
         button.font = .systemFont(ofSize: 12.5, weight: .semibold)
@@ -695,6 +722,10 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         button.toolTip = label
         button.setAccessibilityLabel(label)
         button.translatesAutoresizingMaskIntoConstraints = false
+        if !zeigtTitel {
+            button.widthAnchor.constraint(equalToConstant: 36).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        }
         return button
     }
 
@@ -917,12 +948,14 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         let collapsed = NSStackView(views: [undo, expand, redo])
         collapsed.orientation = .horizontal
         collapsed.alignment = .centerY
+        collapsed.distribution = .fill
         collapsed.spacing = 14
         collapsed.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 14)
 
         let expanded = NSStackView(views: [history, collapse])
         expanded.orientation = .horizontal
         expanded.alignment = .centerY
+        expanded.distribution = .fill
         expanded.spacing = 14
         expanded.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 14)
         expanded.isHidden = true
@@ -933,6 +966,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         let rows = NSStackView(views: [collapsed, expanded])
         rows.orientation = .vertical
         rows.alignment = .centerX
+        rows.distribution = .fill
         rows.spacing = 0
         collapsedTimelineRow = collapsed
         expandedTimelineRow = expanded

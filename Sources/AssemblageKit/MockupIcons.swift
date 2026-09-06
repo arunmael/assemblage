@@ -184,6 +184,15 @@ private func cgPath(fromSVGPathData data: String) -> CGPath {
             current = destination
             lastCubicControl = control2
 
+        case 67, 99: // C/c
+            guard let values = numbers(6) else { return path }
+            let control1 = point(values[0], values[1], relative: relative)
+            let control2 = point(values[2], values[3], relative: relative)
+            let destination = point(values[4], values[5], relative: relative)
+            path.addCurve(to: destination, control1: control1, control2: control2)
+            current = destination
+            lastCubicControl = control2
+
         case 65, 97: // A/a
             guard
                 let radiiAndRotation = numbers(3),
@@ -363,7 +372,7 @@ private func cgPath(circleCenterX cx: CGFloat, y cy: CGFloat, radius r: CGFloat)
 // MARK: - Mockup icons
 
 enum MockupIcon: CaseIterable {
-    case select, crop, brush, warp, removeSubject, insertText, insertShape, collageGrid
+    case select, crop, brush, lasso, paintDrop, warp, removeSubject, insertText, insertShape, collageGrid
     case search, share, layersAdd, eyeVisible, duplicate, delete, chevronDown
     case mirrorHorizontal, mirrorVertical, zoomOut, zoomIn, undo, timeline, redo
 }
@@ -411,6 +420,14 @@ enum MockupIcons {
             return paths("M7 2v15a2 2 0 002 2h13", "M2 7h15a2 2 0 012 2v13")
         case .brush:
             return paths("M9.5 14.5L18 6", "M14 4.2l5.8 5.8-8.8 8.8-6-2 2-6z")
+        case .lasso:
+            return paths(
+                "M12 4c4.4 0 8 2.5 8 5.6 0 3.1-3.6 5.6-8 5.6-1 0-2-.1-2.9-.4",
+                "M9.1 14.8c-1 .7-1.6 1.7-1.6 2.8 0 .5.2 1 .5 1.4",
+                "M8 21.5a1.3 1.3 0 100-2.6 1.3 1.3 0 000 2.6"
+            )
+        case .paintDrop:
+            return paths("M12 3.5s5.8 6.2 5.8 9.9A5.8 5.8 0 016.2 13.4C6.2 9.7 12 3.5 12 3.5z")
         case .warp:
             return paths("M3 9V3h6", "M21 15v6h-6", "M3 3l7 7", "M21 21l-7-7")
         case .removeSubject:

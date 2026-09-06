@@ -111,7 +111,7 @@ final class CollageTemplateCommandTests: XCTestCase {
         }
     }
 
-    func testEinfuegenMenueEnthaeltGenauDieDreiKuratiertenVorlagen() throws {
+    func testEinfuegenMenueEnthaeltVorlagenUndAufhebenBefehl() throws {
         let vorherigesMenue = NSApp.mainMenu
         defer { NSApp.mainMenu = vorherigesMenue }
         AppDelegate().applicationDidFinishLaunching(
@@ -128,7 +128,9 @@ final class CollageTemplateCommandTests: XCTestCase {
         XCTAssertEqual(vorlagen.items.map(\.title), [
             "2×2-Raster",
             "3×3-Raster",
-            "Polaroid-Stapel"
+            "Polaroid-Stapel",
+            "",
+            "Raster aufheben"
         ])
     }
 
@@ -141,7 +143,8 @@ final class CollageTemplateCommandTests: XCTestCase {
         let actions = [
             #selector(DocumentWindowController.applyGrid2x2Template(_:)),
             #selector(DocumentWindowController.applyGrid3x3Template(_:)),
-            #selector(DocumentWindowController.applyPolaroidStackTemplate(_:))
+            #selector(DocumentWindowController.applyPolaroidStackTemplate(_:)),
+            #selector(DocumentWindowController.removeGridTemplate(_:))
         ]
 
         for action in actions {

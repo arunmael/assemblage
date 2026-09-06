@@ -285,12 +285,10 @@ enum ImageImporter {
     private static let cascadeCycle = 6
 
     /// Versetzt jedes weitere gleichzeitig importierte Bild leicht nach
-    /// rechts unten — nach dem Vorbild der klassischen Fenster-Kaskade
-    /// (`NSWindow.cascadeTopLeft`). Ohne diesen Versatz läge ein
-    /// Mehrfachimport exakt übereinander: Sichtbar wäre nur das oberste Bild,
-    /// und wer fünf Fotos auf einmal hereinzieht, hielte den Import für
-    /// kaputt, weil scheinbar nur eines ankam.
-    private static func cascaded(_ transform: Transform2D, index: Int, total: Int) -> Transform2D {
+    /// rechts unten — nach dem Vorbild der klassischen Fenster-Kaskade.
+    /// Dieselbe kanonische Platzierung gilt beim Aufheben eines Rasters,
+    /// damit dabei wieder genau der Zustand eines frischen Imports entsteht.
+    static func cascaded(_ transform: Transform2D, index: Int, total: Int) -> Transform2D {
         guard total > 1 else { return transform }
         var result = transform
         let step = Double(index % cascadeCycle) * cascadeStep
