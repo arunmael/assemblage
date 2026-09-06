@@ -128,6 +128,70 @@ final class ToolbarTests: XCTestCase {
             title: "Verkleinern", action: NSSelectorFromString("zoomOut:"), keyEquivalent: ""
         )))
     }
+
+    /// Regler-Werkzeuge dürfen über die gekoppelte Inspector-Oberkante
+    /// keinen freien Höhenplatz in die Werkzeugzeile zurückdrücken. Nur der
+    /// tatsächlich vom Fenster vergebene Frame deckt diese Constraint-Kette
+    /// ab; die intrinsische Wunschgrösse allein würde den Fehler übersehen.
+    func testFloatingToolbarRowStaysFiftyPointsHighForEveryTool() throws {
+        for tool in CanvasTool.allToolbarCases {
+            let document = AssemblageDocument()
+            document.modify("Vorbereiten") { _ = try? $0.addLayer(imageLayer) }
+            document.state.selectedLayerID = imageLayer.id
+            document.makeWindowControllers()
+
+            let controller = try XCTUnwrap(document.windowControllers.first as? DocumentWindowController)
+            let window = try XCTUnwrap(controller.window)
+            window.setFrame(NSRect(x: 0, y: 0, width: 1280, height: 820), display: false)
+            let shell = try XCTUnwrap(
+                window.contentViewController as? WindowDropZoneViewController
+            )
+            let stage = try XCTUnwrap(shell.children.first as? DocumentStageViewController)
+            let row = try XCTUnwrap(
+                stage.view.subviews.compactMap { $0 as? NSStackView }.first,
+                "die schwebende Werkzeugzeile muss direkt in der Bühne liegen"
+            )
+
+            stage.toolbarController.simulateToolTapForTesting(tool)
+            window.contentView?.layoutSubtreeIfNeeded()
+            XCTAssertEqual(row.frame.height, 50, accuracy: 0.5, "falsche Höhe bei \(tool)")
+        }
+    }
+
+    /// Der kurze Lasso-Umschalter darf nicht als schmaler Streifen über dem
+    /// Inspector stehen. Gemessen wird nach echtem Fensterlayout, weil erst
+    /// Auto Layout aus Inhaltsbreite und relationaler Kante den Frame bildet.
+    func testLassoSettingsBarIsAtLeastAsWideAsInspectorAndRightAligned() throws {
+        let document = AssemblageDocument()
+        document.modify("Vorbereiten") { _ = try? $0.addLayer(imageLayer) }
+        document.state.selectedLayerID = imageLayer.id
+        document.makeWindowControllers()
+
+        let controller = try XCTUnwrap(document.windowControllers.first as? DocumentWindowController)
+        let window = try XCTUnwrap(controller.window)
+        window.setFrame(NSRect(x: 0, y: 0, width: 1280, height: 820), display: false)
+        let shell = try XCTUnwrap(window.contentViewController as? WindowDropZoneViewController)
+        let stage = try XCTUnwrap(shell.children.first as? DocumentStageViewController)
+
+        stage.toolbarController.simulateToolTapForTesting(.lasso)
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.layoutIfNeeded()
+
+        let inspectorPanel = try XCTUnwrap(stage.inspectorPanel)
+        let settingsBar = try XCTUnwrap(
+            stage.settingsBar,
+            "der sichtbare Lasso-Einstellungsstreifen muss über dem Inspector liegen"
+        )
+
+        XCTAssertGreaterThanOrEqual(
+            settingsBar.frame.width, inspectorPanel.frame.width,
+            "der Lasso-Streifen darf nicht schmaler als das Eigenschaften-Panel sein"
+        )
+        XCTAssertEqual(
+            settingsBar.frame.maxX, inspectorPanel.frame.maxX, accuracy: 0.5,
+            "Einstellungsstreifen und Eigenschaften-Panel müssen rechts bündig sein"
+        )
+    }
 }
 
 /// Das aktive Werkzeug und die Pinsel-Einstellungen müssen im

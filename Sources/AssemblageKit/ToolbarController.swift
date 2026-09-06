@@ -68,6 +68,10 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
     private var selectedLayer: Layer?
     private var toolButtons: [CanvasTool: NSButton] = [:]
     private weak var removeSubjectButton: NSButton?
+    private var timelineIsExpanded = false
+    private weak var collapsedTimelineRow: NSView?
+    private weak var expandedTimelineRow: NSView?
+    private weak var undoTimeline: UndoTimelineView?
 
     /// Die Werkzeugsuche (Anpassungen.md / Nutzer-Rückmeldung): ein
     /// Ergebnis-Popover, das beim Tippen sowohl Werkzeuge als auch
@@ -111,6 +115,13 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
             .sink { [weak self] document, selectedLayerID in
                 let layer = selectedLayerID.flatMap { document.layer(withID: $0) }
                 self?.selectionDidChange(to: layer)
+            }
+            .store(in: &observations)
+
+        state.$undoDepth
+            .combineLatest(state.$redoDepth)
+            .sink { [weak self] undoDepth, redoDepth in
+                self?.undoTimeline?.setDepths(undo: undoDepth, redo: redoDepth)
             }
             .store(in: &observations)
     }
@@ -321,6 +332,16 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         row.alignment = .centerY
         row.spacing = 14
         row.translatesAutoresizingMaskIntoConstraints = false
+        // Ohne feste Höhe zieht die Kette Werkzeugleiste → Regler-Streifen →
+        // Eigenschaften-Panel (dessen Unterkante am Fenster festhängt) diese
+        // Zeile bei Pinsel/Lasso/Farbe auf über 400 pt auseinander; die
+        // Cluster drifteten dann sichtbar über die halbe Fensterhöhe.
+        // Hugging-Prioritäten helfen hier nicht: Die geerbte
+        // Content-Hugging-Priorität steuert die Höhe eines `NSStackView`
+        // nicht, und die Stack-eigene liesse ihn auf die kleinste
+        // Clusterhöhe (44 pt) zusammenfallen. Massgeblich ist der
+        // 50 pt hohe Werkzeug-Cluster.
+        row.heightAnchor.constraint(equalToConstant: 50).isActive = true
         return row
     }
 
@@ -362,7 +383,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         divider.heightAnchor.constraint(equalToConstant: 22).isActive = true
 
         let removeSubject = makePillButton(label: "Freistellen", icon: .removeSubject, action: #selector(removeSubject(_:)))
-        removeSubjectButton = removeSubject.subviews.compactMap { $0 as? NSButton }.first
+        removeSubjectButton = removeSubject
 
         let text = makeCommandPill(label: "Text", icon: .insertText, action: #selector(insertText(_:)))
         let shape = makeShapePillMenu()
@@ -392,7 +413,13 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         field.focusRingType = .none
         field.delegate = self
         field.translatesAutoresizingMaskIntoConstraints = false
-        field.widthAnchor.constraint(equalToConstant: 150).isActive = true
+        field.widthAnchor.constraint(greaterThanOrEqualToConstant: 90).isActive = true
+        let preferredWidth = field.widthAnchor.constraint(equalToConstant: 150)
+        preferredWidth.priority = .defaultLow
+        preferredWidth.isActive = true
+        // Das Suchfeld gibt bei knapper Fensterbreite zuerst Platz frei,
+        // damit die eigentlichen Werkzeugbefehle vollständig bedienbar bleiben.
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         searchField = field
 
         let stack = NSStackView(views: [icon, field])
@@ -579,7 +606,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         button.isBordered = false
         button.translatesAutoresizingMaskIntoConstraints = false
 
-        let title = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        let title = NSMenuItem(title: "Form", action: nil, keyEquivalent: "")
         title.image = MockupIcons.image(.insertShape, pointSize: 16, tintColor: AssemblageTheme.textPrimary)
         button.menu?.addItem(title)
 
@@ -591,15 +618,10 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
             button.menu?.addItem(item)
         }
 
-        let label = NSTextField(labelWithString: "Form")
-        label.font = .systemFont(ofSize: 12.5, weight: .semibold)
-        label.textColor = AssemblageTheme.textPrimary
-
-        let stack = NSStackView(views: [button, label])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 4
-        return stack
+        button.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        button.toolTip = "Form"
+        button.setAccessibilityLabel("Form")
+        return button
     }
 
     /// „Raster" — Collage-Vorlagen (2×2, 3×3, Polaroid-Stapel). Vorher ohne
@@ -610,7 +632,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         button.isBordered = false
         button.translatesAutoresizingMaskIntoConstraints = false
 
-        let title = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        let title = NSMenuItem(title: "Raster", action: nil, keyEquivalent: "")
         title.image = MockupIcons.image(.collageGrid, pointSize: 16, tintColor: AssemblageTheme.textPrimary)
         button.menu?.addItem(title)
 
@@ -622,15 +644,10 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
             button.menu?.addItem(item)
         }
 
-        let label = NSTextField(labelWithString: "Raster")
-        label.font = .systemFont(ofSize: 12.5, weight: .semibold)
-        label.textColor = AssemblageTheme.textPrimary
-
-        let stack = NSStackView(views: [button, label])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 4
-        return stack
+        button.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        button.toolTip = "Raster"
+        button.setAccessibilityLabel("Raster")
+        return button
     }
 
     // MARK: - Bausteine
@@ -659,24 +676,31 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
     }
 
     /// Ein Icon+Text-Knopf wie „Freistellen"/„Text"/„Raster" im Mockup.
-    private func makeCommandPill(label: String, icon: MockupIcon, action: Selector?) -> NSView {
+    private func makeCommandPill(label: String, icon: MockupIcon, action: Selector?) -> NSButton {
         makePillButton(label: label, icon: icon, action: action)
     }
 
-    private func makePillButton(label: String, icon: MockupIcon, action: Selector?) -> NSView {
-        let button = plainIconButton(icon: icon, pointSize: 16, label: label, action: action)
-        let text = NSTextField(labelWithString: label)
-        text.font = .systemFont(ofSize: 12.5, weight: .semibold)
-        text.textColor = AssemblageTheme.textPrimary
-
-        let stack = NSStackView(views: [button, text])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 6
-        return stack
+    private func makePillButton(label: String, icon: MockupIcon, action: Selector?) -> NSButton {
+        let button = NSButton(title: label, target: action == nil ? nil : self, action: action)
+        button.image = MockupIcons.image(icon, pointSize: 16, tintColor: AssemblageTheme.textPrimary)
+        button.imagePosition = .imageLeading
+        button.imageHugsTitle = true
+        button.isBordered = false
+        button.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        button.contentTintColor = AssemblageTheme.textPrimary
+        button.toolTip = label
+        button.setAccessibilityLabel(label)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
     }
 
-    private func plainIconButton(icon: MockupIcon, pointSize: CGFloat, label: String, action: Selector?) -> NSButton {
+    private func plainIconButton(
+        icon: MockupIcon,
+        pointSize: CGFloat,
+        hitSize: CGFloat? = nil,
+        label: String,
+        action: Selector?
+    ) -> NSButton {
         let button = NSButton(
             image: MockupIcons.image(icon, pointSize: pointSize, tintColor: AssemblageTheme.textPrimary),
             target: action == nil ? nil : self,
@@ -686,8 +710,9 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         button.toolTip = label
         button.setAccessibilityLabel(label)
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: pointSize).isActive = true
-        button.heightAnchor.constraint(equalToConstant: pointSize).isActive = true
+        let buttonSize = hitSize ?? pointSize
+        button.widthAnchor.constraint(equalToConstant: buttonSize).isActive = true
+        button.heightAnchor.constraint(equalToConstant: buttonSize).isActive = true
         return button
     }
 
@@ -860,43 +885,73 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         return panel
     }
 
-    /// Die Verlaufsleiste unten rechts im Mockup — Widerrufen/Wiederholen
+    /// Die Verlaufsleiste unten im Mockup — Widerrufen/Wiederholen
     /// laufen über dieselbe Responder-Kette wie die Menüzeilen, damit die
     /// bestehende Tastenwiederholungs-/Undo-Logik in
     /// `DocumentWindowController.undo(_:)` unverändert greift.
     func buildUndoBar() -> GlassPanel {
-        let undo = plainIconButton(icon: .undo, pointSize: 16, label: "Zurück (⌘Z)", action: #selector(undoTapped(_:)))
-        let redo = plainIconButton(icon: .redo, pointSize: 16, label: "Vor (⌘⇧Z)", action: #selector(redoTapped(_:)))
+        let undo = plainIconButton(icon: .undo, pointSize: 16, hitSize: 28, label: "Zurück (⌘Z)", action: #selector(undoTapped(_:)))
+        let redo = plainIconButton(icon: .redo, pointSize: 16, hitSize: 28, label: "Vor (⌘⇧Z)", action: #selector(redoTapped(_:)))
+        let expand = plainIconButton(icon: .timeline, pointSize: 16, hitSize: 28, label: "Verlauf einblenden", action: #selector(toggleTimeline(_:)))
+        let collapse = plainIconButton(icon: .timeline, pointSize: 16, hitSize: 28, label: "Verlauf ausblenden", action: #selector(toggleTimeline(_:)))
+        collapse.contentTintColor = AssemblageTheme.accentDark
+        // Die Mockup-Bilder sind absichtlich keine Template-Bilder; die
+        // aktive Farbe muss deshalb auch im Bild stecken, sonst bliebe die
+        // gesetzte Tint-Farbe am reinen Icon unsichtbar.
+        collapse.image = MockupIcons.image(.timeline, pointSize: 16, tintColor: AssemblageTheme.accentDark)
 
-        let history = NSStackView(views: [10, 16, 8, 14].map { height -> NSView in
-            let bar = NSView()
-            bar.wantsLayer = true
-            bar.layer?.backgroundColor = AssemblageTheme.textPrimary.cgColor
-            bar.layer?.cornerRadius = 1.5
-            bar.translatesAutoresizingMaskIntoConstraints = false
-            bar.widthAnchor.constraint(equalToConstant: 3).isActive = true
-            bar.heightAnchor.constraint(equalToConstant: height).isActive = true
-            return bar
-        })
-        history.orientation = .horizontal
-        history.alignment = .centerY
-        history.spacing = 2
+        let history = UndoTimelineView()
+        history.translatesAutoresizingMaskIntoConstraints = false
+        history.widthAnchor.constraint(equalToConstant: 140).isActive = true
+        history.heightAnchor.constraint(equalToConstant: 28).isActive = true
         history.toolTip = "Verlaufs-Timeline"
+        history.setDepths(undo: state.undoDepth, redo: state.redoDepth)
+        history.onSelectDepth = { [weak self] targetDepth in
+            self?.jumpInTimeline(to: targetDepth)
+        }
+        undoTimeline = history
 
-        let dividerLeading = NSBox()
-        dividerLeading.boxType = .separator
-        let dividerTrailing = NSBox()
-        dividerTrailing.boxType = .separator
+        let collapsed = NSStackView(views: [undo, expand, redo])
+        collapsed.orientation = .horizontal
+        collapsed.alignment = .centerY
+        collapsed.spacing = 14
+        collapsed.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 14)
 
-        let stack = NSStackView(views: [undo, dividerLeading, history, dividerTrailing, redo])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.distribution = .fillEqually
-        stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        let expanded = NSStackView(views: [history, collapse])
+        expanded.orientation = .horizontal
+        expanded.alignment = .centerY
+        expanded.spacing = 14
+        expanded.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 14)
+        expanded.isHidden = true
+
+        // Beide Zustände bleiben Teil derselben Ansicht. `NSStackView`
+        // nimmt die ausgeblendete Zeile aus seiner intrinsischen Grösse,
+        // sodass die Pille beim Umschalten ohne Neuaufbau mitwachsen darf.
+        let rows = NSStackView(views: [collapsed, expanded])
+        rows.orientation = .vertical
+        rows.alignment = .centerX
+        rows.spacing = 0
+        collapsedTimelineRow = collapsed
+        expandedTimelineRow = expanded
 
         let panel = GlassPanel(cornerRadius: 0, isPill: true)
-        panel.content = stack
+        panel.content = rows
         return panel
+    }
+
+    @objc private func toggleTimeline(_ sender: Any?) {
+        timelineIsExpanded.toggle()
+        collapsedTimelineRow?.isHidden = timelineIsExpanded
+        expandedTimelineRow?.isHidden = !timelineIsExpanded
+    }
+
+    private func jumpInTimeline(to targetDepth: Int) {
+        let difference = targetDepth - state.undoDepth
+        if difference < 0 {
+            for _ in 0..<(-difference) { undoTapped(undoTimeline) }
+        } else if difference > 0 {
+            for _ in 0..<difference { redoTapped(undoTimeline) }
+        }
     }
 
     @objc private func undoTapped(_ sender: Any?) {
@@ -905,6 +960,67 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
 
     @objc private func redoTapped(_ sender: Any?) {
         NSApp.sendAction(Selector(("redo:")), to: nil, from: sender)
+    }
+}
+
+/// Zeichnet den Verlauf als echte Zeitachse: kräftig bis zum aktuellen
+/// Schritt, schwach für den widerrufenen Teil und mit einer senkrechten Marke
+/// an der gegenwärtigen Position. Eine Zeichenansicht hält Linie und Marke
+/// pixelgenau zusammen; mehrere Subviews würden bei Rundung und Layout leicht
+/// sichtbare Lücken erzeugen.
+@MainActor
+final class UndoTimelineView: NSView {
+
+    private var undoDepth = 0
+    private var redoDepth = 0
+    var onSelectDepth: ((Int) -> Void)?
+
+    func setDepths(undo: Int, redo: Int) {
+        undoDepth = max(0, undo)
+        redoDepth = max(0, redo)
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        let total = undoDepth + redoDepth
+        let markerFraction = total == 0 ? 1 : CGFloat(undoDepth) / CGFloat(total)
+        let lineMinX: CGFloat = 1
+        let lineMaxX = max(lineMinX, bounds.width - 1)
+        let markerX = lineMinX + (lineMaxX - lineMinX) * markerFraction
+        let centerY = bounds.midY
+
+        let weakLine = NSBezierPath()
+        weakLine.move(to: NSPoint(x: total == 0 ? lineMinX : markerX, y: centerY))
+        weakLine.line(to: NSPoint(x: lineMaxX, y: centerY))
+        weakLine.lineWidth = 1.5
+        AssemblageTheme.textTertiary.setStroke()
+        weakLine.stroke()
+
+        if total > 0 {
+            let strongLine = NSBezierPath()
+            strongLine.move(to: NSPoint(x: lineMinX, y: centerY))
+            strongLine.line(to: NSPoint(x: markerX, y: centerY))
+            strongLine.lineWidth = 1.5
+            AssemblageTheme.textPrimary.setStroke()
+            strongLine.stroke()
+        }
+
+        let marker = NSBezierPath()
+        marker.move(to: NSPoint(x: markerX, y: centerY - 9))
+        marker.line(to: NSPoint(x: markerX, y: centerY + 9))
+        marker.lineWidth = 1.5
+        AssemblageTheme.textPrimary.setStroke()
+        marker.stroke()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard bounds.width > 0 else { return }
+        let x = convert(event.locationInWindow, from: nil).x
+        let relativePosition = min(1, max(0, x / bounds.width))
+        let total = undoDepth + redoDepth
+        onSelectDepth?(Int((relativePosition * CGFloat(total)).rounded()))
     }
 }
 

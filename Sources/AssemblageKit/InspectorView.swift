@@ -48,6 +48,10 @@ struct InspectorView: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
+        // Die letzte Zeile braucht Abstand zur 22-pt-Rundung des
+        // Glas-Panels; waagerecht soll das gruppierte Form unverändert bis
+        // an seine systemeigenen Ränder reichen.
+        .padding(.bottom, 12)
     }
 
     // MARK: - Ohne Auswahl: das Dokument

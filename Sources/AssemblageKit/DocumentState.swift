@@ -29,6 +29,13 @@ final class DocumentState: ObservableObject {
     /// sonst irgendwann auseinander.
     @Published fileprivate(set) var currentTool: CanvasTool = .select
 
+    /// Anzahl der noch angewendeten beziehungsweise bereits widerrufenen
+    /// Verlaufsschritte. `NSUndoManager` legt seine Stapeltiefen nicht offen;
+    /// diese beiden Werte spiegeln deshalb gezielt die Benachrichtigungen des
+    /// Managers dieses Dokuments für die Verlaufspille.
+    @Published fileprivate(set) var undoDepth: Int = 0
+    @Published fileprivate(set) var redoDepth: Int = 0
+
     /// Die aktuellen Pinsel-Einstellungen — ebenfalls nur zur Anzeige
     /// (Inspector), geschrieben wird ausschliesslich über die Regler in der
     /// Werkzeugleiste.
@@ -54,10 +61,64 @@ final class DocumentState: ObservableObject {
     /// Undo-Stack.
     weak var owner: AssemblageDocument?
 
+    private weak var observedUndoManager: UndoManager?
+    private var undoManagerObservations: [NSObjectProtocol] = []
+
     init(document: AssemblageModel.Document, resources: DocumentResources) {
         self.document = document
         self.resources = resources
         self.images = ImageStore(resources: resources)
+    }
+
+    /// Beobachtet nur den Manager dieses Dokuments. Eine globale Beobachtung
+    /// würde bei mehreren Fenstern fremde Bearbeitungsschritte mitzählen.
+    func observeUndoManager(_ undoManager: UndoManager?) {
+        guard observedUndoManager !== undoManager else { return }
+
+        let center = NotificationCenter.default
+        undoManagerObservations.forEach(center.removeObserver)
+        undoManagerObservations.removeAll()
+        observedUndoManager = undoManager
+        undoDepth = 0
+        redoDepth = 0
+
+        guard let undoManager else { return }
+
+        undoManagerObservations.append(center.addObserver(
+            forName: .NSUndoManagerDidCloseUndoGroup,
+            object: undoManager,
+            queue: .main
+        ) { [weak self, weak undoManager] _ in
+            MainActor.assumeIsolated {
+                guard let self, let undoManager,
+                      !undoManager.isUndoing, !undoManager.isRedoing
+                else { return }
+                self.undoDepth += 1
+                self.redoDepth = 0
+            }
+        })
+        undoManagerObservations.append(center.addObserver(
+            forName: .NSUndoManagerDidUndoChange,
+            object: undoManager,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.undoDepth = max(0, self.undoDepth - 1)
+                self.redoDepth += 1
+            }
+        })
+        undoManagerObservations.append(center.addObserver(
+            forName: .NSUndoManagerDidRedoChange,
+            object: undoManager,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.undoDepth += 1
+                self.redoDepth = max(0, self.redoDepth - 1)
+            }
+        })
     }
 
     /// Übernimmt einen frisch von der Platte gelesenen Stand.
@@ -101,6 +162,11 @@ extension AssemblageDocument {
     /// Undo-Stack mit Einzeloperationen wäre komplizierter und würde genau
     /// diese Garantie aufgeben.
     func modify(_ actionName: String, _ body: (inout AssemblageModel.Document) -> Void) {
+        // Tests und AppKit dürfen den Undo-Manager austauschen. Vor jeder
+        // Registrierung sicherzustellen, dass genau dieser beobachtet wird,
+        // verhindert veraltete oder dokumentfremde Zähler.
+        state.observeUndoManager(undoManager)
+
         if let laufenderName = coalescingActionName, laufenderName != actionName {
             // Ein anderer Befehl darf nicht in den noch offenen Schritt einer
             // Tastenwiederholung geraten und dessen Undo-Beschriftung erben.

@@ -20,6 +20,11 @@ final class DocumentStageViewController: NSViewController {
     let inspectorHostingController: NSHostingController<InspectorView>
     let toolbarController: ToolbarController
 
+    /// Direkte Referenzen halten Layouttests unabhängig von der Reihenfolge
+    /// der mehreren gleichartigen `GlassPanel`-Subviews.
+    private(set) weak var settingsBar: GlassPanel?
+    private(set) weak var inspectorPanel: GlassPanel?
+
     private let state: DocumentState
     private var observations: Set<AnyCancellable> = []
 
@@ -27,8 +32,8 @@ final class DocumentStageViewController: NSViewController {
     private weak var deleteButton: NSButton?
     private weak var blendModeButton: NSPopUpButton?
 
-    /// Für die umplatzierten Ampel-Knöpfe (siehe `positionTrafficLights()`).
-    private weak var layersPanel: GlassPanel?
+    /// Nimmt die drei echten Fenster-Knöpfe auf (siehe `adoptTrafficLights()`).
+    private let trafficLightHost = TrafficLightHostView()
 
     /// Zwei sich ausschliessende Anker für die Oberkante des Eigenschaften-
     /// Panels: normalerweise ein fester Abstand unter der Werkzeugleiste,
@@ -78,7 +83,7 @@ final class DocumentStageViewController: NSViewController {
 
         // Bis ganz an die Fensteroberkante statt mit 24-pt-Abstand: Dort
         // sitzen jetzt auch die echten Ampel-Knöpfe (siehe
-        // `positionTrafficLights()`), genau wie im Mockup die gemalten Punkte
+        // `adoptTrafficLights()`), genau wie im Mockup die gemalten Punkte
         // im selben Panel sitzen.
         let layersPanel = GlassPanel(cornerRadius: AssemblageTheme.panelCornerRadius)
         layersPanel.content = makeLayersPanelContent()
@@ -90,7 +95,6 @@ final class DocumentStageViewController: NSViewController {
             layersPanel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: AssemblageTheme.margin),
             layersPanel.widthAnchor.constraint(equalToConstant: AssemblageTheme.layersPanelWidth)
         ])
-        self.layersPanel = layersPanel
 
         let toolbarRow = toolbarController.buildFloatingToolbarRow()
         container.addSubview(toolbarRow)
@@ -98,11 +102,26 @@ final class DocumentStageViewController: NSViewController {
             toolbarRow.topAnchor.constraint(equalTo: container.topAnchor, constant: AssemblageTheme.margin),
             toolbarRow.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -AssemblageTheme.margin)
         ])
+        let toolbarLeading = toolbarRow.leadingAnchor.constraint(
+            greaterThanOrEqualTo: layersPanel.trailingAnchor,
+            constant: AssemblageTheme.margin
+        )
+        // Bewusst zwingend: Die Werkzeugleiste ist so breit, wie ihre
+        // Cluster es verlangen, und darf nie unter das Ebenen-Panel
+        // geraten. AppKit leitet daraus die tatsächliche Mindestbreite des
+        // Fensters ab (Ebenen-Panel + Ränder + Zeilenbreite) — sie liegt
+        // damit über der in `DocumentWindowController` gesetzten
+        // `contentMinSize`, die nur die untere Schranke bleibt. Eine
+        // nachgiebige Priorität wäre hier nutzlos: AppKit zieht sie bei der
+        // Mindestgrösse trotzdem heran, sodass das Fenster gar nicht erst
+        // in den Überlappungsbereich käme.
+        toolbarLeading.isActive = true
 
         // Regler für Pinsel/Lasso/Farbe — im Mockup nicht vorgesehen (siehe
         // `ToolbarController.buildToolSettingsBar`), deshalb als eigene,
         // nur bei Bedarf sichtbare Pille direkt unter der Werkzeugleiste.
         let settingsBar = toolbarController.buildToolSettingsBar()
+        self.settingsBar = settingsBar
         settingsBar.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(settingsBar)
         NSLayoutConstraint.activate([
@@ -112,6 +131,7 @@ final class DocumentStageViewController: NSViewController {
         ])
 
         let inspectorPanel = GlassPanel(cornerRadius: AssemblageTheme.panelCornerRadius)
+        self.inspectorPanel = inspectorPanel
         inspectorPanel.content = inspectorHostingController.view
         inspectorPanel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(inspectorPanel)
@@ -133,7 +153,12 @@ final class DocumentStageViewController: NSViewController {
             inspectorTopBelowToolbar,
             inspectorPanel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -AssemblageTheme.margin),
             inspectorPanel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -AssemblageTheme.margin),
-            inspectorPanel.widthAnchor.constraint(equalToConstant: AssemblageTheme.inspectorPanelWidth)
+            inspectorPanel.widthAnchor.constraint(equalToConstant: AssemblageTheme.inspectorPanelWidth),
+            // Nur die linke Kante begrenzt die Mindestbreite: Pinsel- und
+            // Farbregler brauchen rund 570 pt und dürfen deshalb weiter nach
+            // links wachsen; eine feste Gleichbreite mit den 248 pt des
+            // Inspectors würde diese Regler unbedienbar zusammendrücken.
+            settingsBar.leadingAnchor.constraint(lessThanOrEqualTo: inspectorPanel.leadingAnchor)
         ])
         toolbarController.onSettingsBarVisibilityChange = { [weak self] isVisible in
             self?.inspectorTopBelowToolbar?.isActive = !isVisible
@@ -142,15 +167,13 @@ final class DocumentStageViewController: NSViewController {
 
         // Getauscht gegenüber der ersten Fassung (auf Wunsch): die
         // Verlaufsleiste steht jetzt neben dem Ebenen-Panel unten links, der
-        // Zoom unten rechts. Beide bleiben durch die feste Fensterbreite
-        // dazwischen getrennt — keins darf je unter das andere geraten.
+        // Zoom unten rechts auf der freien Leinwand.
         let undoBar = toolbarController.buildUndoBar()
         undoBar.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(undoBar)
         NSLayoutConstraint.activate([
             undoBar.leadingAnchor.constraint(equalTo: layersPanel.trailingAnchor, constant: AssemblageTheme.margin),
             undoBar.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -AssemblageTheme.margin),
-            undoBar.widthAnchor.constraint(equalToConstant: 180),
             undoBar.heightAnchor.constraint(equalToConstant: 44)
         ])
 
@@ -158,7 +181,10 @@ final class DocumentStageViewController: NSViewController {
         zoomBar.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(zoomBar)
         NSLayoutConstraint.activate([
-            zoomBar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -AssemblageTheme.margin),
+            // Das Eigenschaften-Panel klebt selbst am rechten Fensterrand;
+            // rechts daneben gibt es keinen Platz. Links davon bleibt die
+            // Pille unten rechts auf der Leinwand, ohne Inhalt zu überdecken.
+            zoomBar.trailingAnchor.constraint(equalTo: inspectorPanel.leadingAnchor, constant: -AssemblageTheme.margin),
             zoomBar.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -AssemblageTheme.margin),
             zoomBar.heightAnchor.constraint(equalToConstant: 44)
         ])
@@ -168,43 +194,49 @@ final class DocumentStageViewController: NSViewController {
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        positionTrafficLights()
+        adoptTrafficLights()
     }
 
-    /// Verschiebt die drei echten Fenster-Knöpfe (Schliessen/Einklappen/
-    /// Vollbild) an die Stelle, an der das Mockup seine gemalten Ampel-Punkte
-    /// zeigt — oben links im Ebenen-Panel statt in der (unsichtbar
-    /// gemachten) Titelleiste. Ihr Abstand zueinander bleibt exakt Apples
-    /// eigener Wert: Nur die Position der ganzen Dreiergruppe wandert, nicht
-    /// ihr Aufbau — ein Nachbau der Ampel wäre unnötig fehleranfällig.
+    /// Hängt die drei echten Fenster-Knöpfe (Schliessen/Einklappen/Vollbild)
+    /// aus der System-Titelleiste in `trafficLightHost` um — also nach oben
+    /// links ins Ebenen-Panel, wo das Mockup seine gemalten Ampel-Punkte
+    /// zeigt.
     ///
-    /// Läuft bei jedem Layout statt nur einmal, weil AppKit die Knöpfe bei
-    /// manchen Fenstervorgängen (z. B. Live-Grössenänderung) sonst auf ihre
-    /// Standardposition zurückschnappen liesse.
-    private func positionTrafficLights() {
-        guard let window = view.window, let layersPanel,
+    /// Umhängen statt bloss verschieben: Die Knöpfe per `setFrameOrigin` an
+    /// die Wunschstelle zu schieben hielt nicht, weil AppKit die Titelleiste
+    /// nach `viewDidLayout` noch einmal selbst anordnet und die Knöpfe dabei
+    /// kommentarlos auf ihre Standardposition zurücksetzt — genau das liess
+    /// sie scheinbar zufällig mal hier, mal dort sitzen. In unserer eigenen
+    /// Ansichtshierarchie greift AppKits Titelleisten-Layout nicht mehr zu,
+    /// und Auto Layout hält die Position auch bei Grössenänderungen.
+    ///
+    /// Läuft bei jedem Layout statt nur einmal, weil AppKit sich die Knöpfe
+    /// bei manchen Fenstervorgängen (z. B. Vollbild) zurückholt; die
+    /// `superview`-Prüfung macht jeden weiteren Aufruf zum No-op.
+    private func adoptTrafficLights() {
+        guard let window = view.window,
               let close = window.standardWindowButton(.closeButton),
               let miniaturize = window.standardWindowButton(.miniaturizeButton),
-              let zoomButton = window.standardWindowButton(.zoomButton)
+              let zoomButton = window.standardWindowButton(.zoomButton),
+              close.superview !== trafficLightHost
         else { return }
 
-        let offsetToMiniaturize = CGPoint(
-            x: miniaturize.frame.minX - close.frame.minX,
-            y: miniaturize.frame.minY - close.frame.minY
-        )
-        let offsetToZoom = CGPoint(
-            x: zoomButton.frame.minX - close.frame.minX,
-            y: zoomButton.frame.minY - close.frame.minY
-        )
-
-        // 14/18 pt Innenabstand wie das Panel selbst (siehe
-        // `makeLayersPanelContent`), in Fensterkoordinaten umgerechnet.
-        let targetInPanel = CGPoint(x: 14, y: layersPanel.bounds.height - 18 - close.frame.height)
-        let target = layersPanel.convert(targetInPanel, to: nil)
-
-        close.setFrameOrigin(target)
-        miniaturize.setFrameOrigin(CGPoint(x: target.x + offsetToMiniaturize.x, y: target.y + offsetToMiniaturize.y))
-        zoomButton.setFrameOrigin(CGPoint(x: target.x + offsetToZoom.x, y: target.y + offsetToZoom.y))
+        var previous: NSView?
+        for button in [close, miniaturize, zoomButton] {
+            button.removeFromSuperview()
+            button.translatesAutoresizingMaskIntoConstraints = false
+            trafficLightHost.addSubview(button)
+            // 6 pt Lücke zwischen 14 pt breiten Knöpfen — der Abstand, den
+            // AppKit in der Titelleiste selbst verwendet.
+            let leading = previous.map {
+                button.leadingAnchor.constraint(equalTo: $0.trailingAnchor, constant: 6)
+            } ?? button.leadingAnchor.constraint(equalTo: trafficLightHost.leadingAnchor)
+            NSLayoutConstraint.activate([
+                leading,
+                button.centerYAnchor.constraint(equalTo: trafficLightHost.centerYAnchor)
+            ])
+            previous = button
+        }
     }
 
     // MARK: - Ebenen-Panel: Kopf- und Fusszeile
@@ -215,34 +247,41 @@ final class DocumentStageViewController: NSViewController {
     /// Teil von `LayerListView`, damit deren eigener, unabhängig
     /// restylter Zustand nicht mit dieser Layout-Entscheidung kollidiert.
     private func makeLayersPanelContent() -> NSView {
-        // Platzhalter für die echten Ampel-Knöpfe, die jetzt oben im Panel
-        // sitzen (siehe `positionTrafficLights()`) — sie schweben ausserhalb
-        // dieser Ansichtshierarchie in Fensterkoordinaten, brauchen hier aber
-        // trotzdem reservierten Platz, sonst überlappte die „EBENEN"-
-        // Kopfzeile sie.
-        let trafficLightSpacer = NSView()
-        trafficLightSpacer.translatesAutoresizingMaskIntoConstraints = false
-        trafficLightSpacer.heightAnchor.constraint(equalToConstant: 20).isActive = true
+        // Die echten Ampel-Knöpfe hängen zur Laufzeit hier drin (siehe
+        // `adoptTrafficLights()`); vorher ist der Host leer und hält per
+        // Höhen-Constraint den Platz frei, damit die „EBENEN"-Kopfzeile nicht
+        // nach oben rutscht.
+        trafficLightHost.translatesAutoresizingMaskIntoConstraints = false
+        trafficLightHost.heightAnchor.constraint(equalToConstant: 16).isActive = true
 
         let header = makeLayersHeader()
         let list = layersHostingController.view
         let footer = makeLayersFooter()
 
-        let stack = NSStackView(views: [trafficLightSpacer, header, list, footer])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 12
         // Mehr Luft an allen vier Seiten als im Mockup-Rohwert (14/18): Bei
         // exakt 14 pt sassen Kopf- und Fusszeilen-Symbole sichtbar zu nah an
         // der abgerundeten Panel-Kante.
-        stack.edgeInsets = NSEdgeInsets(top: 16, left: 18, bottom: 18, right: 18)
+        let insets = NSEdgeInsets(top: 18, left: 22, bottom: 22, right: 22)
 
-        for view in [trafficLightSpacer, header, footer] {
+        let stack = NSStackView(views: [trafficLightHost, header, list, footer])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 12
+        stack.edgeInsets = insets
+
+        // Auf die *Innenbreite* festnageln, nicht auf `stack.widthAnchor`:
+        // Ein vertikaler `NSStackView` mit `alignment = .leading` streckt
+        // seine Kinder nicht selbst auf die volle Breite, ein Constraint auf
+        // die volle Stack-Breite liess sie aber links und rechts genau um die
+        // `edgeInsets` überstehen — Kopf-/Fusszeile klebten dadurch bündig an
+        // der Panel-Kante, statt den vorgesehenen Rand zu haben.
+        let seitenraender = insets.left + insets.right
+        for view in [trafficLightHost, header, list, footer] {
             view.translatesAutoresizingMaskIntoConstraints = false
-            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            view.widthAnchor.constraint(
+                equalTo: stack.widthAnchor, constant: -seitenraender
+            ).isActive = true
         }
-        list.translatesAutoresizingMaskIntoConstraints = false
-        list.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
         return stack
     }
@@ -387,6 +426,41 @@ final class DocumentStageViewController: NSViewController {
             $0.blendMode = mode
         }
         _ = id
+    }
+}
+
+/// Trägt die aus der Titelleiste umgehängten Ampel-Knöpfe (siehe
+/// `DocumentStageViewController.adoptTrafficLights()`).
+///
+/// Eigene Klasse nur wegen des Tracking-Bereichs: In der Titelleiste sorgt
+/// AppKits eigener Container dafür, dass alle drei Symbole (×, −, ⤢)
+/// erscheinen, sobald die Maus über *einen* der Knöpfe fährt. Diese
+/// Gruppenlogik hängt an jenem Container und geht beim Umhängen verloren —
+/// hier wird sie nachgebildet.
+@MainActor
+final class TrafficLightHostView: NSView {
+
+    private var hoverArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { setSymbolsVisible(true) }
+    override func mouseExited(with event: NSEvent) { setSymbolsVisible(false) }
+
+    private func setSymbolsVisible(_ visible: Bool) {
+        for case let button as NSButton in subviews {
+            button.isHighlighted = visible
+        }
     }
 }
 

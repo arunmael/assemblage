@@ -54,7 +54,8 @@ enum ForegroundMasking {
     /// explizit, statt ihn mit „kaputtes Bild“ oder „Vision nicht verfügbar“
     /// zu vermischen, die beide über `throws` laufen.
     enum Result {
-        /// PNG-Alphamaskendaten in denselben Pixelmassen wie das Quellbild.
+        /// PNG-Maskenbitmap mit Deckung in der Helligkeit und denselben
+        /// Pixelmassen wie das Quellbild.
         case mask(Data)
         /// Vision hat auf diesem Bild keine Vordergrund-Instanz gefunden.
         case noSubjectFound
@@ -151,15 +152,29 @@ enum ForegroundMasking {
 
         let maskPixelBuffer: CVPixelBuffer
         do {
-            maskPixelBuffer = try observation.generateMaskedImage(
-                ofInstances: observation.allInstances,
-                from: handler,
-                croppedToInstancesExtent: false
+            // `generateMaskedImage` liefert bereits das freigestellte
+            // *Farbbild*. Würden dessen Motivfarben später als Helligkeits-
+            // maske gelesen, würden etwa Rot oder dunkle Kleidung zu
+            // teilweiser Deckung und damit zum blassen Geisterbild. Diese API
+            // liefert stattdessen die eigentliche 0…1-Silhouette.
+            maskPixelBuffer = try observation.generateScaledMaskForImage(
+                forInstances: observation.allInstances,
+                from: handler
             )
         } catch {
             throw MaskingError.visionRequestFailed(error.localizedDescription)
         }
 
+        // Der einkanalige Puffer (`OneComponent32Float`) wird hier ohne
+        // weitere Umrechnung übernommen: Core Image verteilt den einen Kanal
+        // beim Rendern selbst auf R, G und B und setzt Alpha auf 1 —
+        // nachgemessen kommt genau das heraus, was `ContentRendering`
+        // erwartet, nämlich Motiv weiss (1,0) und Hintergrund schwarz (0,0)
+        // bei durchgehend deckendem Alpha. Ein zwischengeschalteter
+        // `CIColorMatrix`, der dieselbe Verteilung von Hand machen soll,
+        // liefert dagegen ein Bild, das `createCGImage` gar nicht mehr
+        // rendern kann (`nil`) — die vermeintliche Absicherung war der
+        // Fehler, nicht die Absicherung.
         let maskCIImage = CIImage(cvPixelBuffer: maskPixelBuffer)
         guard var maskCGImage = RenderContext.shared.createCGImage(maskCIImage, from: maskCIImage.extent) else {
             throw MaskingError.visionRequestFailed("Die Maske liess sich nicht zu einem Bild zusammensetzen.")

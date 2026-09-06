@@ -127,6 +127,33 @@ final class WindowMinimumSizeTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(w.contentMinSize.height, 400)
     }
 
+    /// Die schwebende Werkzeugleiste darf nie unter das Ebenen-Panel
+    /// geraten — genau das sah aus, als würde sie in die Fenstermitte
+    /// rutschen. Sie hebt dafür die tatsächliche Mindestbreite des Fensters
+    /// über `contentMinSize` an; entscheidend ist nicht diese Zahl, sondern
+    /// dass sich die beiden auch bei einem Schrumpfversuch nicht überlappen.
+    func testToolbarRowNeverSlidesUnderTheLayersPanel() throws {
+        let w = try fenster()
+        w.setFrame(NSRect(x: 0, y: 0, width: 1280, height: 820), display: false)
+        w.contentView?.layoutSubtreeIfNeeded()
+
+        w.setFrame(NSRect(x: 0, y: 0, width: 640, height: 820), display: false)
+        w.contentView?.layoutSubtreeIfNeeded()
+        w.layoutIfNeeded()
+
+        let stage = try XCTUnwrap(
+            (w.contentViewController as? WindowDropZoneViewController)?
+                .children.first as? DocumentStageViewController
+        )
+        let ebenenPanel = try XCTUnwrap(stage.view.subviews.compactMap { $0 as? GlassPanel }.first)
+        let werkzeugzeile = try XCTUnwrap(stage.view.subviews.compactMap { $0 as? NSStackView }.first)
+
+        XCTAssertGreaterThanOrEqual(
+            werkzeugzeile.frame.minX, ebenenPanel.frame.maxX,
+            "die Werkzeugleiste überlappt bei \(w.frame.width) pt das Ebenen-Panel"
+        )
+    }
+
     /// Der entscheidende Fall, genau so aufgetreten: In den Voreinstellungen
     /// steht ein zusammengefallener Rahmen aus einer früheren Sitzung. Beim
     /// Start muss er korrigiert werden — sonst kommt die App dauerhaft leer
@@ -265,5 +292,42 @@ final class UndoCommandRoutingTests: XCTestCase {
         XCTAssertEqual(document.state.document.layers[0].transform.x, 150)
         controller.undo(nil)
         XCTAssertEqual(document.state.document.layers[0].transform.x, 100)
+    }
+
+    /// Die Timeline zählt geschlossene Nutzer-Schritte und verschiebt beim
+    /// Widerrufen genau einen Eintrag von links nach rechts. Insbesondere darf
+    /// die dabei intern registrierte Redo-Gruppe nicht als neue Bearbeitung
+    /// wieder auf `undoDepth` landen.
+    func testHistoryDepthsTrackModifyUndoAndRedoWithoutCountingUndoAsNewStep() throws {
+        let (document, controller) = try fenster(mitEbene: formebene)
+        let id = try XCTUnwrap(document.state.selectedLayerID)
+        let undoManager = try XCTUnwrap(document.undoManager)
+        undoManager.groupsByEvent = false
+
+        XCTAssertEqual(document.state.undoDepth, 0)
+        XCTAssertEqual(document.state.redoDepth, 0)
+
+        for (name, x) in [("Erste", 140.0), ("Zweite", 180.0), ("Dritte", 220.0)] {
+            undoManager.beginUndoGrouping()
+            document.modify(name) {
+                try? $0.updateLayer(id: id) { $0.transform.x = x }
+            }
+            undoManager.endUndoGrouping()
+        }
+        XCTAssertEqual(document.state.undoDepth, 3)
+        XCTAssertEqual(document.state.redoDepth, 0)
+
+        controller.undo(nil)
+        XCTAssertEqual(document.state.undoDepth, 2,
+                       "Widerrufen darf die intern geschlossene Redo-Gruppe nicht als neuen Schritt zählen")
+        XCTAssertEqual(document.state.redoDepth, 1)
+
+        controller.undo(nil)
+        XCTAssertEqual(document.state.undoDepth, 1)
+        XCTAssertEqual(document.state.redoDepth, 2)
+
+        undoManager.redo()
+        XCTAssertEqual(document.state.undoDepth, 2)
+        XCTAssertEqual(document.state.redoDepth, 1)
     }
 }

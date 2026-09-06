@@ -166,6 +166,34 @@ final class ForegroundMaskingTests: XCTestCase {
         XCTAssertEqual(decoded.height, height, "die Maske muss dieselbe Höhe wie das Quellbild haben")
     }
 
+    /// Prüft nicht nur die Masse, sondern den eigentlichen Maskenvertrag:
+    /// Eine dunkle Motivfarbe darf nicht als entsprechend geringe Deckung in
+    /// der PNG landen. Das Motiv muss weiss, der Hintergrund schwarz sein.
+    func testDarkSalientShapeProducesWhiteSilhouetteInsteadOfSubjectColors() async throws {
+        let width = 600, height = 400
+        let image = try imageWithSalientShape(width: width, height: height)
+
+        let result = try await ForegroundMasking.generateMask(from: image)
+
+        guard case .mask(let data) = result else {
+            throw XCTSkip("Vision hat auf diesem synthetischen Bild kein Motiv erkannt; die Erkennung ist modellabhängig.")
+        }
+
+        let decoded = try XCTUnwrap(ImageDecoding.decode(data), "die Maske muss sich als PNG wieder einlesen lassen")
+        let pixels = NSBitmapImageRep(cgImage: decoded)
+        let innen = try XCTUnwrap(pixels.colorAt(x: width / 2, y: height / 2))
+        let aussen = try XCTUnwrap(pixels.colorAt(x: 10, y: 10))
+
+        XCTAssertGreaterThanOrEqual(
+            innen.redComponent, 0.9,
+            "die Maske darf die Farben des Motivs nicht übernehmen — sie muss eine Silhouette sein"
+        )
+        XCTAssertLessThanOrEqual(
+            aussen.redComponent, 0.1,
+            "der Hintergrund der Silhouette muss nahezu schwarz sein"
+        )
+    }
+
     /// Derselbe Massstab-Test wie oben, aber über den `Data`-Einstieg und mit
     /// einem Bild, das grösser ist als das interne Analyse-Limit — prüft
     /// damit auch, dass das Hoch-/Herunterskalieren die Endmasse nicht

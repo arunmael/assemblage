@@ -21,6 +21,7 @@ final class AssemblageDocument: NSDocument {
             resources: DocumentResources()
         )
         zustand.owner = self
+        zustand.observeUndoManager(undoManager)
         return zustand
     }()
 
