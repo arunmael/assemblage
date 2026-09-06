@@ -1315,16 +1315,56 @@ extension CanvasView: NSTextViewDelegate {
     }
 }
 
-/// `NSClipView` ohne Begrenzung auf den Dokumentrahmen.
+/// `NSClipView`, die den Blick frei über die Fläche schieben lässt, statt ihn
+/// am Dokumentrahmen festzuhalten.
 ///
 /// AppKit hält den sichtbaren Ausschnitt von sich aus über der Leinwand fest —
-/// damit klebt man an ihr, statt frei auf der Fläche zu arbeiten. Hier darf sie
-/// beliebig weit aus dem Fenster geschoben werden; der Rückweg ist „Ins Fenster
-/// einpassen", das über `centerDocument()` wieder zentriert.
+/// damit klebt man an ihr, statt frei darauf zu arbeiten. Hier darf sie so weit
+/// geschoben werden, bis sie gerade eben aus dem Sichtfeld läuft; der Rückweg
+/// ist „Ins Fenster einpassen", das über `centerDocument()` wieder zentriert.
+///
+/// Der erlaubte Bereich bleibt dabei bewusst *endlich*. Gab
+/// `constrainBoundsRect` seinen Vorschlag unverändert zurück, fehlte AppKits
+/// Bildlauf-Synchronisierung die Bezugsgrösse, aus der sie beim
+/// Zwei-Finger-Bildlauf ihren Ruhepunkt errechnet: Das Ergebnis war ein NaN
+/// und ein sofortiger Abbruch des Programms
+/// („Invalid view geometry: x is NaN" in `_scrollToCanonicalOrigin`).
 final class CenteringClipView: NSClipView {
 
     override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
-        proposedBounds
+        guard let documentView else { return super.constrainBoundsRect(proposedBounds) }
+
+        // Bewusst *nicht* an `super` weiterreichen, wenn der Vorschlag
+        // unbrauchbar ist: `NSClipView` gibt ein NaN unverändert zurück, und
+        // genau das beendet später das Programm. Eine unbrauchbare Grösse
+        // kann nur durch die eigene, bekannte ersetzt werden.
+        let size = proposedBounds.size.isFinite ? proposedBounds.size : bounds.size
+        let content = documentView.frame
+
+        return NSRect(
+            origin: CGPoint(
+                x: constrained(proposedBounds.origin.x,
+                               between: content.minX - size.width, and: content.maxX,
+                               fallback: bounds.origin.x),
+                y: constrained(proposedBounds.origin.y,
+                               between: content.minY - size.height, and: content.maxY,
+                               fallback: bounds.origin.y)
+            ),
+            size: size
+        )
+    }
+
+    /// Hält `value` im erlaubten Bereich. Ein NaN oder Unendlich bedeutet
+    /// „nicht bewegen": Dann gilt der bisherige Wert, und wenn selbst der
+    /// unbrauchbar ist, die untere Grenze.
+    private func constrained(
+        _ value: CGFloat,
+        between minimum: CGFloat,
+        and maximum: CGFloat,
+        fallback: CGFloat
+    ) -> CGFloat {
+        let brauchbar = value.isFinite ? value : (fallback.isFinite ? fallback : minimum)
+        return min(max(brauchbar, minimum), maximum)
     }
 
     /// Holt die Leinwand mittig ins Sichtfeld zurück.
@@ -1337,6 +1377,21 @@ final class CenteringClipView: NSClipView {
         enclosingScrollView?.reflectScrolledClipView(self)
     }
 }
+
+extension CGSize {
+
+    /// Sind Breite *und* Höhe endliche Zahlen? `CGSize` selbst kennt keine
+    /// solche Prüfung, und NaN fällt durch jeden Grössenvergleich.
+    var isFinite: Bool { width.isFinite && height.isFinite }
+}
+
+extension CGRect {
+
+    /// Sind Ursprung *und* Grösse endliche Zahlen? `NSRect` selbst kennt keine
+    /// solche Prüfung, `isNull`/`isInfinite` decken NaN nicht ab.
+    var hasFiniteGeometry: Bool { origin.x.isFinite && origin.y.isFinite && size.isFinite }
+}
+
 
 // MARK: - Bilder auf die Leinwand ziehen
 
