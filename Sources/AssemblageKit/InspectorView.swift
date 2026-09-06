@@ -47,6 +47,7 @@ struct InspectorView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Ohne Auswahl: das Dokument
@@ -202,25 +203,30 @@ struct InspectorView: View {
 
     private func transformSection(_ layer: Layer) -> some View {
         Section("Position und Transformation") {
-            numberField("Position X", fallback: layer.transform.x, actionName: "Position ändern", get: {
-                $0.transform.x
-            }) {
-                $0.transform.x = $1
-            }
-            numberField("Position Y", fallback: layer.transform.y, actionName: "Position ändern", get: {
-                $0.transform.y
-            }) {
-                $0.transform.y = $1
-            }
-            numberField("Skalierung X (%)", fallback: layer.transform.scaleX * 100, actionName: "Skalierung ändern", get: {
-                $0.transform.scaleX * 100
-            }) {
-                $0.transform.scaleX = $1 / 100
-            }
-            numberField("Skalierung Y (%)", fallback: layer.transform.scaleY * 100, actionName: "Skalierung ändern", get: {
-                $0.transform.scaleY * 100
-            }) {
-                $0.transform.scaleY = $1 / 100
+            LazyVGrid(
+                columns: [GridItem(.flexible()), GridItem(.flexible())],
+                spacing: 8
+            ) {
+                numberField("Position X", fallback: layer.transform.x, actionName: "Position ändern", get: {
+                    $0.transform.x
+                }) {
+                    $0.transform.x = $1
+                }
+                numberField("Position Y", fallback: layer.transform.y, actionName: "Position ändern", get: {
+                    $0.transform.y
+                }) {
+                    $0.transform.y = $1
+                }
+                numberField("Skalierung X (%)", fallback: layer.transform.scaleX * 100, actionName: "Skalierung ändern", get: {
+                    $0.transform.scaleX * 100
+                }) {
+                    $0.transform.scaleX = $1 / 100
+                }
+                numberField("Skalierung Y (%)", fallback: layer.transform.scaleY * 100, actionName: "Skalierung ändern", get: {
+                    $0.transform.scaleY * 100
+                }) {
+                    $0.transform.scaleY = $1 / 100
+                }
             }
             numberField("Drehung (°)", fallback: layer.transform.rotationDegrees, actionName: "Drehung ändern", get: {
                 $0.transform.rotationDegrees
@@ -416,6 +422,7 @@ struct InspectorView: View {
                     .monospacedDigit()
             }
             Slider(value: value, in: range, onEditingChanged: editingChanged(actionName: actionName))
+                .tint(AssemblageTheme.SwiftUIColor.accent)
                 .controlSize(.large)
                 .frame(minHeight: 36)
         }
@@ -424,7 +431,13 @@ struct InspectorView: View {
 
     private func textField(_ title: String, value: Binding<String>, actionName: String) -> some View {
         TextField(title, text: value, onEditingChanged: editingChanged(actionName: actionName))
-            .textFieldStyle(.roundedBorder)
+            .textFieldStyle(.plain)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(AssemblageTheme.SwiftUIColor.inputBackground)
+            )
             .controlSize(.large)
     }
 
@@ -445,10 +458,16 @@ struct InspectorView: View {
         return LabeledContent(title) {
             TextField("", text: binding, onEditingChanged: editingChanged(actionName: actionName))
                 .labelsHidden()
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
                 .multilineTextAlignment(.trailing)
                 .monospacedDigit()
                 .frame(minWidth: 72)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(AssemblageTheme.SwiftUIColor.inputBackground)
+                )
         }
     }
 

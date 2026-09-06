@@ -61,6 +61,7 @@ final class CanvasViewController: NSViewController {
 
     @objc private func zoomDidChange() {
         canvasView.zoomScale = scrollView.magnification
+        onZoomPercentChange?(zoomPercent)
     }
 
     override func viewDidLoad() {
@@ -183,22 +184,33 @@ final class CanvasViewController: NSViewController {
         // Öffnen nicht formatfüllend aufgeblasen werden.
         scrollView.magnification = min(max(scale, scrollView.minMagnification), 1)
         scrollView.contentView.scrollToVisible(canvasView.bounds)
+        zoomDidChange()
     }
 
     @objc func zoomToActualSize() {
         scrollView.magnification = 1
+        zoomDidChange()
     }
 
     @objc func zoomIn() {
         scrollView.magnification = min(scrollView.magnification * 1.5, scrollView.maxMagnification)
+        zoomDidChange()
     }
 
     @objc func zoomOut() {
         scrollView.magnification = max(scrollView.magnification / 1.5, scrollView.minMagnification)
+        zoomDidChange()
     }
 
     var canZoomIn: Bool { scrollView.magnification < scrollView.maxMagnification }
     var canZoomOut: Bool { scrollView.magnification > scrollView.minMagnification }
+
+    /// Aktuelle Zoomstufe, gerundet auf ganze Prozent — für die schwebende
+    /// Zoom-Pille (Liquid-Glass-Mockup). Aktualisiert sich auch bei Pinch-
+    /// und Bildlauf-Zoom, weil sie über `zoomDidChange()` läuft statt nur
+    /// bei den eigenen Menübefehlen gesetzt zu werden.
+    var zoomPercent: Int { Int((scrollView.magnification * 100).rounded()) }
+    var onZoomPercentChange: ((Int) -> Void)?
 }
 
 

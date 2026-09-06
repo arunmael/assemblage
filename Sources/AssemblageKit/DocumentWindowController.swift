@@ -12,19 +12,28 @@ import AssemblageModel
 @MainActor
 final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
 
-    private var splitViewController: NSSplitViewController?
+    private var stageViewController: DocumentStageViewController?
     private var canvasViewController: CanvasViewController?
     private var toolbarController: ToolbarController?
 
     convenience init() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        // Bewusst ohne `.fullSizeContentView`: Der dreigeteilte Inhalt soll
-        // weder unter dem Dokumentnamen noch unter der Werkzeugleiste liegen.
+        // Randloser Look (Liquid-Glass-Mockup „Assemblage UI"): Der Inhalt
+        // reicht bis unter die Titelleiste, die selbst unsichtbar bleibt.
+        // Die drei echten Ampel-Knöpfe bleiben an ihrem normalen Platz
+        // erhalten — sie sind dafür zuständig, dass Schliessen/Einklappen/
+        // Vollbild ganz normal funktionieren, ein Nachbau davon wäre unnötig
+        // riskant. Das Ebenen-Panel (siehe `DocumentStageViewController`)
+        // beginnt bewusst mit demselben 24-pt-Rand wie im Mockup und lässt
+        // die Ampel damit knapp darüber frei, statt sie nachzumalen.
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
 
         // Mindestgrösse **vor** dem Wiederherstellen des gesicherten Rahmens
         // setzen, sonst zieht AppKit sie nicht heran.
@@ -73,69 +82,28 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
               let state = (document as? AssemblageDocument)?.state
         else { return }
 
-        let layers = NSHostingController(rootView: LayerListView(state: state))
         let canvas = CanvasViewController(state: state)
-        let inspector = NSHostingController(rootView: InspectorView(state: state))
         canvasViewController = canvas
 
-        let layersItem = NSSplitViewItem(sidebarWithViewController: layers)
-        layersItem.minimumThickness = 200
-        layersItem.maximumThickness = 360
-        // Die Ebenenliste ist der Kern der App — sie soll beim Verkleinern
-        // des Fensters nicht als Erstes verschwinden.
-        layersItem.canCollapse = true
-
-        // Die Werkzeugleiste sitzt zwischen Ebenenliste und Leinwand — dort,
-        // wo bei Pixelmator die Werkzeuge liegen, und in Griffweite des
-        // Bildes, auf das sie wirken.
-        //
-        // Als eigene Spalte im Split View und nicht als schwebende Ansicht auf
-        // der Leinwand: Eine schwebende Leiste verdeckte beim Aufklappen genau
-        // den Bildrand, an dem man gerade arbeitet.
-        let toolSidebar = ToolSidebarViewController()
-        let toolItem = NSSplitViewItem(viewController: toolSidebar)
-        toolItem.canCollapse = false
-        toolItem.holdingPriority = .defaultHigh + 1
-        toolItem.minimumThickness = ToolSidebarView.collapsedWidth
-        toolItem.maximumThickness = ToolSidebarView.collapsedWidth
-
-        let canvasItem = NSSplitViewItem(viewController: canvas)
-        canvasItem.minimumThickness = 400
-
-        let inspectorItem = NSSplitViewItem(inspectorWithViewController: inspector)
-        inspectorItem.minimumThickness = 260
-        inspectorItem.maximumThickness = 380
-
-        let splitViewController = NSSplitViewController()
-        splitViewController.addSplitViewItem(layersItem)
-        splitViewController.addSplitViewItem(toolItem)
-        splitViewController.addSplitViewItem(canvasItem)
-        splitViewController.addSplitViewItem(inspectorItem)
-        self.splitViewController = splitViewController
-
-        // Die Ablagefläche umschliesst den Split View, statt ihn zu
-        // ersetzen — er behält seine eigene Spalten- und Grössenverwaltung
-        // vollständig.
-        let dropZone = WindowDropZoneViewController(embedding: splitViewController)
-        dropZone.onDrop = { [weak self] pasteboard in
-            self?.handleWindowDrop(from: pasteboard)
-        }
-        contentViewController = dropZone
-        window?.toolbarStyle = .unified
-
-        let toolbarController = ToolbarController(
+        let stage = DocumentStageViewController(
             state: state,
             canvasViewController: canvas,
             commandTarget: self
         )
-        toolbarController.sidebar = toolSidebar.sidebar
-        canvas.selectToolFromKeyboard = { [weak toolbarController] tool in
-            toolbarController?.select(tool) ?? false
+        self.stageViewController = stage
+        self.toolbarController = stage.toolbarController
+
+        canvas.selectToolFromKeyboard = { [weak stage] tool in
+            stage?.toolbarController.select(tool) ?? false
         }
-        self.toolbarController = toolbarController
-        if let window {
-            toolbarController.install(on: window)
+
+        // Die Ablagefläche umschliesst die Bühne, statt sie zu ersetzen — sie
+        // behält ihre eigene Layout-Verwaltung vollständig.
+        let dropZone = WindowDropZoneViewController(embedding: stage)
+        dropZone.onDrop = { [weak self] pasteboard in
+            self?.handleWindowDrop(from: pasteboard)
         }
+        contentViewController = dropZone
     }
 
     /// Wird beim Laden aus einer Feder aufgerufen; bei uns entsteht das

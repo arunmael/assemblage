@@ -21,7 +21,9 @@ struct LayerListView: View {
             }
             .onMove(perform: editing.move)
         }
-        .listStyle(.sidebar)
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.clear)
         .onDeleteCommand {
             guard let id = state.selectedLayerID else { return }
             editing.delete(id)
@@ -48,6 +50,10 @@ private struct LayerRow: View {
     @State private var draftName = ""
     @FocusState private var isNameFocused: Bool
 
+    private var isSelected: Bool {
+        state.selectedLayerID == layer.id
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             HStack(spacing: 10) {
@@ -55,9 +61,15 @@ private struct LayerRow: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     name
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(
+                            isSelected
+                                ? AssemblageTheme.SwiftUIColor.accentDark
+                                : AssemblageTheme.SwiftUIColor.textPrimary
+                        )
                     Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(AssemblageTheme.SwiftUIColor.textSecondary)
                         .lineLimit(1)
                 }
             }
@@ -89,6 +101,12 @@ private struct LayerRow: View {
                 editing.delete(layer.id)
             }
         }
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
+        .listRowBackground(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(isSelected ? AssemblageTheme.SwiftUIColor.accentSoft : Color.clear)
+        )
     }
 
     @ViewBuilder
@@ -152,11 +170,11 @@ private struct LayerThumbnail: View {
     private let side: CGFloat = 30
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 4)
+        RoundedRectangle(cornerRadius: 9)
             .fill(.quaternary)
             .frame(width: side, height: side)
             .overlay { content }
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .clipShape(RoundedRectangle(cornerRadius: 9))
     }
 
     @ViewBuilder
