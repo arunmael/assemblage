@@ -19,32 +19,30 @@ final class DocumentWindowTests: XCTestCase {
         return try XCTUnwrap(document.windowControllers.first as? DocumentWindowController)
     }
 
-    /// Der Split View sitzt seit der fensterweiten Ablagefläche (aus
-    /// Anpassungen.md) nicht mehr direkt als `contentViewController`,
-    /// sondern als dessen einziges Kind.
-    private func splitViewController(in controller: DocumentWindowController) throws -> NSSplitViewController {
+    /// Die Bühne (`DocumentStageViewController`) sitzt seit der
+    /// fensterweiten Ablagefläche (aus Anpassungen.md) nicht mehr direkt als
+    /// `contentViewController`, sondern als dessen einziges Kind. Seit dem
+    /// Liquid-Glass-Umbau ersetzt sie den früheren `NSSplitViewController` —
+    /// Ebenen-, Werkzeug- und Eigenschaften-Bereich schweben jetzt als Glas-
+    /// Panels über dem Canvas statt in eigenen Split-View-Spalten zu stehen.
+    private func stage(in controller: DocumentWindowController) throws -> DocumentStageViewController {
         let huelle = try XCTUnwrap(
             controller.contentViewController as? WindowDropZoneViewController,
             "das Fenster muss einen Inhalt haben — nicht nur eine leere Fläche"
         )
-        return try XCTUnwrap(huelle.children.first as? NSSplitViewController)
+        return try XCTUnwrap(huelle.children.first as? DocumentStageViewController)
     }
 
     func testWindowShowsThePanesFromThePlan() throws {
         let controller = try makeWindowController(for: AssemblageDocument())
 
-        let split = try splitViewController(in: controller)
+        let bühne = try stage(in: controller)
 
-        // Ebenen, Werkzeuge, Canvas, Eigenschaften. Über die Typen und nicht
-        // über die Anzahl: Eine Zahl sagt nicht, *welche* Spalte fehlt, und
-        // bricht bei jedem Zusatz, ohne einen Fehler anzuzeigen.
-        let typen = split.splitViewItems.map { ObjectIdentifier(type(of: $0.viewController)) }
-        for erwartet in [ToolSidebarViewController.self, CanvasViewController.self] {
-            XCTAssertTrue(typen.contains(ObjectIdentifier(erwartet)),
-                          "\(erwartet) fehlt im Fenster")
-        }
-        XCTAssertEqual(split.splitViewItems.filter { $0.viewController is NSHostingController<LayerListView> }.count, 1)
-        XCTAssertEqual(split.splitViewItems.filter { $0.viewController is NSHostingController<InspectorView> }.count, 1)
+        // Ebenen, Werkzeuge, Canvas, Eigenschaften — jetzt als Kind-
+        // Controller/-Views der Bühne statt als Split-View-Spalten.
+        XCTAssertNotNil(bühne.canvasViewController)
+        XCTAssertTrue(bühne.children.contains { $0 === bühne.layersHostingController })
+        XCTAssertTrue(bühne.children.contains { $0 === bühne.inspectorHostingController })
     }
 
     /// Der eigentliche Regressionstest: Der Inhalt muss den Zustand *dieses*
@@ -61,10 +59,7 @@ final class DocumentWindowTests: XCTestCase {
         }
 
         let controller = try makeWindowController(for: document)
-        let split = try splitViewController(in: controller)
-        let canvas = try XCTUnwrap(
-            split.splitViewItems.compactMap { $0.viewController as? CanvasViewController }.first
-        )
+        let canvas = try stage(in: controller).canvasViewController
         _ = canvas.view  // Ansicht laden
 
         let scrollView = try XCTUnwrap(canvas.view as? NSScrollView)
@@ -80,20 +75,14 @@ final class DocumentWindowTests: XCTestCase {
     /// Fenster bekommen — sonst startet die App ins Nichts.
     func testUntitledDocumentAlsoGetsContent() throws {
         let controller = try makeWindowController(for: AssemblageDocument())
-        let split = try splitViewController(in: controller)
-        let canvas = try XCTUnwrap(
-            split.splitViewItems.compactMap { $0.viewController as? CanvasViewController }.first
-        )
+        let canvas = try stage(in: controller).canvasViewController
 
         XCTAssertNotNil(canvas.view as? NSScrollView)
     }
 
     func testZoomMenuDisablesCommandsAtMagnificationLimits() throws {
         let controller = try makeWindowController(for: AssemblageDocument())
-        let split = try splitViewController(in: controller)
-        let canvas = try XCTUnwrap(
-            split.splitViewItems.compactMap { $0.viewController as? CanvasViewController }.first
-        )
+        let canvas = try stage(in: controller).canvasViewController
 
         for _ in 0..<20 { canvas.zoomIn() }
         XCTAssertFalse(controller.validateMenuItem(NSMenuItem(
