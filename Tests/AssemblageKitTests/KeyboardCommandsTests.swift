@@ -80,6 +80,21 @@ final class KeyboardCommandsTests: XCTestCase {
         XCTAssertNil(befehl(""))
     }
 
+    // MARK: - Löschen
+
+    /// Sowohl die Löschen-Taste (Rückschritt) als auch die Entf-Taste auf
+    /// Tastaturen mit Ziffernblock sollen die Ebene löschen.
+    func testDeleteKeysTriggerDeletion() {
+        XCTAssertEqual(befehl(String(UnicodeScalar(NSDeleteCharacter)!)), .deleteSelectedLayer)
+        XCTAssertEqual(befehl(String(UnicodeScalar(NSDeleteFunctionKey)!)), .deleteSelectedLayer)
+    }
+
+    /// Beim Umbenennen einer Ebene tippt man Zeichen, die dabei nicht das
+    /// Dokument löschen dürfen.
+    func testNoDeleteWhileTypingText() {
+        XCTAssertNil(befehl(String(UnicodeScalar(NSDeleteCharacter)!), tippt: true))
+    }
+
     // MARK: - Ausführen
 
     private func dokumentMitEbene() -> (AssemblageDocument, UUID, UndoManager) {
@@ -118,6 +133,18 @@ final class KeyboardCommandsTests: XCTestCase {
         document.endInteraction(actionName: "Ebene bewegen")
         undoManager.undo()
         XCTAssertEqual(document.state.document.layer(withID: id)?.transform.x, 100)
+    }
+
+    func testDeleteCommandRemovesTheSelectedLayerAndIsUndoable() {
+        let (document, id, undoManager) = dokumentMitEbene()
+
+        KeyboardCommands.perform(.deleteSelectedLayer, in: document.state)
+
+        XCTAssertNil(document.state.document.layer(withID: id))
+        XCTAssertEqual(undoManager.undoActionName, "Ebene löschen")
+
+        undoManager.undo()
+        XCTAssertNotNil(document.state.document.layer(withID: id))
     }
 
     func testOpacityCommandIsClamped() {

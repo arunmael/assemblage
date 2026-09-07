@@ -7,6 +7,7 @@ enum KeyboardCommand: Equatable {
     /// Versatz in Leinwandpunkten.
     case nudge(dx: Double, dy: Double)
     case setOpacity(Double)
+    case deleteSelectedLayer
 }
 
 @MainActor
@@ -36,6 +37,12 @@ enum KeyboardCommands {
         }
         guard let zeichen = characters.lowercased().first else { return nil }
 
+        // Die Löschen-Taste (Rückschritt) und die Entf-Taste löschen die
+        // ausgewählte Ebene — der Reflex aus jeder Datei- oder Ebenenliste.
+        if isDeleteKey(zeichen) {
+            return .deleteSelectedLayer
+        }
+
         if let richtung = arrowDirection(zeichen) {
             let schritt = modifiers.contains(.shift) ? coarseNudgeStep : nudgeStep
             return .nudge(dx: richtung.dx * schritt, dy: richtung.dy * schritt)
@@ -62,6 +69,14 @@ enum KeyboardCommands {
             return .setOpacity(ziffer == 0 ? 1 : Double(ziffer) / 10)
         }
         return nil
+    }
+
+    /// Erkennt sowohl die Löschen-Taste (Rückschritt, links neben der
+    /// Eingabetaste — sendet `NSDeleteCharacter`) als auch die Entf-Taste auf
+    /// Tastaturen mit eigenem Ziffernblock (`NSDeleteFunctionKey`).
+    private static func isDeleteKey(_ zeichen: Character) -> Bool {
+        guard let wert = zeichen.unicodeScalars.first?.value else { return false }
+        return wert == UInt32(NSDeleteCharacter) || wert == UInt32(NSDeleteFunctionKey)
     }
 
     private static func arrowDirection(_ zeichen: Character) -> (dx: Double, dy: Double)? {
@@ -99,6 +114,9 @@ enum KeyboardCommands {
             document.modify("Deckkraft ändern") {
                 try? $0.updateLayer(id: id) { $0.opacity = wert.clamped(to: 0...1) }
             }
+
+        case .deleteSelectedLayer:
+            LayerListEditing(state: state).delete(id)
         }
     }
 }
