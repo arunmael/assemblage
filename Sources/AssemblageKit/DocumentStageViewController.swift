@@ -281,56 +281,23 @@ final class DocumentStageViewController: NSViewController {
         return stack
     }
 
+    /// Kein Hinzufügen-Menü mehr in der Kopfzeile: „Text einfügen“,
+    /// „Rechteck“ und „Ellipse“ gab es bereits redundant über die
+    /// Werkzeugleiste (Text-Button, Formen-Menü) und die ⌘K-Suche — das
+    /// Plus hier bot keinen eigenen Mehrwert.
     private func makeLayersHeader() -> NSView {
         let title = NSTextField(labelWithString: "EBENEN")
         title.font = .systemFont(ofSize: 11, weight: .bold)
         title.textColor = AssemblageTheme.textSecondary
 
-        let addMenu = NSPopUpButton(frame: .zero, pullsDown: true)
-        addMenu.bezelStyle = .texturedRounded
-        addMenu.isBordered = false
-        addMenu.translatesAutoresizingMaskIntoConstraints = false
-        addMenu.widthAnchor.constraint(equalToConstant: 24).isActive = true
-        addMenu.heightAnchor.constraint(equalToConstant: 24).isActive = true
-
-        let title0 = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        title0.image = MockupIcons.image(.layersAdd, pointSize: 14, tintColor: AssemblageTheme.textPrimary)
-        addMenu.menu?.addItem(title0)
-
-        let text = NSMenuItem(title: "Text einfügen", action: #selector(DocumentWindowController.insertTextLayer(_:)), keyEquivalent: "")
-        let rectangle = NSMenuItem(title: "Rechteck", action: #selector(DocumentWindowController.insertRectangleLayer(_:)), keyEquivalent: "")
-        let ellipse = NSMenuItem(title: "Ellipse", action: #selector(DocumentWindowController.insertEllipseLayer(_:)), keyEquivalent: "")
-        for item in [text, rectangle, ellipse] {
-            addMenu.menu?.addItem(item)
-        }
-        // `target` lässt sich erst setzen, sobald das Panel tatsächlich in
-        // einem Fenster hängt (`self.view` wäre an dieser Stelle noch
-        // innerhalb des eigenen `loadView()` — ein Zugriff darauf würde
-        // `loadView()` erneut anstossen). Wird in `viewDidAppear()`
-        // nachgezogen.
-        addMenuItemsNeedingWindow.append(contentsOf: [text, rectangle, ellipse])
-
-        let row = NSStackView(views: [title, NSView(), addMenu])
+        let row = NSStackView(views: [title])
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.distribution = .equalSpacing
         return row
     }
 
-    /// Menüeinträge, deren `target` erst gesetzt werden kann, wenn das
-    /// Panel tatsächlich in einem Fenster hängt (`commandTarget` ist der
-    /// `DocumentWindowController`, an den die Aktionen über die
-    /// Responder-Kette ohnehin weitergereicht würden — hier aber explizit
-    /// gesetzt, weil ein `NSPopUpButton`-Menü nicht selbst in der
-    /// Responder-Kette hängt).
-    private var addMenuItemsNeedingWindow: [NSMenuItem] = []
-
     override func viewDidAppear() {
         super.viewDidAppear()
-        let target = view.window?.windowController
-        for item in addMenuItemsNeedingWindow {
-            item.target = target
-        }
         observeWindowUpdatesForTrafficLights()
     }
 

@@ -481,7 +481,7 @@ enum MockupIcons {
         case .undo:
             return paths("M15 6l-6 6 6 6")
         case .timeline:
-            return paths("M6 9v6", "M10 6v12", "M14 8v8", "M18 10v4")
+            return timelinePaths
         case .redo:
             return paths("M9 6l6 6-6 6")
         }
@@ -489,6 +489,16 @@ enum MockupIcons {
 
     private static var mirrorPaths: [CGPath] {
         paths("M12 3v18", "M6 8l-3 4 3 4", "M18 8l3 4-3 4")
+    }
+
+    /// Ein Zeitstrahl-Pfeil: ein senkrechter Startstrich, ein Schaft und eine
+    /// Pfeilspitze – Symbol für die Undo/Redo-Historie, in etwa `|-->`.
+    private static var timelinePaths: [CGPath] {
+        paths(
+            "M4 8v8",
+            "M4 12h14",
+            "M14 7l6 5-6 5"
+        )
     }
 
     private static func paths(_ data: String...) -> [CGPath] {
