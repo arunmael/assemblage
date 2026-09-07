@@ -111,6 +111,10 @@ enum ImageInShapeCommand {
                 guard case .image(var content) = layer.content else { return }
                 content.cropRect = platzierung.cropRect
                 content.clipShape = formInhalt.kind
+                content.clipShapeCornerRadius = formInhalt.cornerRadius
+                content.clipShapePointCount = formInhalt.pointCount
+                content.clipShapePath = formInhalt.path
+                content.clipShapePathSize = formInhalt.size
                 // Der sichtbare Rand der Form wird zum Rahmen des Bildes —
                 // sonst ginge er beim Aufbrauchen der Formebene verloren.
                 if formInhalt.strokeWidth > 0 {
@@ -142,6 +146,10 @@ enum ImageInShapeCommand {
             try? document.updateLayer(id: imageLayerID) { layer in
                 guard case .image(var content) = layer.content else { return }
                 content.clipShape = nil
+                content.clipShapeCornerRadius = 0
+                content.clipShapePointCount = 5
+                content.clipShapePath = nil
+                content.clipShapePathSize = nil
                 layer.content = .image(content)
             }
         }

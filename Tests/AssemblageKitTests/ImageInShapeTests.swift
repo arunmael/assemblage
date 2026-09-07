@@ -24,6 +24,36 @@ final class ImageInShapeTests: XCTestCase {
         XCTAssertNotEqual(image, oldImage)
     }
 
+    func testEinsetzenUebernimmtDieVollstaendigeFormgeometrie() throws {
+        let path = VectorPath(subpath: PathSubpath(
+            anchors: [
+                PathAnchor(corner: Point(x: 10, y: 15)),
+                PathAnchor(corner: Point(x: 180, y: 35)),
+                PathAnchor(corner: Point(x: 60, y: 120))
+            ],
+            isClosed: true
+        ))
+        let shape = ShapeLayerContent(
+            kind: .freehand,
+            size: Size(width: 200, height: 140),
+            cornerRadius: 23,
+            pointCount: 9,
+            path: path
+        )
+        let (document, imageID, shapeID, _, _) = makeDocument(shape: shape)
+
+        ImageInShapeCommand.apply(
+            imageLayerID: imageID, shapeLayerID: shapeID, fit: .cover, to: document.state
+        ) { _ in self.imageSize }
+
+        let content = imageContent(try XCTUnwrap(document.state.document.layer(withID: imageID)))
+        XCTAssertEqual(content.clipShape, shape.kind)
+        XCTAssertEqual(content.clipShapeCornerRadius, shape.cornerRadius)
+        XCTAssertEqual(content.clipShapePointCount, shape.pointCount)
+        XCTAssertEqual(content.clipShapePath, shape.path)
+        XCTAssertEqual(content.clipShapePathSize, shape.size)
+    }
+
     func testCoverSchneidetZuUndSkaliertGleichmaessig() throws {
         let (document, imageID, shapeID, _, _) = makeDocument()
         ImageInShapeCommand.apply(
@@ -75,7 +105,16 @@ final class ImageInShapeTests: XCTestCase {
     }
 
     func testZuschnittAufhebenIstWiderrufbar() throws {
-        let (document, imageID, _, _, _) = makeDocument(clipShape: .heart)
+        let path = VectorPath(subpath: PathSubpath(
+            anchors: [PathAnchor(corner: .zero), PathAnchor(corner: Point(x: 30, y: 40))]
+        ))
+        let (document, imageID, _, _, _) = makeDocument(
+            clipShape: .freehand,
+            clipShapeCornerRadius: 12,
+            clipShapePointCount: 8,
+            clipShapePath: path,
+            clipShapePathSize: Size(width: 30, height: 40)
+        )
         let undoManager = UndoManager()
         undoManager.groupsByEvent = false
         document.undoManager = undoManager
@@ -83,10 +122,18 @@ final class ImageInShapeTests: XCTestCase {
         undoManager.beginUndoGrouping()
         ImageInShapeCommand.removeClipShape(from: imageID, in: document.state)
         undoManager.endUndoGrouping()
-        XCTAssertNil(imageContent(try XCTUnwrap(document.state.document.layer(withID: imageID))).clipShape)
+        let removed = imageContent(try XCTUnwrap(document.state.document.layer(withID: imageID)))
+        XCTAssertNil(removed.clipShape)
+        XCTAssertEqual(removed.clipShapeCornerRadius, 0)
+        XCTAssertEqual(removed.clipShapePointCount, 5)
+        XCTAssertNil(removed.clipShapePath)
+        XCTAssertNil(removed.clipShapePathSize)
 
         undoManager.undo()
-        XCTAssertEqual(imageContent(try XCTUnwrap(document.state.document.layer(withID: imageID))).clipShape, .heart)
+        let restored = imageContent(try XCTUnwrap(document.state.document.layer(withID: imageID)))
+        XCTAssertEqual(restored.clipShape, .freehand)
+        XCTAssertEqual(restored.clipShapePath, path)
+        XCTAssertEqual(restored.clipShapePathSize, Size(width: 30, height: 40))
     }
 
     func testCanApplyLehntGleicheIDUndFalscheTypenAb() {
@@ -97,18 +144,30 @@ final class ImageInShapeTests: XCTestCase {
     }
 
     private func makeDocument(
-        clipShape: ShapeKind? = nil
+        clipShape: ShapeKind? = nil,
+        clipShapeCornerRadius: Double = 0,
+        clipShapePointCount: Int = 5,
+        clipShapePath: VectorPath? = nil,
+        clipShapePathSize: Size? = nil,
+        shape: ShapeLayerContent? = nil
     ) -> (AssemblageDocument, UUID, UUID, Layer, Layer) {
         let document = AssemblageDocument()
         let image = Layer(
             name: "Bild",
             transform: Transform2D(x: 80, y: 70, scaleX: 0.5, scaleY: 0.5),
-            content: .image(ImageLayerContent(originalFileReference: "originals/test.png", clipShape: clipShape))
+            content: .image(ImageLayerContent(
+                originalFileReference: "originals/test.png",
+                clipShape: clipShape,
+                clipShapeCornerRadius: clipShapeCornerRadius,
+                clipShapePointCount: clipShapePointCount,
+                clipShapePath: clipShapePath,
+                clipShapePathSize: clipShapePathSize
+            ))
         )
         let shape = Layer(
             name: "Form",
             transform: Transform2D(x: 420, y: 310, scaleX: 1.5, scaleY: 0.75, rotationDegrees: 12),
-            content: .shape(ShapeLayerContent(
+            content: .shape(shape ?? ShapeLayerContent(
                 kind: .ellipse,
                 size: Size(width: 300, height: 300),
                 strokeColorHex: "#123456",

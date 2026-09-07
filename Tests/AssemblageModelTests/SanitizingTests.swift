@@ -16,6 +16,10 @@ final class SanitizingTests: XCTestCase {
     /// sie gültige Werte, verstellt sie bei jedem Sichern die Arbeit des
     /// Nutzers — ein weit schlimmerer Fehler als der, den sie behebt.
     func testAValidDocumentPassesThroughUnchanged() {
+        let clipPath = VectorPath(subpath: PathSubpath(
+            anchors: [PathAnchor(corner: .zero), PathAnchor(corner: Point(x: 30, y: 40))],
+            isClosed: true
+        ))
         let document = Document(
             canvas: CanvasSize(width: 1920, height: 1080),
             layers: [
@@ -37,7 +41,14 @@ final class SanitizingTests: XCTestCase {
                     content: .image(ImageLayerContent(
                         originalFileReference: "originals/a.png",
                         cropRect: Rect(x: 10, y: 20, width: 30, height: 40),
-                        adjustments: ImageAdjustments(brightness: 0.2, contrast: -0.3, warmth: 0.1)))
+                        adjustments: ImageAdjustments(brightness: 0.2, contrast: -0.3, warmth: 0.1),
+                        clipShape: .freehand,
+                        clipShapeCornerRadius: 7,
+                        clipShapePointCount: 8,
+                        clipShapePath: clipPath,
+                        clipShapePathSize: Size(width: 30, height: 40),
+                        borderWidth: 2.5,
+                        borderColorHex: "#654321"))
                 ),
                 Layer(name: "Titel", content: .text(TextLayerContent(
                     string: "Hallo", fontName: "Georgia", fontSize: 31.5, colorHex: "#00FF00"))),
@@ -111,6 +122,30 @@ final class SanitizingTests: XCTestCase {
             originalFileReference: "originals/a.png",
             adjustments: ImageAdjustments(brightness: .nan, contrast: .infinity, blurRadius: -.infinity))
         XCTAssertEqual(inhalt.sanitized().adjustments, .neutral)
+    }
+
+    func testImageClipAndBorderNumbersAreSanitizedWithoutLosingGeometry() {
+        let path = VectorPath(subpath: PathSubpath(
+            anchors: [PathAnchor(corner: .zero), PathAnchor(corner: Point(x: 10, y: 20))]
+        ))
+        let inhalt = ImageLayerContent(
+            originalFileReference: "originals/a.png",
+            clipShape: .freehand,
+            clipShapeCornerRadius: .nan,
+            clipShapePointCount: 7,
+            clipShapePath: path,
+            clipShapePathSize: Size(width: .infinity, height: 20),
+            borderWidth: .infinity,
+            borderColorHex: "#ABCDEF"
+        ).sanitized()
+
+        XCTAssertEqual(inhalt.clipShape, .freehand)
+        XCTAssertEqual(inhalt.clipShapeCornerRadius, 0)
+        XCTAssertEqual(inhalt.clipShapePointCount, 7)
+        XCTAssertEqual(inhalt.clipShapePath, path)
+        XCTAssertEqual(inhalt.clipShapePathSize, Size(width: 1, height: 20))
+        XCTAssertEqual(inhalt.borderWidth, 0)
+        XCTAssertEqual(inhalt.borderColorHex, "#ABCDEF")
     }
 
     // MARK: - Der eigentliche Zweck

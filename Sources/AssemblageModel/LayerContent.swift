@@ -17,6 +17,10 @@ public struct ImageLayerContent: Codable, Equatable, Sendable {
     /// (erst freistellen, dann in eine Form setzen). Beide laufen deshalb
     /// beim Zeichnen durch dieselbe Stelle zusammen.
     public var clipShape: ShapeKind?
+    public var clipShapeCornerRadius: Double
+    public var clipShapePointCount: Int
+    public var clipShapePath: VectorPath?
+    public var clipShapePathSize: Size?
 
     /// Rahmenstärke in Punkten; 0 = kein Rahmen. Der Rahmen folgt
     /// `clipShape`, sonst dem Bildrechteck.
@@ -28,6 +32,10 @@ public struct ImageLayerContent: Codable, Equatable, Sendable {
         cropRect: Rect? = nil,
         adjustments: ImageAdjustments = .neutral,
         clipShape: ShapeKind? = nil,
+        clipShapeCornerRadius: Double = 0,
+        clipShapePointCount: Int = 5,
+        clipShapePath: VectorPath? = nil,
+        clipShapePathSize: Size? = nil,
         borderWidth: Double = 0,
         borderColorHex: String = "#FFFFFF"
     ) {
@@ -35,6 +43,10 @@ public struct ImageLayerContent: Codable, Equatable, Sendable {
         self.cropRect = cropRect
         self.adjustments = adjustments
         self.clipShape = clipShape
+        self.clipShapeCornerRadius = clipShapeCornerRadius
+        self.clipShapePointCount = clipShapePointCount
+        self.clipShapePath = clipShapePath
+        self.clipShapePathSize = clipShapePathSize
         self.borderWidth = borderWidth
         self.borderColorHex = borderColorHex
     }

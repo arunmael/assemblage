@@ -164,7 +164,14 @@ extension ImageLayerContent: Sanitizable {
         ImageLayerContent(
             originalFileReference: originalFileReference,
             cropRect: cropRect?.sanitized(),
-            adjustments: adjustments.sanitized()
+            adjustments: adjustments.sanitized(),
+            clipShape: clipShape,
+            clipShapeCornerRadius: clipShapeCornerRadius.finite(or: 0),
+            clipShapePointCount: clipShapePointCount,
+            clipShapePath: clipShapePath,
+            clipShapePathSize: clipShapePathSize?.sanitized(),
+            borderWidth: borderWidth.finite(or: 0),
+            borderColorHex: borderColorHex
         )
     }
 }

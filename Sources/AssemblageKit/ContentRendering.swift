@@ -149,7 +149,13 @@ enum ShapePath {
             return CGPath(rect: rect, transform: nil)
         }
         return cgPath(
-            for: ShapeLayerContent(kind: clipShape, size: Size(rect.size)),
+            for: ShapeLayerContent(
+                kind: clipShape,
+                size: content.clipShapePathSize ?? Size(rect.size),
+                cornerRadius: content.clipShapeCornerRadius,
+                pointCount: content.clipShapePointCount,
+                path: content.clipShapePath
+            ),
             in: rect
         )
     }
@@ -341,12 +347,14 @@ enum MaskRendering {
         kontext.setFillColor(gray: 1, alpha: 1)
 
         // Derselbe Pfadbau wie für eine echte Formebene — `ShapePath` ist die
-        // eine Stelle, an der ein Umriss entsteht. Eckenradius und Zackenzahl
-        // sind hier die Vorgabewerte; eine Bildebene führt sie nicht mit.
+        // eine Stelle, an der ein Umriss entsteht.
         let flaeche = CGRect(x: 0, y: 0, width: breite, height: hoehe)
         let vorlage = ShapeLayerContent(
             kind: form,
-            size: Size(width: Double(breite), height: Double(hoehe))
+            size: inhalt.clipShapePathSize ?? Size(flaeche.size),
+            cornerRadius: inhalt.clipShapeCornerRadius,
+            pointCount: inhalt.clipShapePointCount,
+            path: inhalt.clipShapePath
         )
         guard let pfad = ShapePath.cgPath(for: vorlage, in: flaeche) else { return nil }
         kontext.addPath(pfad)

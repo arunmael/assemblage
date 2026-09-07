@@ -61,6 +61,11 @@ final class DecodingToleranceTests: XCTestCase {
         }
         XCTAssertEqual(content.adjustments, .neutral)
         XCTAssertNil(content.cropRect)
+        XCTAssertNil(content.clipShape)
+        XCTAssertEqual(content.clipShapeCornerRadius, 0)
+        XCTAssertEqual(content.clipShapePointCount, 5)
+        XCTAssertNil(content.clipShapePath)
+        XCTAssertNil(content.clipShapePathSize)
     }
 
     func testTextAndShapeContentUseDefaults() throws {
@@ -166,6 +171,10 @@ final class DecodingToleranceTests: XCTestCase {
 
     /// Die Toleranz darf nicht dazu führen, dass gesetzte Werte verlorengehen.
     func testFullyPopulatedDocumentStillRoundTrips() throws {
+        let clipPath = VectorPath(subpath: PathSubpath(
+            anchors: [PathAnchor(corner: .zero), PathAnchor(corner: Point(x: 20, y: 30))],
+            isClosed: true
+        ))
         let original = Document(
             canvas: CanvasSize(width: 640, height: 480),
             layers: [
@@ -185,7 +194,14 @@ final class DecodingToleranceTests: XCTestCase {
                         ImageLayerContent(
                             originalFileReference: "originals/a.png",
                             cropRect: Rect(x: 1, y: 2, width: 3, height: 4),
-                            adjustments: ImageAdjustments(brightness: 0.5, warmth: -0.2)
+                            adjustments: ImageAdjustments(brightness: 0.5, warmth: -0.2),
+                            clipShape: .freehand,
+                            clipShapeCornerRadius: 12,
+                            clipShapePointCount: 8,
+                            clipShapePath: clipPath,
+                            clipShapePathSize: Size(width: 20, height: 30),
+                            borderWidth: 3.5,
+                            borderColorHex: "#123456"
                         )
                     )
                 )
