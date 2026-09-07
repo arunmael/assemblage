@@ -1455,6 +1455,8 @@ extension CanvasView: NSTextViewDelegate {
 /// („Invalid view geometry: x is NaN" in `_scrollToCanonicalOrigin`).
 final class CenteringClipView: NSClipView {
 
+    static let freeScrollMargin: CGFloat = 3_000
+
     override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
         guard let documentView else { return super.constrainBoundsRect(proposedBounds) }
 
@@ -1468,10 +1470,12 @@ final class CenteringClipView: NSClipView {
         return NSRect(
             origin: CGPoint(
                 x: constrained(proposedBounds.origin.x,
-                               between: content.minX - size.width, and: content.maxX,
+                               between: content.minX - size.width - Self.freeScrollMargin,
+                               and: content.maxX + Self.freeScrollMargin,
                                fallback: bounds.origin.x),
                 y: constrained(proposedBounds.origin.y,
-                               between: content.minY - size.height, and: content.maxY,
+                               between: content.minY - size.height - Self.freeScrollMargin,
+                               and: content.maxY + Self.freeScrollMargin,
                                fallback: bounds.origin.y)
             ),
             size: size

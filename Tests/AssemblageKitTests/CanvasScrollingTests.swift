@@ -64,16 +64,29 @@ final class CanvasScrollingTests: XCTestCase {
                        "über den rechten Dokumentrand hinaus muss erlaubt sein")
     }
 
-    /// Aber nicht so weit, dass die Leinwand ganz verloren geht.
-    func testScrollingStopsOnceTheCanvasHasLeftTheViewport() {
+    /// Aber nicht endlos: Der Vertrag bleibt endlich (sonst der alte NaN-
+    /// Absturz beim Zwei-Finger-Bildlauf), erlaubt aber grosszügig freien
+    /// Bildlauf jenseits des Leinwandrands — eine Sichtfeldbreite Rand
+    /// (wie zuvor) blockierte spürbar, sobald die Leinwand gerade aus dem
+    /// Bild lief. `CenteringClipView.freeScrollMargin` ist der zusätzliche,
+    /// von der Sichtfeldgrösse unabhängige Puffer.
+    func testScrollingStopsFarBeyondTheViewportButNotAtItsEdge() {
         let clip = clipView()
+        let margin = CenteringClipView.freeScrollMargin
 
-        // Sichtfeld 200 breit, Leinwand 0…400: weiter als -200 bzw. +400
-        // wäre die Leinwand vollständig aus dem Bild.
-        XCTAssertEqual(clip.constrainBoundsRect(proposal(-5000, 0, in: clip)).origin.x, -200)
-        XCTAssertEqual(clip.constrainBoundsRect(proposal(5000, 0, in: clip)).origin.x, 400)
-        XCTAssertEqual(clip.constrainBoundsRect(proposal(0, -5000, in: clip)).origin.y, -150)
-        XCTAssertEqual(clip.constrainBoundsRect(proposal(0, 5000, in: clip)).origin.y, 300)
+        // Sichtfeld 200×150, Leinwand 0…400×0…300: der erlaubte Bereich
+        // reicht eine Sichtfeldbreite/-höhe plus den grosszügigen Puffer
+        // über den Leinwandrand hinaus — deutlich mehr als die alte, knappe
+        // „gerade eben aus dem Bild"-Grenze.
+        XCTAssertEqual(clip.constrainBoundsRect(proposal(-1e6, 0, in: clip)).origin.x, -200 - margin)
+        XCTAssertEqual(clip.constrainBoundsRect(proposal(1e6, 0, in: clip)).origin.x, 400 + margin)
+        XCTAssertEqual(clip.constrainBoundsRect(proposal(0, -1e6, in: clip)).origin.y, -150 - margin)
+        XCTAssertEqual(clip.constrainBoundsRect(proposal(0, 1e6, in: clip)).origin.y, 300 + margin)
+
+        // Und der alte, enge Anschlag ist jetzt klar innerhalb des erlaubten
+        // Bereichs erreichbar, statt bereits die Grenze zu sein.
+        let knappAusserhalb = clip.constrainBoundsRect(proposal(-200, 0, in: clip))
+        XCTAssertEqual(knappAusserhalb.origin.x, -200)
     }
 
     /// Eine kleinere Leinwand als das Fenster darf sich ebenfalls verschieben
@@ -81,11 +94,12 @@ final class CanvasScrollingTests: XCTestCase {
     func testSmallCanvasInLargeViewportStillScrollsWithinFiniteBounds() {
         let clip = clipView(canvas: CGSize(width: 100, height: 80),
                             viewport: CGSize(width: 600, height: 400))
+        let margin = CenteringClipView.freeScrollMargin
 
-        let rect = clip.constrainBoundsRect(proposal(-5000, -5000, in: clip))
+        let rect = clip.constrainBoundsRect(proposal(-1e6, -1e6, in: clip))
         XCTAssertTrue(rect.hasFiniteGeometry)
-        XCTAssertEqual(rect.origin.x, -600)
-        XCTAssertEqual(rect.origin.y, -400)
+        XCTAssertEqual(rect.origin.x, -600 - margin)
+        XCTAssertEqual(rect.origin.y, -400 - margin)
     }
 
     /// „Ins Fenster einpassen" holt die Leinwand mittig zurück.
