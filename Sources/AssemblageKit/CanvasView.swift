@@ -316,7 +316,10 @@ final class CanvasView: NSView {
         document = newDocument
 
         if canvasChanged {
-            frame = CGRect(origin: .zero, size: document.canvas.cgSize)
+            // Der Ursprung gehört zur Lage auf dem Brett und darf bei einer
+            // Grössenänderung nicht auf dessen Nullpunkt zurückspringen.
+            setFrameSize(document.canvas.cgSize)
+            (superview as? CanvasBoardView)?.layoutCanvas()
             sizeCanvasLayers()
         }
 

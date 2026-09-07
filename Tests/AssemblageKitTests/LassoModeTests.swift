@@ -173,7 +173,7 @@ final class LassoModeTests: XCTestCase {
         let controller = CanvasViewController(state: document.state)
         controller.loadViewIfNeeded()
         let scroll = try XCTUnwrap(controller.view as? NSScrollView)
-        let controllerCanvas = try XCTUnwrap(scroll.documentView as? CanvasView)
+        let controllerCanvas = try XCTUnwrap((scroll.documentView as? CanvasBoardView)?.canvasView)
         fenster.contentView = scroll
         controllerCanvas.frame = NSRect(x: 0, y: 0, width: 200, height: 200)
         canvas = controllerCanvas

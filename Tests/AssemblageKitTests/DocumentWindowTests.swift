@@ -63,7 +63,10 @@ final class DocumentWindowTests: XCTestCase {
         _ = canvas.view  // Ansicht laden
 
         let scrollView = try XCTUnwrap(canvas.view as? NSScrollView)
-        let canvasView = try XCTUnwrap(scrollView.documentView)
+        // Die Leinwand liegt auf einem viel grösseren Brett (freier Bildlauf),
+        // deshalb ist sie nicht selbst das `documentView`.
+        let board = try XCTUnwrap(scrollView.documentView as? CanvasBoardView)
+        let canvasView = board.canvasView
 
         XCTAssertEqual(canvasView.frame.size, CGSize(width: 640, height: 480),
                        "die Leinwand muss die Grösse dieses Dokuments haben")

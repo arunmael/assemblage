@@ -8,6 +8,7 @@ final class CanvasViewController: NSViewController {
 
     private let state: DocumentState
     private var canvasView: CanvasView!
+    private var boardView: CanvasBoardView!
     private let scrollView = NSScrollView()
     private let clipView = CenteringClipView()
     private var observations: Set<AnyCancellable> = []
@@ -29,9 +30,10 @@ final class CanvasViewController: NSViewController {
 
     override func loadView() {
         canvasView = CanvasView(document: state.document, images: state.images)
+        boardView = CanvasBoardView(canvasView: canvasView)
 
         scrollView.contentView = clipView
-        scrollView.documentView = canvasView
+        scrollView.documentView = boardView
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
