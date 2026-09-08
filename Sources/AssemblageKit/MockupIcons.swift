@@ -375,6 +375,7 @@ enum MockupIcon: CaseIterable {
     case select, crop, brush, lasso, paintDrop, pen, warp, removeSubject, insertText, insertShape, collageGrid
     case search, share, layersAdd, eyeVisible, duplicate, delete, chevronDown
     case mirrorHorizontal, mirrorVertical, zoomOut, zoomIn, undo, timeline, redo
+    case lockClosed, lockOpen
 }
 
 enum MockupIcons {
@@ -452,6 +453,12 @@ enum MockupIcons {
             ]
         case .share:
             return paths("M12 3v12", "M8 7l4-4 4 4", "M5 13v6a2 2 0 002 2h10a2 2 0 002-2v-6")
+        case .lockClosed:
+            // Bügel geschlossen: beide Enden sitzen auf dem Gehäuse.
+            return paths("M5 11h14v10H5z", "M8 11V8c0-2.2 1.8-4 4-4s4 1.8 4 4v3")
+        case .lockOpen:
+            // Offener Bügel — das rechte Ende endet frei über dem Gehäuse.
+            return paths("M5 11h14v10H5z", "M8 11V8c0-2.2 1.8-4 4-4s4 1.8 4 4")
         case .layersAdd:
             return paths("M12 5v14M5 12h14")
         case .eyeVisible:

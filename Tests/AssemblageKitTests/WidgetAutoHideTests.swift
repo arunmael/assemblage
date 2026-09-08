@@ -59,4 +59,26 @@ final class WidgetAutoHideTests: XCTestCase {
         let panel = NSRect(x: 24, y: 24, width: 248, height: 752)
         XCTAssertTrue(kanten(NSPoint(x: 600, y: 400), widgets: [(.left, panel)]).isEmpty)
     }
+
+    /// Der Griff ist das sichtbare Ziel — wer in seine Nähe kommt, weckt seine
+    /// Kante, auch ohne den schmalen Randstreifen selbst zu treffen.
+    func testDieNaeheZumGriffWecktSeineKante() {
+        let griff = NSRect(x: 3, y: 372, width: 5, height: 56)
+        let wach = WidgetAutoHideController.revealedEdges(
+            mouse: NSPoint(x: 40, y: 400), in: flaeche, flipped: false,
+            handles: [(.left, griff)]
+        )
+        XCTAssertEqual(wach, [.left], "40 pt vom linken Rand liegt im Fangbereich des Griffs")
+    }
+
+    /// Weit weg vom Griff bleibt es ruhig — sonst käme das Panel quer über die
+    /// halbe Leinwand zurück.
+    func testWeitWegVomGriffBleibtAllesVersteckt() {
+        let griff = NSRect(x: 3, y: 372, width: 5, height: 56)
+        let wach = WidgetAutoHideController.revealedEdges(
+            mouse: NSPoint(x: 500, y: 400), in: flaeche, flipped: false,
+            handles: [(.left, griff)]
+        )
+        XCTAssertTrue(wach.isEmpty)
+    }
 }

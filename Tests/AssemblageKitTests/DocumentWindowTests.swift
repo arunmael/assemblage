@@ -87,14 +87,16 @@ final class DocumentWindowTests: XCTestCase {
         let controller = try makeWindowController(for: AssemblageDocument())
         let canvas = try stage(in: controller).canvasViewController
 
-        for _ in 0..<20 { canvas.zoomIn() }
+        // Genug Schritte, um die Obergrenze auch in 20-Prozent-Schritten
+        // wirklich zu erreichen (siehe `steppedMagnification`).
+        for _ in 0..<120 { canvas.zoomIn() }
         XCTAssertFalse(controller.validateMenuItem(NSMenuItem(
             title: "Einzoomen",
             action: #selector(DocumentWindowController.zoomIn(_:)),
             keyEquivalent: ""
         )))
 
-        for _ in 0..<40 { canvas.zoomOut() }
+        for _ in 0..<200 { canvas.zoomOut() }
         XCTAssertFalse(controller.validateMenuItem(NSMenuItem(
             title: "Auszoomen",
             action: #selector(DocumentWindowController.zoomOut(_:)),

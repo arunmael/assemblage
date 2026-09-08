@@ -121,11 +121,12 @@ final class ToolbarTests: XCTestCase {
             commandTarget: DocumentWindowController()
         )
 
-        for _ in 0..<20 { canvas.zoomIn() }
+        // Genug Schritte für die Obergrenze in 20-Prozent-Schritten.
+        for _ in 0..<120 { canvas.zoomIn() }
         XCTAssertFalse(toolbar.validateMenuItem(NSMenuItem(
             title: "Vergrössern", action: NSSelectorFromString("zoomIn:"), keyEquivalent: ""
         )))
-        for _ in 0..<40 { canvas.zoomOut() }
+        for _ in 0..<200 { canvas.zoomOut() }
         XCTAssertFalse(toolbar.validateMenuItem(NSMenuItem(
             title: "Verkleinern", action: NSSelectorFromString("zoomOut:"), keyEquivalent: ""
         )))

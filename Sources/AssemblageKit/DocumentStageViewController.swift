@@ -473,17 +473,20 @@ final class DocumentStageViewController: NSViewController {
             .init(
                 view: layersPanel.view, edge: .left, constraint: layersPanel.leading,
                 shownConstant: rand,
-                hiddenConstant: -(AssemblageTheme.layersPanelWidth + rand)
+                hiddenConstant: -(AssemblageTheme.layersPanelWidth + rand),
+                pinnable: true
             ),
             .init(
                 view: toolbarRow.view, edge: .top, constraint: toolbarRow.top,
                 shownConstant: rand,
-                hiddenConstant: -(ToolbarController.toolbarRowHeight + rand)
+                hiddenConstant: -(ToolbarController.toolbarRowHeight + rand),
+                pinnable: true
             ),
             .init(
                 view: inspectorPanel.view, edge: .right, constraint: inspectorPanel.trailing,
                 shownConstant: -rand,
-                hiddenConstant: AssemblageTheme.inspectorPanelWidth + rand
+                hiddenConstant: AssemblageTheme.inspectorPanelWidth + rand,
+                pinnable: true
             ),
             .init(
                 view: ruler.view, edge: .top, constraint: ruler.top,

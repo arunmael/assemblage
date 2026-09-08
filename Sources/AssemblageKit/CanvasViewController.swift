@@ -265,17 +265,49 @@ final class CanvasViewController: NSViewController {
     }
 
     @objc func zoomIn() {
-        scrollView.magnification = min(scrollView.magnification * 1.5, scrollView.maxMagnification)
+        scrollView.magnification = Self.steppedMagnification(from: scrollView.magnification, up: true)
         zoomDidChange()
     }
 
     @objc func zoomOut() {
-        scrollView.magnification = max(scrollView.magnification / 1.5, scrollView.minMagnification)
+        scrollView.magnification = Self.steppedMagnification(from: scrollView.magnification, up: false)
         zoomDidChange()
     }
 
-    var canZoomIn: Bool { scrollView.magnification < scrollView.maxMagnification }
-    var canZoomOut: Bool { scrollView.magnification > scrollView.minMagnification }
+    /// Die nächste Zoomstufe in 20-Prozent-Schritten (Nutzer-Auftrag): 60, 80,
+    /// 100, 120 … statt der früheren Multiplikation mit 1.5.
+    ///
+    /// Von der aktuellen Stufe aus auf- bzw. abgerundet, damit ein per Pinch
+    /// erreichter krummer Wert (82 %) beim nächsten Druck auf einer runden
+    /// Stufe landet (100 % bzw. 80 %) und nicht krumm bleibt.
+    ///
+    /// Nach unten ist bei einer vollen Stufe Schluss statt bei den 5 % des
+    /// Bildlaufs — eine halbe Stufe wäre genau der krumme Wert, den die
+    /// Rundung sonst vermeidet.
+    nonisolated static func steppedMagnification(
+        from current: CGFloat, up: Bool, step: CGFloat = 0.2, maximum: CGFloat = 16
+    ) -> CGFloat {
+        // Toleranz, weil `magnification` nach Pinch und Fenstergrösse selten
+        // exakt auf einer Stufe liegt: Ohne sie führte ein Druck bei 99.9997 %
+        // nach 100 % statt nach 120 %.
+        let stufen = current / step
+        let ziel = up ? (floor(stufen + 0.001) + 1) : (ceil(stufen - 0.001) - 1)
+        return min(max(ziel * step, step), maximum)
+    }
+
+    // Beide fragen die Stufenrechnung selbst, statt die Grenzen des Bildlaufs
+    // zu vergleichen: Seit dem Zoom in festen 20-Prozent-Schritten ist die
+    // unterste erreichbare Stufe 20 % und nicht mehr die technische
+    // Mindestvergrösserung. Der Befehl ist damit genau dann verfügbar, wenn
+    // ein Druck darauf auch etwas ändert.
+    var canZoomIn: Bool {
+        Self.steppedMagnification(from: scrollView.magnification, up: true)
+            > scrollView.magnification + 0.0001
+    }
+    var canZoomOut: Bool {
+        Self.steppedMagnification(from: scrollView.magnification, up: false)
+            < scrollView.magnification - 0.0001
+    }
 
     /// Aktuelle Zoomstufe, gerundet auf ganze Prozent — für die schwebende
     /// Zoom-Pille (Liquid-Glass-Mockup). Aktualisiert sich auch bei Pinch-
@@ -483,4 +515,39 @@ extension CanvasViewController {
 @MainActor
 final class CanvasScrollView: NSScrollView {
     override var mouseDownCanMoveWindow: Bool { false }
+
+    /// Zeigerposition beim letzten Schritt des Ziehens mit der rechten Taste.
+    private var panPosition: NSPoint?
+
+    /// Mit der rechten Maustaste lässt sich die Leinwand frei verschieben
+    /// (Nutzer-Auftrag) — dieselbe Geste, die Bildbearbeitungen sonst auf die
+    /// Leertaste legen. Der linke Knopf bleibt dabei unangetastet, er gehört
+    /// weiterhin den Werkzeugen.
+    override func rightMouseDown(with event: NSEvent) {
+        panPosition = event.locationInWindow
+        NSCursor.closedHand.push()
+    }
+
+    override func rightMouseDragged(with event: NSEvent) {
+        guard let vorher = panPosition else { return }
+        let jetzt = event.locationInWindow
+
+        // Der Inhalt folgt dem Zeiger, der sichtbare Ausschnitt wandert also
+        // entgegengesetzt.
+        var ursprung = contentView.bounds.origin
+        ursprung.x -= jetzt.x - vorher.x
+        ursprung.y -= (jetzt.y - vorher.y) * (contentView.isFlipped ? -1 : 1)
+
+        contentView.setBoundsOrigin(contentView.constrainBoundsRect(
+            NSRect(origin: ursprung, size: contentView.bounds.size)
+        ).origin)
+        reflectScrolledClipView(contentView)
+        panPosition = jetzt
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        guard panPosition != nil else { return }
+        panPosition = nil
+        NSCursor.pop()
+    }
 }
