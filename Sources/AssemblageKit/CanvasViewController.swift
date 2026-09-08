@@ -9,7 +9,7 @@ final class CanvasViewController: NSViewController {
     private let state: DocumentState
     private var canvasView: CanvasView!
     private var boardView: CanvasBoardView!
-    private let scrollView = NSScrollView()
+    private let scrollView = CanvasScrollView()
     private let clipView = CenteringClipView()
     private var observations: Set<AnyCancellable> = []
     /// Beim ersten Anzeigen einmal auf Fenstergrösse einpassen — danach nicht
@@ -19,6 +19,7 @@ final class CanvasViewController: NSViewController {
     var selectToolFromKeyboard: ((CanvasTool) -> Bool)?
     private var freehandColorHex = "#1D3557"
     private var freehandStrokeWidth = 6.0
+    private var themeSubscription: AnyCancellable?
 
     init(state: DocumentState) {
         self.state = state
@@ -44,7 +45,6 @@ final class CanvasViewController: NSViewController {
         scrollView.verticalScrollElasticity = .allowed
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = true
-        scrollView.backgroundColor = .underPageBackgroundColor
 
         // Zoomen übernimmt AppKit — damit funktioniert die Pinch-Geste
         // automatisch, auch über Sidecar Direct Touch (Plan 2.2).
@@ -67,11 +67,46 @@ final class CanvasViewController: NSViewController {
         )
 
         view = scrollView
+
+        applyStageBackground()
+        // Auf den nächsten Durchlauf verschieben: `sink` feuert, *bevor*
+        // `@Published` den neuen Wert geschrieben hat — siehe `viewDidLoad`
+        // weiter unten für dieselbe Einschränkung bei `state.$document`.
+        themeSubscription = ThemeManager.shared.$current
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.applyStageBackground() } }
+    }
+
+    /// Der Fensterhintergrund hinter dem Canvas-Rahmen. In „Soulless"
+    /// unverändert das System-Semantikfarbe (passt sich automatisch Hell/
+    /// Dunkel an). In „Beautifull" liegt dahinter der Schreibtisch/andere
+    /// Programme (`DocumentWindowController.applyWindowOpacity` macht das
+    /// Fenster dafür nicht-deckend) — ein ganz leichter heller Schleier
+    /// (`stageMilkTint`) sorgt dafür, dass die Fensterkante trotzdem als
+    /// solche erkennbar bleibt, statt wie ein reines Loch zu wirken
+    /// (Nutzer-Rückmeldung: „etwas milchiger, damit man erkennt, wo das
+    /// Fenster aufhört").
+    private func applyStageBackground() {
+        if AssemblageTheme.aqua != nil {
+            // Malt selbst nichts mehr: Den milchigen Schleier legt
+            // `DocumentStageViewController.applyStageTint()` auf die
+            // Container-Ansicht dahinter. Der Weg über den Bildlauf selbst
+            // (`backgroundColor` oder eigene Ebene) trug nicht — AppKit
+            // verwaltet dessen Ebene für den Bildlauf mit und räumte die
+            // Farbe wieder weg.
+            scrollView.drawsBackground = false
+        } else {
+            scrollView.drawsBackground = true
+            scrollView.backgroundColor = .underPageBackgroundColor
+        }
     }
 
     @objc private func zoomDidChange() {
         canvasView.zoomScale = scrollView.magnification
         onZoomPercentChange?(zoomPercent)
+        // Feuert auch beim blossen Verschieben (es hängt an
+        // `boundsDidChangeNotification` des Bildlaufs) — genau das brauchen die
+        // Lineale, deren Nullpunkt sich dabei mitbewegt.
+        onCanvasGeometryChange?()
     }
 
     override func viewDidLoad() {
@@ -80,7 +115,12 @@ final class CanvasViewController: NSViewController {
             .sink { [weak self] document in
                 // Auf den nächsten Durchlauf verschieben: `sink` feuert,
                 // *bevor* `@Published` den neuen Wert geschrieben hat.
-                DispatchQueue.main.async { self?.canvasView.update(to: document) }
+                DispatchQueue.main.async {
+                    self?.canvasView.update(to: document)
+                    // Eine geänderte Leinwandgrösse verschiebt den Nullpunkt
+                    // der Lineale, ohne dass ein Bildlauf stattfindet.
+                    self?.onCanvasGeometryChange?()
+                }
             }
             .store(in: &observations)
 
@@ -243,6 +283,20 @@ final class CanvasViewController: NSViewController {
     /// bei den eigenen Menübefehlen gesetzt zu werden.
     var zoomPercent: Int { Int((scrollView.magnification * 100).rounded()) }
     var onZoomPercentChange: ((Int) -> Void)?
+
+    // MARK: - Lage der Leinwand (Grundlage der Lineale)
+
+    /// Die Leinwand, wie sie gerade im Fenster liegt — inklusive Zoom und
+    /// Bildlauf, weil `convert` die ganze Ansichtskette mitrechnet. Die
+    /// Lineale leiten daraus Nullpunkt und Massstab ab.
+    var canvasRectInWindow: NSRect { canvasView.convert(canvasView.bounds, to: nil) }
+
+    /// Grösse der Leinwand in Dokumentpixeln (`CanvasView` setzt ihren Rahmen
+    /// genau darauf, siehe `update(to:)`).
+    var canvasDocumentSize: NSSize { canvasView.bounds.size }
+
+    /// Läuft nach jeder Änderung von Zoom, Bildlauf oder Leinwandgrösse.
+    var onCanvasGeometryChange: (() -> Void)?
 }
 
 
@@ -419,4 +473,14 @@ extension CanvasViewController {
         guard let id = canvasView.comparisonLayerID, id != state.selectedLayerID else { return }
         canvasView.comparisonLayerID = nil
     }
+}
+
+/// Nur wegen `mouseDownCanMoveWindow` eine eigene Klasse: Das Fenster ist
+/// `isMovableByWindowBackground`, und ohne diesen Widerspruch verschöbe ein
+/// Zug auf der (im Erscheinungsbild „Beautifull" durchsichtigen) Fläche das
+/// ganze Fenster, statt die Ebene zu bewegen — siehe ausführliche Begründung
+/// in `CanvasBoardView`.
+@MainActor
+final class CanvasScrollView: NSScrollView {
+    override var mouseDownCanMoveWindow: Bool { false }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 /// Baut das Menü von Hand auf.
 ///
@@ -347,7 +348,99 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Ins Fenster einpassen", action: #selector(DocumentWindowController.zoomToFit(_:)), keyEquivalent: "9")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Vollbild", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        menu.addItem(.separator())
+        menu.addItem(themeMenuItem())
+        menu.addItem(backgroundOpacityMenuItem())
+        menu.addItem(.separator())
+
+        // Der Haken kommt aus `menuNeedsUpdate(_:)`, deshalb braucht dieses
+        // Menü — anders als die reinen Befehlsmenüs — einen Delegaten.
+        menu.delegate = self
+        let autoHide = NSMenuItem(
+            title: "Widgets automatisch ausblenden",
+            action: #selector(toggleAutoHideWidgets(_:)),
+            keyEquivalent: ""
+        )
+        autoHide.target = self
+        menu.addItem(autoHide)
         return menu
+    }
+
+    @objc @MainActor private func toggleAutoHideWidgets(_ sender: NSMenuItem) {
+        WidgetAutoHideSettings.shared.setEnabled(!WidgetAutoHideSettings.shared.isEnabled)
+    }
+
+    /// Untermenü für die Hintergrund-Durchsicht (Nutzer-Auftrag: einstellbar
+    /// statt des bisher fest verdrahteten Werts, siehe
+    /// `BackgroundOpacityManager`). Ein Regler oben — live, ohne das Menü
+    /// erst schliessen zu müssen — und darunter dieselben Raststufen als
+    /// Klick-Alternative, falls jemand lieber eine feste Stufe trifft als
+    /// zu ziehen.
+    private func backgroundOpacityMenuItem() -> NSMenuItem {
+        let submenu = NSMenu(title: "Hintergrund-Durchsicht")
+        submenu.delegate = self
+
+        // `BackgroundOpacitySliderMenuItemView` liest `BackgroundOpacityManager`
+        // (MainActor-isoliert) in ihrem Init — der Menüaufbau selbst läuft
+        // nicht explizit MainActor-isoliert, aber garantiert schon auf dem
+        // Haupt-Thread (`applicationDidFinishLaunching`), darum ungefährlich.
+        let sliderItem = NSMenuItem()
+        sliderItem.view = MainActor.assumeIsolated {
+            BackgroundOpacitySliderMenuItemView(
+                target: self, action: #selector(backgroundOpacitySliderChanged(_:))
+            )
+        }
+        submenu.addItem(sliderItem)
+        submenu.addItem(.separator())
+
+        for preset in BackgroundOpacityManager.presets {
+            let percent = Int((preset * 100).rounded())
+            let item = NSMenuItem(
+                title: "\(percent) %",
+                action: #selector(selectBackgroundOpacityPreset(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = preset
+            submenu.addItem(item)
+        }
+
+        let entry = NSMenuItem(title: "Hintergrund-Durchsicht", action: nil, keyEquivalent: "")
+        entry.submenu = submenu
+        return entry
+    }
+
+    @objc @MainActor private func backgroundOpacitySliderChanged(_ sender: NSSlider) {
+        BackgroundOpacityManager.shared.setOpacity(CGFloat(sender.doubleValue))
+    }
+
+    @objc @MainActor private func selectBackgroundOpacityPreset(_ sender: NSMenuItem) {
+        guard let value = sender.representedObject as? CGFloat else { return }
+        BackgroundOpacityManager.shared.setOpacity(value)
+    }
+
+    /// Untermenü zum Umschalten zwischen den beiden Erscheinungsbildern
+    /// („Soulless" = bisheriges „Liquid Glass"-Aussehen, „Beautifull" = neue
+    /// Y2K-/Aqua-Optik, siehe `Theme.swift`). Der Haken kommt nicht aus einer
+    /// laufenden Beobachtung, sondern aus `menuNeedsUpdate(_:)` — das genügt,
+    /// weil AppKit ein Menü ohnehin erst kurz vor dem Aufklappen aktualisiert.
+    private func themeMenuItem() -> NSMenuItem {
+        let submenu = NSMenu(title: "Erscheinungsbild")
+        submenu.delegate = self
+        for theme in AppTheme.allCases {
+            let item = NSMenuItem(title: theme.displayName, action: #selector(selectTheme(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = theme
+            submenu.addItem(item)
+        }
+        let entry = NSMenuItem(title: "Erscheinungsbild", action: nil, keyEquivalent: "")
+        entry.submenu = submenu
+        return entry
+    }
+
+    @objc @MainActor private func selectTheme(_ sender: NSMenuItem) {
+        guard let theme = sender.representedObject as? AppTheme else { return }
+        ThemeManager.shared.setTheme(theme)
     }
 
     private func windowMenu() -> NSMenu {
@@ -386,6 +479,78 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             NSAlert(error: error).runModal()
         }
     }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    /// Setzt den Haken vor dem aktiven Erscheinungsbild — läuft laut AppKit
+    /// kurz bevor das Menü sichtbar wird, ein eigenes Abonnement auf
+    /// `ThemeManager` erübrigt sich dadurch für diesen einen Anzeigezweck.
+    @MainActor
+    public func menuNeedsUpdate(_ menu: NSMenu) {
+        for item in menu.items {
+            if item.action == #selector(toggleAutoHideWidgets(_:)) {
+                item.state = WidgetAutoHideSettings.shared.isEnabled ? .on : .off
+            } else if let theme = item.representedObject as? AppTheme {
+                item.state = theme == ThemeManager.shared.current ? .on : .off
+            } else if let preset = item.representedObject as? CGFloat {
+                item.state = abs(preset - BackgroundOpacityManager.shared.opacity) < 0.001 ? .on : .off
+            }
+        }
+    }
+}
+
+/// Regler + Prozentanzeige für `AppDelegate.backgroundOpacityMenuItem()`.
+/// Eigene View statt eines nackten `NSSlider` als Menü-Item-View: Ohne die
+/// mitlaufende Beschriftung liesse sich der aktuelle Wert beim Ziehen nicht
+/// ablesen. Abonniert `BackgroundOpacityManager` direkt statt über eine
+/// Ziel/Aktion-Rückmeldung der Regler-Aktion — so bleibt die Anzeige auch
+/// dann korrekt, wenn der Wert anderswo geändert wird (z. B. über eine der
+/// Raststufen direkt darunter im selben Menü).
+@MainActor
+private final class BackgroundOpacitySliderMenuItemView: NSView {
+    private let slider: NSSlider
+    private let label = NSTextField(labelWithString: "")
+    private var subscription: AnyCancellable?
+
+    init(target: AnyObject, action: Selector) {
+        slider = NSSlider(
+            value: Double(BackgroundOpacityManager.shared.opacity), minValue: 0, maxValue: 1,
+            target: target, action: action
+        )
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 28))
+
+        slider.isContinuous = true
+        slider.translatesAutoresizingMaskIntoConstraints = false
+
+        label.alignment = .right
+        label.textColor = .secondaryLabelColor
+        label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = NSStackView(views: [slider, label])
+        stack.orientation = .horizontal
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+            label.widthAnchor.constraint(equalToConstant: 36),
+            slider.widthAnchor.constraint(equalToConstant: 150)
+        ])
+
+        subscription = BackgroundOpacityManager.shared.$opacity
+            .sink { [weak self] value in
+                guard let self else { return }
+                self.slider.doubleValue = Double(value)
+                self.label.stringValue = "\(Int((value * 100).rounded())) %"
+            }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) wird nicht unterstützt") }
 }
 
 enum DiagnosticsFolderError: LocalizedError {

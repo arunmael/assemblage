@@ -42,7 +42,9 @@ final class ToolbarRowLayoutTests: XCTestCase {
 
         let höhen = panels.map(\.frame.height)
         for höhe in höhen {
-            XCTAssertEqual(höhe, 50, accuracy: 0.5, "Panelhöhen: \(höhen)")
+            // 58 pt: gibt der aktive, 30 % grössere Werkzeugknopf vor (siehe
+            // `ToolbarController.activeToolScale`).
+            XCTAssertEqual(höhe, 58, accuracy: 0.5, "Panelhöhen: \(höhen)")
         }
     }
 

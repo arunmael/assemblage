@@ -16,7 +16,7 @@ final class DocumentCodableTests: XCTestCase {
     }
 
     func testDocumentWithAllLayerTypesRoundTrips() throws {
-        var document = Document(preset: .a4Poster)
+        var document = Document(preset: .a4Portrait)
 
         let imageLayer = Layer(
             name: "Hintergrund",

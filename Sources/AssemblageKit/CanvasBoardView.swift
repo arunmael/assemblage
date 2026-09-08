@@ -21,6 +21,17 @@ final class CanvasBoardView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) wird nicht verwendet") }
 
+    /// Das Fenster ist `isMovableByWindowBackground` (randloser Look, siehe
+    /// `DocumentWindowController`). AppKit fängt einen Mausklick dann *vor*
+    /// der Ansicht ab und verschiebt stattdessen das Fenster — und zwar
+    /// überall dort, wo keine deckend zeichnende Ansicht widerspricht. Seit
+    /// die Leinwandfläche im Erscheinungsbild „Beautifull" durchsichtig ist,
+    /// traf das auch die Arbeitsfläche selbst: Ziehen mit dem Zeiger-Werkzeug
+    /// verschob das ganze Fenster statt der Ebene. Deshalb hier ausdrücklich
+    /// widersprechen — unabhängig vom Erscheinungsbild, denn die Fläche ist in
+    /// beiden Fällen Arbeitsfläche und keine Fenster-Ziehzone.
+    override var mouseDownCanMoveWindow: Bool { false }
+
     /// Passt Brettgrösse und Lage der Leinwand an die aktuelle Leinwandgrösse
     /// an. Muss nach jeder Änderung der Leinwandgrösse laufen.
     func layoutCanvas() {

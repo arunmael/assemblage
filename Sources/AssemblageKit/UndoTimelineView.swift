@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 /// Zeichnet den Verlauf als echte Zeitachse: kräftig bis zum aktuellen
 /// Schritt, schwach für den widerrufenen Teil und mit einer senkrechten Marke
@@ -12,6 +13,20 @@ final class UndoTimelineView: NSView {
     private var redoDepth = 0
     private var lastReportedDepth: Int?
     var onSelectDepth: ((Int) -> Void)?
+    // `draw(_:)` liest `AssemblageTheme.textPrimary`/`textTertiary` bei jedem
+    // Aufruf frisch — ohne diese Anmeldung würde die Ansicht aber erst beim
+    // nächsten `setDepths(...)` neu zeichnen, nicht schon beim Themenwechsel
+    // selbst.
+    private var themeSubscription: AnyCancellable?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        themeSubscription = ThemeManager.shared.$current
+            .sink { [weak self] _ in self?.needsDisplay = true }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) wird nicht unterstützt") }
 
     private var totalDepth: Int { undoDepth + redoDepth }
 

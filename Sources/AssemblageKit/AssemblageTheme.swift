@@ -1,61 +1,58 @@
 import AppKit
 
-/// Farb-, Radius- und Abstandswerte des "Liquid Glass"-Erscheinungsbilds
-/// (Claude-Design-Mockup „Assemblage UI", nur der Modus „Liquid Glass" —
-/// „Calm" wurde nicht übernommen, da kein Umschalter dafür beauftragt war).
+/// Farb-, Radius- und Abstandswerte des aktiven Erscheinungsbilds.
 ///
-/// Alle Zahlenwerte sind 1:1 aus dem Mockup übernommen (siehe
-/// `/tmp/template_raw.html`, Zeilen 20-269, zum Zeitpunkt der Umsetzung).
-/// Eine einzige Quelle dieser Werte verhindert, dass Werkzeugleiste,
-/// Ebenen- und Eigenschaften-Panel beim Nachjustieren auseinanderlaufen.
+/// Ursprünglich der einzige Wertesatz der App (das „Liquid Glass"-Mockup,
+/// siehe Git-Historie). Seit dem zweiten Erscheinungsbild „Beautifull"
+/// delegieren die Farb-/Radius-/Schatten-Werte an `ThemeManager.shared` (die
+/// beiden Wertesätze stehen in `Theme.swift`) — jede bestehende Aufrufstelle
+/// (`AssemblageTheme.textPrimary`, `AssemblageTheme.margin`, …) funktioniert
+/// dadurch unverändert weiter, liefert aber je nach Nutzerwahl im
+/// „Darstellung"-Menü unterschiedliche Werte.
+///
+/// Reine Layout-Masse (Abstände, feste Panelbreiten, Fenster-Insets) bleiben
+/// bewusst *nicht* Teil von `ThemeTokens`: An Anordnung/Funktion soll sich
+/// zwischen den Erscheinungsbildern nichts ändern, nur am Aussehen.
+@MainActor
 enum AssemblageTheme {
+
+    private static var tokens: ThemeTokens { ThemeManager.shared.tokens }
 
     // MARK: - Farben
 
-    /// Primäre Textfarbe auf hellem Glas-Untergrund.
-    static let textPrimary = NSColor(srgbHex: "#1c1d1f")
-    static let textSecondary = NSColor(srgbHex: "#1c1d1f", alpha: 0.6)
-    static let textTertiary = NSColor(srgbHex: "#1c1d1f", alpha: 0.4)
+    static var textPrimary: NSColor { tokens.textPrimary }
+    static var textSecondary: NSColor { tokens.textSecondary }
+    static var textTertiary: NSColor { tokens.textTertiary }
 
-    /// Systemblau, wie es auch die aktive Werkzeug-Markierung im Mockup nutzt.
-    static let accent = NSColor(srgbHex: "#0a84ff")
-    static let accentDark = NSColor(srgbHex: "#0761c9")
-    static let accentSoft = NSColor(srgbHex: "#0a84ff", alpha: 0.14)
+    static var accent: NSColor { tokens.accent }
+    static var accentDark: NSColor { tokens.accentDark }
+    static var accentSoft: NSColor { tokens.accentSoft }
 
-    static let divider = NSColor(srgbHex: "#000000", alpha: 0.08)
+    static var divider: NSColor { tokens.divider }
 
-    /// Halbtransparenter Glas-Hintergrund der schwebenden Panels — liegt auf
-    /// einem `NSVisualEffectView` (siehe `GlassPanel`), das den eigentlichen
-    /// Weichzeichner-Effekt liefert; diese Farbe stellt nur den im Mockup
-    /// vorgegebenen Farbton darüber sicher, da Systemmaterialien ihn nicht
-    /// exakt treffen.
-    static let glassBackground = NSColor(srgbHex: "#ffffff", alpha: 0.55)
-    static let glassBorder = NSColor(srgbHex: "#ffffff", alpha: 0.7)
-    static let glassShadowColor = NSColor(srgbHex: "#0f172a", alpha: 0.16)
+    static var glassBackground: NSColor { tokens.glassBackground }
+    static var glassBorder: NSColor { tokens.glassBorder }
+    static var glassShadowColor: NSColor { tokens.glassShadowColor }
 
-    static let canvasFrameBackground = NSColor(srgbHex: "#ffffff", alpha: 0.92)
-    static let inputBackground = NSColor(srgbHex: "#000000", alpha: 0.045)
-    static let handleBackground = NSColor.white
-
-    /// Fensterhintergrund hinter dem Canvas-Rahmen (radialer Verlauf im
-    /// Mockup; hier als mittlerer Farbwert genähert, da ein exakter radialer
-    /// Verlauf für eine reine Arbeitsfläche keinen sichtbaren Zusatznutzen
-    /// hätte).
-    static let stageBackground = NSColor(srgbHex: "#dde2e8")
+    static var canvasFrameBackground: NSColor { tokens.canvasFrameBackground }
+    static var inputBackground: NSColor { tokens.inputBackground }
+    static var handleBackground: NSColor { tokens.handleBackground }
+    static var stageBackground: NSColor { tokens.stageBackground }
 
     // MARK: - Radien
 
-    static let windowCornerRadius: CGFloat = 20
-    static let panelCornerRadius: CGFloat = 22
-    static let toolClusterCornerRadius: CGFloat = 18
-    static let toolButtonCornerRadius: CGFloat = 12
-    static let pillCornerRadius: CGFloat = 999
-    static let canvasFrameCornerRadius: CGFloat = 18
-    static let canvasCornerRadius: CGFloat = 12
-    static let chipCornerRadius: CGFloat = 9
-    static let thumbnailCornerRadius: CGFloat = 9
+    static var windowCornerRadius: CGFloat { tokens.windowCornerRadius }
+    static var panelCornerRadius: CGFloat { tokens.panelCornerRadius }
+    static var toolClusterCornerRadius: CGFloat { tokens.toolClusterCornerRadius }
+    static var toolButtonCornerRadius: CGFloat { tokens.toolButtonCornerRadius }
+    static var pillCornerRadius: CGFloat { tokens.pillCornerRadius }
+    static var canvasFrameCornerRadius: CGFloat { tokens.canvasFrameCornerRadius }
+    static var canvasCornerRadius: CGFloat { tokens.canvasCornerRadius }
+    static var chipCornerRadius: CGFloat { tokens.chipCornerRadius }
+    static var thumbnailCornerRadius: CGFloat { tokens.thumbnailCornerRadius }
+    static var cornerCurve: CALayerCornerCurve { tokens.cornerCurve }
 
-    // MARK: - Abstände
+    // MARK: - Abstände (themenunabhängig, siehe Kommentar oben)
 
     /// Aussenabstand aller schwebenden Panels zum Fensterrand.
     static let margin: CGFloat = 24
@@ -65,20 +62,18 @@ enum AssemblageTheme {
     /// von der Fensteroberkante — Platz für die schwebende Werkzeugleiste.
     static let topContentInset: CGFloat = 96
 
+    /// Dicke der beiden Lineal-Widgets (siehe `CanvasRulerView`).
+    static let rulerThickness: CGFloat = 24
+
     // MARK: - Schatten
 
-    static let glassShadowRadius: CGFloat = 30
-    static let glassShadowOffset = CGSize(width: 0, height: -10)
-}
+    static var glassShadowRadius: CGFloat { tokens.glassShadowRadius }
+    static var glassShadowOffset: CGSize { tokens.glassShadowOffset }
 
-private extension NSColor {
-    /// Kurzform für `#RRGGBB`-Literale wie sie das Mockup verwendet.
-    convenience init(srgbHex hex: String, alpha: CGFloat = 1) {
-        var value: UInt64 = 0
-        Scanner(string: hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))).scanHexInt64(&value)
-        let r = CGFloat((value & 0xFF0000) >> 16) / 255
-        let g = CGFloat((value & 0x00FF00) >> 8) / 255
-        let b = CGFloat(value & 0x0000FF) / 255
-        self.init(srgbRed: r, green: g, blue: b, alpha: alpha)
-    }
+    // MARK: - Panel-Material / Y2K-Aqua-Zusatzwerte
+
+    static var panelMaterial: NSVisualEffectView.Material { tokens.panelMaterial }
+    /// `nil` im Erscheinungsbild „Soulless"; gesetzt in „Beautifull" (siehe
+    /// `AquaStyle` in `Theme.swift`).
+    static var aqua: AquaStyle? { tokens.aqua }
 }

@@ -491,16 +491,13 @@ enum MockupIcons {
         paths("M12 3v18", "M6 8l-3 4 3 4", "M18 8l3 4-3 4")
     }
 
-    /// Eine Uhr mit Verlaufspfeil – Symbol für die Undo/Redo-Historie: ein
-    /// fast geschlossener Kreis (Ziffernblatt), eine Pfeilspitze an seiner
-    /// offenen Stelle und zwei Zeiger.
+    /// Eine schlichte Uhr – Symbol für die Undo/Redo-Historie: ein
+    /// geschlossenes Ziffernblatt mit zwei Zeigern, passend zum Uhr-Symbol
+    /// zwischen den Vor/Zurück-Pfeilen (Vorlage: Probleme/UI-Referenz vom
+    /// Nutzer, ein rundes Uhr-Icon ohne Pfeilspitze).
     private static var timelinePaths: [CGPath] {
-        paths(
-            "M14.4 6.4A7 7 0 1 1 9.6 6.4",
-            "M6.8 5.6L9.6 6.4L7.6 9.2",
-            "M12 13V9",
-            "M12 13L15 15"
-        )
+        [cgPath(circleCenterX: 12, y: 12, radius: 7)] +
+            paths("M12 12V7.5", "M12 12L15.5 14")
     }
 
     private static func paths(_ data: String...) -> [CGPath] {

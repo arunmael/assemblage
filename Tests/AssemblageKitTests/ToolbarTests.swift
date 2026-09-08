@@ -135,7 +135,7 @@ final class ToolbarTests: XCTestCase {
     /// keinen freien Höhenplatz in die Werkzeugzeile zurückdrücken. Nur der
     /// tatsächlich vom Fenster vergebene Frame deckt diese Constraint-Kette
     /// ab; die intrinsische Wunschgrösse allein würde den Fehler übersehen.
-    func testFloatingToolbarRowStaysFiftyPointsHighForEveryTool() throws {
+    func testFloatingToolbarRowKeepsItsHeightForEveryTool() throws {
         for tool in CanvasTool.allToolbarCases {
             let document = AssemblageDocument()
             document.modify("Vorbereiten") { _ = try? $0.addLayer(imageLayer) }
@@ -156,7 +156,10 @@ final class ToolbarTests: XCTestCase {
 
             stage.toolbarController.simulateToolTapForTesting(tool)
             window.contentView?.layoutSubtreeIfNeeded()
-            XCTAssertEqual(row.frame.height, 50, accuracy: 0.5, "falsche Höhe bei \(tool)")
+            // 58 pt: Der aktive Werkzeugknopf wird 30 % grösser gezeichnet
+            // (38 → 49.4 pt, siehe `ToolbarController.activeToolScale`) und
+            // gibt damit die Zeilenhöhe vor.
+            XCTAssertEqual(row.frame.height, 58, accuracy: 0.5, "falsche Höhe bei \(tool)")
         }
     }
 

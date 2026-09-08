@@ -8,6 +8,11 @@ import AssemblageModel
 struct LayerListView: View {
 
     @ObservedObject var state: DocumentState
+    // Ungenutzt ausser als Auslöser: Ohne diese Beobachtung würde SwiftUI
+    // beim Wechsel des Erscheinungsbilds nicht neu zeichnen, weil `body`
+    // sonst von keinem `@Published`-Wert abhängt — `AssemblageTheme` selbst
+    // ist kein `ObservableObject`.
+    @ObservedObject private var themeManager = ThemeManager.shared
 
     private var editing: LayerListEditing {
         LayerListEditing(state: state)

@@ -17,6 +17,10 @@ protocol CanvasKeyboardCommandDelegate: AnyObject {
 @MainActor
 final class CanvasView: NSView {
 
+    /// Siehe `CanvasBoardView.mouseDownCanMoveWindow`: Die Leinwand ist
+    /// Arbeitsfläche, kein Griff zum Fensterverschieben.
+    override var mouseDownCanMoveWindow: Bool { false }
+
     private var renderer: LayerRenderer
     /// Die Leinwand selbst — weisser Grund plus Schlagschatten, damit sie sich
     /// sichtbar vom Arbeitsbereich absetzt.
@@ -1459,6 +1463,10 @@ extension CanvasView: NSTextViewDelegate {
 final class CenteringClipView: NSClipView {
 
     static let freeScrollMargin: CGFloat = 3_000
+
+    /// Siehe `CanvasBoardView.mouseDownCanMoveWindow`: Auch der freie
+    /// Bildlaufrand rings um die Leinwand gehört zur Arbeitsfläche.
+    override var mouseDownCanMoveWindow: Bool { false }
 
     override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
         guard let documentView else { return super.constrainBoundsRect(proposedBounds) }

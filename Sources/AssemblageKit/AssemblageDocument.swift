@@ -64,6 +64,38 @@ final class AssemblageDocument: NSDocument {
         addWindowController(DocumentWindowController())
     }
 
+    /// Frisch angelegt statt aus einer Datei geöffnet — dann fragt das Fenster
+    /// beim ersten Anzeigen nach der Leinwandgrösse (Nutzer-Auftrag). `read`
+    /// setzt das Kennzeichen zurück, denn ein geöffnetes Dokument bringt seine
+    /// Grösse längst mit.
+    ///
+    /// `nonisolated(unsafe)`, weil `read(from:ofType:)` ausdrücklich nicht an
+    /// den Haupt-Thread gebunden ist (siehe dort). Ungefährlich: Geschrieben
+    /// wird genau einmal während des Ladens, gelesen erst danach beim Anzeigen
+    /// des Fensters — beides nacheinander, nie gleichzeitig.
+    ///
+    /// Nicht über `fileURL == nil` lösbar: Eine Dokument-Kopie („Duplizieren")
+    /// hat ebenfalls keine Datei, bringt ihre Leinwandgrösse aber mit und darf
+    /// deshalb nicht danach fragen. Sie läuft — anders als ein neues Dokument —
+    /// durch `read`.
+    nonisolated(unsafe) private var isNewDocument = true
+
+    /// Fragt beim Anlegen sofort nach der Leinwandgrösse, statt kommentarlos
+    /// mit der Vorgabe zu starten.
+    ///
+    /// In `showWindows()` statt im Fenstercontroller, weil nur hier der
+    /// Unterschied zwischen „neu angelegt" und „geöffnet" bekannt ist — und
+    /// weil es genau einmal läuft: Das Kennzeichen fällt sofort, bevor der
+    /// Dialog überhaupt erscheint.
+    override func showWindows() {
+        super.showWindows()
+
+        guard isNewDocument else { return }
+        isNewDocument = false
+        guard let window = windowControllers.first?.window else { return }
+        CanvasResizePanelController.present(for: self, host: window, purpose: .newDocument)
+    }
+
     // MARK: - Lesen & Schreiben
 
     override func save(
@@ -101,6 +133,10 @@ final class AssemblageDocument: NSDocument {
     }
 
     override func read(from fileWrapper: FileWrapper, ofType typeName: String) throws {
+        // Ein gelesenes Dokument bringt seine Leinwandgrösse mit; es darf beim
+        // Öffnen nicht nach einer neuen gefragt werden (siehe `showWindows`).
+        isNewDocument = false
+
         guard let documentData = fileWrapper.fileWrappers?[DocumentPackage.documentFileName]?
             .regularFileContents
         else {

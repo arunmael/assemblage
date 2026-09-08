@@ -5,6 +5,8 @@ import AssemblageModel
 struct InspectorView: View {
 
     @ObservedObject var state: DocumentState
+    // Ungenutzt ausser als Auslöser: siehe Kommentar in `LayerListView`.
+    @ObservedObject private var themeManager = ThemeManager.shared
 
     private var editing: InspectorEditing {
         InspectorEditing(state: state)

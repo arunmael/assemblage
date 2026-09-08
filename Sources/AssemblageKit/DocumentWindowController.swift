@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import AssemblageModel
 
@@ -15,6 +16,7 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
     private var stageViewController: DocumentStageViewController?
     private var canvasViewController: CanvasViewController?
     private var toolbarController: ToolbarController?
+    private var themeSubscription: AnyCancellable?
 
     convenience init() {
         let window = NSWindow(
@@ -66,6 +68,35 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
             )
         }
         self.init(window: window)
+
+        Self.applyWindowOpacity(to: window)
+        // Auf den nächsten Durchlauf verschieben: `sink` feuert, *bevor*
+        // `@Published` den neuen Wert geschrieben hat (siehe auch
+        // `CanvasViewController.viewDidLoad`).
+        themeSubscription = ThemeManager.shared.$current
+            .sink { [weak window] _ in
+                DispatchQueue.main.async {
+                    guard let window else { return }
+                    Self.applyWindowOpacity(to: window)
+                }
+            }
+    }
+
+    /// `.behindWindow`-Weichzeichner (siehe `GlassPanel`) zeigt nur dann
+    /// wirklich Schreibtisch/andere Programme durch, wenn das Fenster selbst
+    /// nicht deckend ist — bei einem deckenden Fenster fällt der Effekt
+    /// stillschweigend auf ein reines Eigen-Blur zurück (Apples Vibrancy-
+    /// Vorgabe). Ungefährlich für „Soulless": Die Leinwand füllt das ganze
+    /// Fenster mit einem eigenen, undurchsichtigen Hintergrund, ein
+    /// nicht-deckendes Fenster bliebe dort unsichtbar ohne Wirkung.
+    private static func applyWindowOpacity(to window: NSWindow) {
+        if AssemblageTheme.aqua != nil {
+            window.isOpaque = false
+            window.backgroundColor = .clear
+        } else {
+            window.isOpaque = true
+            window.backgroundColor = .windowBackgroundColor
+        }
     }
 
     /// Der Inhalt entsteht erst, wenn das Dokument zugewiesen ist.

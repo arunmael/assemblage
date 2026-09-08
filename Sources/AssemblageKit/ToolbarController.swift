@@ -68,6 +68,26 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
     }
     private var selectedLayer: Layer?
     private var toolButtons: [CanvasTool: NSButton] = [:]
+
+    /// Um wie viel der aktive Werkzeugknopf grösser gezeichnet wird — statt
+    /// des früheren blauen Leuchtens. 10 % waren dem Nutzer zu wenig, um den
+    /// Unterschied auf einen Blick zu sehen; bei 30 % ragt der aktive Knopf
+    /// deutlich aus der Reihe. Mehr geht nicht ohne höhere Werkzeugleiste:
+    /// Die Zeilenhöhe (`toolbarRowHeight`) begrenzt ihn nach oben.
+    private static let activeToolScale: CGFloat = 1.3
+
+    /// Was `applyActiveIndicator` braucht, um einen Werkzeugknopf zwischen
+    /// Normal- und Aktiv-Grösse umzuschalten: die Grundmasse und die beiden
+    /// Zwänge, deren Konstanten dafür verändert werden.
+    @MainActor
+    private struct ToolButtonSizing {
+        let icon: MockupIcon
+        let baseSize: CGFloat
+        let baseIconPointSize: CGFloat
+        let width: NSLayoutConstraint
+        let height: NSLayoutConstraint
+    }
+    private var toolButtonSizing: [CanvasTool: ToolButtonSizing] = [:]
     private weak var removeSubjectButton: NSButton?
     private var timelineIsExpanded = false
     private weak var collapsedTimelineRow: NSView?
@@ -108,6 +128,32 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
     private var freehandColorHex = "#1D3557"
     private var freehandStrokeWidth = 6.0
 
+    /// Jeder über `makeToolButton`/`makePillButton`/`plainIconButton`
+    /// erzeugte Icon-Knopf trägt sich hier ein. `MockupIcons.image` malt die
+    /// Tönung fest in die Bilddaten (kein Template-Bild, siehe dortiger
+    /// Kommentar) — beim Themenwechsel muss das Bild deshalb neu gezeichnet
+    /// werden, ein blosses Neuzeichnen des Knopfs würde die alte Farbe
+    /// unverändert weiter anzeigen.
+    @MainActor
+    private struct ThemedIconButton {
+        let button: NSButton
+        let icon: MockupIcon
+        let pointSize: CGFloat
+        /// Meist `AssemblageTheme.textPrimary` — der „Verlauf ausblenden"-
+        /// Knopf zeigt aber dauerhaft die Akzentfarbe (siehe `buildUndoBar`)
+        /// und würde sonst bei jedem Themenwechsel auf die normale Textfarbe
+        /// zurückfallen.
+        var tint: @MainActor () -> NSColor = { AssemblageTheme.textPrimary }
+    }
+    private var themedIconButtons: [ThemedIconButton] = []
+    private weak var searchIconView: NSImageView?
+    private weak var shapeMenuTitleItem: NSMenuItem?
+    private weak var gridMenuTitleItem: NSMenuItem?
+    private weak var zoomPercentLabel: NSTextField?
+    private weak var zoomLCDBackdrop: NSView?
+    private var zoomLCDPadding: (leading: NSLayoutConstraint, trailing: NSLayoutConstraint, top: NSLayoutConstraint, bottom: NSLayoutConstraint)?
+    private var themeSubscription: AnyCancellable?
+
     init(
         state: DocumentState,
         canvasViewController: CanvasViewController,
@@ -132,6 +178,31 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
                 self?.undoTimeline?.setDepths(undo: undoDepth, redo: redoDepth)
             }
             .store(in: &observations)
+
+        // Läuft auch einmal sofort beim Erstellen (siehe `@Published`), also
+        // vor dem eigentlichen Aufbau der Werkzeugleiste in
+        // `buildFloatingToolbarRow()` — zu diesem Zeitpunkt sind Registrierung
+        // und Wörterbücher noch leer, `refreshTheme()` ist dann ein No-op.
+        // Auf den nächsten Durchlauf verschieben: `sink` feuert, *bevor*
+        // `@Published` den neuen Wert geschrieben hat (siehe auch
+        // `CanvasViewController.viewDidLoad`) — `refreshTheme()` läse sonst
+        // noch das alte Erscheinungsbild.
+        themeSubscription = ThemeManager.shared.$current
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.refreshTheme() } }
+    }
+
+    /// Zieht alle Icon-Knöpfe und die LCD-Anzeige auf das gerade aktive
+    /// Erscheinungsbild nach — läuft bei jedem Themenwechsel (siehe `init`).
+    private func refreshTheme() {
+        for entry in themedIconButtons {
+            entry.button.image = MockupIcons.image(entry.icon, pointSize: entry.pointSize, tintColor: entry.tint())
+            entry.button.needsDisplay = true
+        }
+        searchIconView?.image = MockupIcons.image(.search, pointSize: 15, tintColor: AssemblageTheme.textTertiary)
+        shapeMenuTitleItem?.image = MockupIcons.image(.insertShape, pointSize: 16, tintColor: AssemblageTheme.textPrimary)
+        gridMenuTitleItem?.image = MockupIcons.image(.collageGrid, pointSize: 16, tintColor: AssemblageTheme.textPrimary)
+        updatePresentation()
+        applyZoomLCDStyle()
     }
 
     // MARK: - Werkzeugzustand
@@ -186,9 +257,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
             button.alphaValue = available ? 1 : 0.35
             let isActive = tool == currentTool
             button.state = isActive ? .on : .off
-            button.layer?.backgroundColor = isActive
-                ? AssemblageTheme.accentSoft.cgColor
-                : NSColor.clear.cgColor
+            applyActiveIndicator(to: button, tool: tool, isActive: isActive)
             button.contentTintColor = isActive ? AssemblageTheme.accentDark : AssemblageTheme.textPrimary
         }
 
@@ -202,6 +271,34 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         // sichtbar nichts, ohne erkennbar zu sein, warum.
         removeSubjectButton?.alphaValue = removeSubjectAvailable ? 1 : 0.35
         updateSettingsBarVisibility()
+    }
+
+    /// Zeigt den aktiven Zustand eines Werkzeugknopfs an: Er wird 10 % grösser
+    /// dargestellt als die übrigen (Nutzer-Auftrag).
+    ///
+    /// Ersetzt die beiden früheren, farbigen Anzeigen — die Akzent-Füllung in
+    /// „Soulless" und das „Blue LED"-Leuchten in „Beautifull". Grösse statt
+    /// Farbe funktioniert in beiden Erscheinungsbildern gleich; das Leuchten
+    /// war nur nötig, weil eine Füllung unter dem deckenden Glas-Bezel von
+    /// `AquaButtonCell` unsichtbar geblieben wäre.
+    ///
+    /// Das Icon wird dabei neu gezeichnet statt hochskaliert: `MockupIcons`
+    /// malt Pfade, ein vergrössertes Bitmap hätte weiche Kanten.
+    private func applyActiveIndicator(to button: NSButton, tool: CanvasTool, isActive: Bool) {
+        // Reste der früheren Anzeigen abräumen (ein einmal gesetzter Schatten
+        // bliebe sonst am Knopf hängen).
+        button.layer?.backgroundColor = NSColor.clear.cgColor
+        button.layer?.shadowOpacity = 0
+
+        guard let sizing = toolButtonSizing[tool] else { return }
+        let faktor = isActive ? Self.activeToolScale : 1
+        sizing.width.constant = sizing.baseSize * faktor
+        sizing.height.constant = sizing.baseSize * faktor
+        button.image = MockupIcons.image(
+            sizing.icon,
+            pointSize: sizing.baseIconPointSize * faktor,
+            tintColor: AssemblageTheme.textPrimary
+        )
     }
 
     /// Ersetzt den Inhalt des Einstellungs-Streifens passend zum aktiven
@@ -333,9 +430,10 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
     /// Baut die komplette obere rechte Zeile: Werkzeug-Cluster, Sekundär-
     /// Cluster, Suchfeld, Teilen-Knopf — exakt die vier Gruppen aus dem
     /// Mockup, im selben Abstand (14 pt).
-    /// Höhe jedes Panels der schwebenden Werkzeugzeile. Der Werkzeug-Cluster
-    /// gibt das Mass vor: 38 pt Knopf plus 6 pt Rand oben und unten.
-    private static let toolbarRowHeight: CGFloat = 50
+    /// Höhe jedes Panels der schwebenden Werkzeugzeile. Das Mass gibt der
+    /// grösste Fall im Werkzeug-Cluster vor: der *aktive* Knopf mit 38 pt ×
+    /// `activeToolScale` (49.4 pt) plus 4 pt Rand oben und unten.
+    static let toolbarRowHeight: CGFloat = 58
 
     func buildFloatingToolbarRow() -> NSView {
         let panels = [
@@ -389,8 +487,15 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
 
         let stack = NSStackView(views: [select, crop, warp])
         stack.orientation = .horizontal
-        stack.spacing = 4
-        stack.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
+        // Grösserer Abstand als früher (4 pt), weil der aktive Knopf jetzt
+        // 10 % mehr Platz einnimmt (siehe `applyActiveIndicator`) und sonst
+        // fast an seine Nachbarn stiesse.
+        stack.spacing = 9
+        // Oben/unten knapper als vorher (6 pt): Die Panelhöhe ist über
+        // `toolbarRowHeight` fest auf 50 pt gesetzt, der aktive Knopf braucht
+        // davon 41.8 pt — mit 6 pt Rand wären es 53.8 pt und die Zwänge
+        // widersprächen sich.
+        stack.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
 
         return wrapInGlassPanel(stack, cornerRadius: AssemblageTheme.toolClusterCornerRadius)
     }
@@ -420,8 +525,10 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         let stack = NSStackView(views: [brush, lasso, paint, freehand, divider, removeSubject, text, shape, grid])
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
+        // Wie im ersten Cluster: mehr Luft für den 10 % grösseren aktiven
+        // Knopf, oben/unten dafür knapper wegen der festen Panelhöhe.
+        stack.spacing = 12
+        stack.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
 
         return wrapInGlassPanel(stack, cornerRadius: AssemblageTheme.toolClusterCornerRadius)
     }
@@ -429,6 +536,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
     private func makeSearchField() -> NSView {
         let icon = NSImageView(image: MockupIcons.image(.search, pointSize: 15, tintColor: AssemblageTheme.textTertiary))
         icon.translatesAutoresizingMaskIntoConstraints = false
+        searchIconView = icon
 
         let field = NSTextField()
         field.placeholderString = "Werkzeug suchen…"
@@ -575,15 +683,22 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 4
-        stack.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        let seitenrand: CGFloat = 16
+        stack.edgeInsets = NSEdgeInsets(top: 12, left: seitenrand, bottom: 12, right: seitenrand)
         for row in rows {
             row.translatesAutoresizingMaskIntoConstraints = false
-            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            // Um beide Seitenränder verkürzt statt auf die volle Stack-Breite:
+            // Sonst reicht jede Zeile über die `edgeInsets` hinaus bis an den
+            // Popover-Rand, und Überschrift wie Ergebniszeilen kleben dort
+            // (Nutzer-Rückmeldung: Text weiter weg vom Rand).
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -seitenrand * 2).isActive = true
         }
 
         let content = NSViewController()
         content.view = stack
-        stack.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        // Etwas breiter als früher (220), damit die Ergebniszeilen trotz der
+        // neuen Seitenränder gleich viel Text zeigen wie vorher.
+        stack.widthAnchor.constraint(equalToConstant: 252).isActive = true
 
         let popover = searchPopover ?? NSPopover()
         popover.behavior = .transient
@@ -621,22 +736,21 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
             icon: .share, pointSize: 17, hitSize: 44, label: "Teilen", action: #selector(shareDocument(_:))
         )
 
-        // Zentrierende Zwischenansicht, weil `GlassPanel` seinen Inhalt an
-        // alle vier Kanten spannt: Ohne sie stiesse die feste Knopfhöhe mit
-        // der Zeilenhöhe des Panels zusammen (siehe `buildFloatingToolbarRow()`).
+        // Nutzer-Rückmeldung: kein umschliessendes Glas-Panel mehr — der
+        // Knopf (schon rund über `AquaButtonCell`) steht für sich, ohne
+        // Kachel-Umrandung. Trotzdem eine zentrierende Zwischenansicht statt
+        // des Knopfs direkt: `buildFloatingToolbarRow()` zieht jedes Element
+        // dieser Zeile auf dieselbe 50-pt-Zeilenhöhe hoch — ohne Hülle stiesse
+        // das direkt mit der festen 44-pt-Knopfhöhe zusammen.
         let huelle = NSView()
         huelle.translatesAutoresizingMaskIntoConstraints = false
         huelle.addSubview(button)
         NSLayoutConstraint.activate([
             button.centerXAnchor.constraint(equalTo: huelle.centerXAnchor),
-            button.centerYAnchor.constraint(equalTo: huelle.centerYAnchor)
+            button.centerYAnchor.constraint(equalTo: huelle.centerYAnchor),
+            huelle.widthAnchor.constraint(equalToConstant: 44)
         ])
-
-        let panel = GlassPanel(cornerRadius: 16)
-        panel.content = huelle
-        panel.translatesAutoresizingMaskIntoConstraints = false
-        panel.widthAnchor.constraint(equalToConstant: 44).isActive = true
-        return panel
+        return huelle
     }
 
     /// Ein sichtbares Form-Icon, dessen Menü alle verfügbaren Formen anbietet.
@@ -649,6 +763,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         let title = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         title.image = MockupIcons.image(.insertShape, pointSize: 16, tintColor: AssemblageTheme.textPrimary)
         button.menu?.addItem(title)
+        shapeMenuTitleItem = title
 
         let shapeKinds = NewLayerKind.allCases.filter { $0 != .text }
         for (index, kind) in shapeKinds.enumerated() {
@@ -681,6 +796,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         let title = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         title.image = MockupIcons.image(.collageGrid, pointSize: 16, tintColor: AssemblageTheme.textPrimary)
         button.menu?.addItem(title)
+        gridMenuTitleItem = title
 
         for template in CollageTemplate.allCases {
             let item = NSMenuItem(
@@ -712,17 +828,41 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         size: CGFloat,
         action: Selector
     ) -> NSButton {
-        let button = NSButton(title: "", target: self, action: action)
+        // Leer erstellen und `cell` sofort tauschen, bevor Titel/Bild/
+        // Ziel gesetzt werden: `NSButton(title:target:action:)` würde diese
+        // Werte auf der alten Zelle ablegen, ein späterer Zellentausch liesse
+        // sie dann verschwinden (neue Zellen starten leer).
+        let button = NSButton()
+        button.cell = AquaButtonCell()
+        button.title = ""
+        button.target = self
+        button.action = action
         button.image = MockupIcons.image(icon, pointSize: 18, tintColor: AssemblageTheme.textPrimary)
-        button.isBordered = false
+        themedIconButtons.append(ThemedIconButton(button: button, icon: icon, pointSize: 18))
+        // Immer `true`: Im Erscheinungsbild „Soulless" zeichnet
+        // `AquaButtonCell.drawBezel` nichts (siehe dort), das Ergebnis bleibt
+        // also der bisherige randlose Look; „Beautifull" bekommt dieselbe
+        // Zelle als glänzenden Aqua-Knopf.
+        button.isBordered = true
         button.setButtonType(.toggle)
         button.toolTip = label
         button.setAccessibilityLabel(label)
         button.wantsLayer = true
+        // Nur für die „Soulless"-Aktiv-Füllung relevant (siehe
+        // `applyActiveIndicator`) — deren `layer.backgroundColor` braucht
+        // einen passenden Eckenradius, um wie eine abgerundete Fläche statt
+        // eines Rechtecks auszusehen. Der Glas-Knopf in „Beautifull" bestimmt
+        // seine eigene (pillenförmige) Kontur unabhängig davon selbst.
         button.layer?.cornerRadius = AssemblageTheme.toolButtonCornerRadius
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: size).isActive = true
-        button.heightAnchor.constraint(equalToConstant: size).isActive = true
+        // Als Variablen statt inline aktiviert: `applyActiveIndicator` schaltet
+        // den aktiven Knopf über genau diese beiden Konstanten auf 110 %.
+        let width = button.widthAnchor.constraint(equalToConstant: size)
+        let height = button.heightAnchor.constraint(equalToConstant: size)
+        NSLayoutConstraint.activate([width, height])
+        toolButtonSizing[tool] = ToolButtonSizing(
+            icon: icon, baseSize: size, baseIconPointSize: 18, width: width, height: height
+        )
         button.isEnabled = ToolSelection.isAvailable(tool, forSelected: selectedLayer)
         toolButtons[tool] = button
         return button
@@ -730,11 +870,17 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
 
     /// Ein Icon+Text-Knopf wie „Freistellen"/„Text"/„Raster" im Mockup.
     private func makePillButton(label: String, icon: MockupIcon, action: Selector?, zeigtTitel: Bool = true) -> NSButton {
-        let button = NSButton(title: zeigtTitel ? label : "", target: action == nil ? nil : self, action: action)
+        let button = NSButton()
+        button.cell = AquaButtonCell()
+        button.title = zeigtTitel ? label : ""
+        button.target = action == nil ? nil : self
+        button.action = action
         button.image = MockupIcons.image(icon, pointSize: 16, tintColor: AssemblageTheme.textPrimary)
+        themedIconButtons.append(ThemedIconButton(button: button, icon: icon, pointSize: 16))
         button.imagePosition = zeigtTitel ? .imageLeading : .imageOnly
         button.imageHugsTitle = true
-        button.isBordered = false
+        button.isBordered = true
+        button.wantsLayer = true
         button.font = .systemFont(ofSize: 12.5, weight: .semibold)
         button.contentTintColor = AssemblageTheme.textPrimary
         button.toolTip = label
@@ -754,12 +900,14 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         label: String,
         action: Selector?
     ) -> NSButton {
-        let button = NSButton(
-            image: MockupIcons.image(icon, pointSize: pointSize, tintColor: AssemblageTheme.textPrimary),
-            target: action == nil ? nil : self,
-            action: action
-        )
-        button.isBordered = false
+        let button = NSButton()
+        button.cell = AquaButtonCell()
+        button.target = action == nil ? nil : self
+        button.action = action
+        button.image = MockupIcons.image(icon, pointSize: pointSize, tintColor: AssemblageTheme.textPrimary)
+        themedIconButtons.append(ThemedIconButton(button: button, icon: icon, pointSize: pointSize))
+        button.isBordered = true
+        button.wantsLayer = true
         button.toolTip = label
         button.setAccessibilityLabel(label)
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -968,11 +1116,29 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
             percent?.stringValue = "\(value) %"
         }
         percent.stringValue = "\(canvasViewController?.zoomPercent ?? 100) %"
+        zoomPercentLabel = percent
+
+        // Umhüllung statt Text direkt in den Stack: Regel D der Theme-Vorgabe
+        // verlangt für Zahlen-Anzeigen einen „versenkten dunklen Container" —
+        // in „Soulless" bleibt diese Hülle unsichtbar (kein Hintergrund,
+        // keine Extra-Abstände ausserhalb der Textgrösse).
+        let lcdBackdrop = NSView()
+        lcdBackdrop.wantsLayer = true
+        lcdBackdrop.translatesAutoresizingMaskIntoConstraints = false
+        percent.translatesAutoresizingMaskIntoConstraints = false
+        lcdBackdrop.addSubview(percent)
+        let leading = percent.leadingAnchor.constraint(equalTo: lcdBackdrop.leadingAnchor)
+        let trailing = percent.trailingAnchor.constraint(equalTo: lcdBackdrop.trailingAnchor)
+        let top = percent.topAnchor.constraint(equalTo: lcdBackdrop.topAnchor)
+        let bottom = percent.bottomAnchor.constraint(equalTo: lcdBackdrop.bottomAnchor)
+        NSLayoutConstraint.activate([leading, trailing, top, bottom])
+        zoomLCDPadding = (leading, trailing, top, bottom)
+        zoomLCDBackdrop = lcdBackdrop
 
         let minus = plainIconButton(icon: .zoomOut, pointSize: 13, label: "Verkleinern", action: #selector(zoomOut(_:)))
         let plus = plainIconButton(icon: .zoomIn, pointSize: 13, label: "Vergrössern", action: #selector(zoomIn(_:)))
 
-        let stack = NSStackView(views: [percent, minus, plus])
+        let stack = NSStackView(views: [lcdBackdrop, minus, plus])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 10
@@ -980,7 +1146,34 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
 
         let panel = GlassPanel(cornerRadius: 0, isPill: true)
         panel.content = stack
+        applyZoomLCDStyle()
         return panel
+    }
+
+    /// Passt die Zoom-Prozentanzeige an: „Beautifull" bekommt einen dunklen,
+    /// versenkten Hintergrund und eine LCD-/Mono-Schrift (Regel D der Theme-
+    /// Vorgabe); „Soulless" bleibt unverändert reiner Text ohne Hülle.
+    private func applyZoomLCDStyle() {
+        guard let label = zoomPercentLabel, let backdrop = zoomLCDBackdrop else { return }
+        if let aqua = AssemblageTheme.aqua {
+            label.font = aqua.lcdFont
+            label.textColor = aqua.lcdForeground
+            backdrop.layer?.backgroundColor = aqua.lcdBackground.cgColor
+            backdrop.layer?.cornerRadius = 4
+            backdrop.layer?.borderWidth = 0
+            zoomLCDPadding?.leading.constant = 6
+            zoomLCDPadding?.trailing.constant = -6
+            zoomLCDPadding?.top.constant = 2
+            zoomLCDPadding?.bottom.constant = -2
+        } else {
+            label.font = .systemFont(ofSize: 12, weight: .semibold)
+            label.textColor = AssemblageTheme.textSecondary
+            backdrop.layer?.backgroundColor = NSColor.clear.cgColor
+            zoomLCDPadding?.leading.constant = 0
+            zoomLCDPadding?.trailing.constant = 0
+            zoomLCDPadding?.top.constant = 0
+            zoomLCDPadding?.bottom.constant = 0
+        }
     }
 
     /// Die Verlaufsleiste unten im Mockup — Widerrufen/Wiederholen gehen
@@ -996,6 +1189,13 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         // aktive Farbe muss deshalb auch im Bild stecken, sonst bliebe die
         // gesetzte Tint-Farbe am reinen Icon unsichtbar.
         collapse.image = MockupIcons.image(.timeline, pointSize: 16, tintColor: AssemblageTheme.accentDark)
+        // Überschreibt den generischen (textPrimary-getönten) Registry-
+        // Eintrag von `plainIconButton` mit der Akzentfarbe — sonst würde
+        // `refreshTheme()` das Icon beim nächsten Themenwechsel zurück auf
+        // die normale Textfarbe stellen.
+        if let index = themedIconButtons.lastIndex(where: { $0.button === collapse }) {
+            themedIconButtons[index].tint = { AssemblageTheme.accentDark }
+        }
 
         let history = UndoTimelineView()
         history.translatesAutoresizingMaskIntoConstraints = false

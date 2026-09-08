@@ -24,6 +24,8 @@ final class DocumentStageViewController: NSViewController {
     /// der mehreren gleichartigen `GlassPanel`-Subviews.
     private(set) weak var settingsBar: GlassPanel?
     private(set) weak var inspectorPanel: GlassPanel?
+    private(set) weak var horizontalRuler: CanvasRulerView?
+    private(set) weak var verticalRuler: CanvasRulerView?
 
     private let state: DocumentState
     private var observations: Set<AnyCancellable> = []
@@ -44,6 +46,16 @@ final class DocumentStageViewController: NSViewController {
     private var inspectorTopBelowToolbar: NSLayoutConstraint?
     private var inspectorTopBelowSettingsBar: NSLayoutConstraint?
 
+    /// Feste Referenzen für den Themenwechsel — anders als `ToolbarController`
+    /// hat dieser Controller nur zwei fest verdrahtete Icon-Knöpfe, eine
+    /// eigene Registrierungsliste wäre hier Overkill.
+    private weak var layersHeaderLabel: NSTextField?
+    private weak var duplicateButtonRef: NSButton?
+    private weak var deleteButtonRef: NSButton?
+    private var themeSubscription: AnyCancellable?
+    private var backgroundOpacitySubscription: AnyCancellable?
+    private(set) var autoHideController: WidgetAutoHideController?
+
     init(
         state: DocumentState,
         canvasViewController: CanvasViewController,
@@ -63,6 +75,53 @@ final class DocumentStageViewController: NSViewController {
         addChild(canvasViewController)
         addChild(layersHostingController)
         addChild(inspectorHostingController)
+
+        // Auf den nächsten Durchlauf verschieben: `sink` feuert, *bevor*
+        // `@Published` den neuen Wert geschrieben hat (siehe auch
+        // `CanvasViewController.viewDidLoad`) — `refreshTheme()` läse sonst
+        // noch das alte Erscheinungsbild.
+        themeSubscription = ThemeManager.shared.$current
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.refreshTheme() } }
+        backgroundOpacitySubscription = BackgroundOpacityManager.shared.$opacity
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.applyStageTint() } }
+    }
+
+    /// Zieht Kopfzeilen-Beschriftung und Fusszeilen-Icons des Ebenen-Panels
+    /// auf das aktive Erscheinungsbild nach. Alle übrigen schwebenden Panels
+    /// (Werkzeugleiste, Eigenschaften-Panel, Zoom-/Verlaufsleiste) kümmern
+    /// sich über ihre eigenen Abonnements selbst darum (`GlassPanel`,
+    /// `ToolbarController`).
+    private func refreshTheme() {
+        layersHeaderLabel?.textColor = AssemblageTheme.textSecondary
+        if let duplicateButtonRef {
+            duplicateButtonRef.image = MockupIcons.image(.duplicate, pointSize: 14, tintColor: AssemblageTheme.textPrimary)
+            duplicateButtonRef.needsDisplay = true
+        }
+        if let deleteButtonRef {
+            deleteButtonRef.image = MockupIcons.image(.delete, pointSize: 14, tintColor: AssemblageTheme.textPrimary)
+            deleteButtonRef.needsDisplay = true
+        }
+        applyStageTint()
+    }
+
+    /// Der milchige Schleier über der ganzen Fensterfläche im
+    /// Erscheinungsbild „Beautifull".
+    ///
+    /// Bewusst hier auf der Container-Ansicht und nicht im
+    /// `CanvasViewController`: Der Bildlauf verwaltet seine eigene Ebene
+    /// mit (Bildlauf-Optimierung) und räumte eine dort gesetzte
+    /// Hintergrundfarbe wieder weg. Der Container gehört dagegen
+    /// ausschliesslich uns. Zusammen mit dem nicht-deckenden Fenster
+    /// (`DocumentWindowController.applyWindowOpacity`) und dem Bildlauf, der
+    /// nichts mehr malt, ergibt das die halbdurchsichtige Scheibe, durch die
+    /// Schreibtisch und andere Programme gedämpft durchscheinen.
+    ///
+    /// In „Soulless" bleibt der Container wie bisher ohne eigene Farbe.
+    private func applyStageTint() {
+        let opacity = BackgroundOpacityManager.shared.opacity
+        view.layer?.backgroundColor = AssemblageTheme.aqua?.stageMilkTint
+            .withAlphaComponent(opacity)
+            .cgColor
     }
 
     @available(*, unavailable)
@@ -73,6 +132,130 @@ final class DocumentStageViewController: NSViewController {
             NotificationCenter.default.removeObserver(windowUpdateObservation)
         }
     }
+
+    /// Legt die beiden Lineale an — jedes als eigenes schwebendes Widget im
+    /// selben Glas-Panel wie Werkzeugleiste und Ebenenliste (Nutzer-Auftrag:
+    /// „innerhalb der Widgets, nicht ausserhalb"), statt als nackte Leiste am
+    /// Fensterrand.
+    ///
+    /// Beide säumen die freie Arbeitsfläche: das waagerechte unter der
+    /// Werkzeugleiste, das senkrechte darunter an dessen linker Flucht (siehe
+    /// `constrainRulers`).
+    ///
+    /// Getrennt vom Setzen der Zwänge, weil der Regler-Streifen unter dem
+    /// waagerechten Lineal hängt und deshalb früher gebaut werden muss, als
+    /// Eigenschaften-Panel und Verlaufsleiste bereitstehen.
+    private func makeRulerPanels(in container: NSView) -> (horizontal: GlassPanel, vertical: GlassPanel) {
+        let waagerecht = CanvasRulerView(orientation: .horizontal)
+        let senkrecht = CanvasRulerView(orientation: .vertical)
+        horizontalRuler = waagerecht
+        verticalRuler = senkrecht
+
+        // Fester, moderater Radius statt `panelCornerRadius`: Bei nur 24 pt
+        // Dicke würde der grosse Panelradius die Leiste zur Kapsel runden und
+        // die äusseren Striche unter der Wölbung verschlucken.
+        let waagerechtPanel = GlassPanel(cornerRadius: AssemblageTheme.toolButtonCornerRadius)
+        waagerechtPanel.content = waagerecht
+        let senkrechtPanel = GlassPanel(cornerRadius: AssemblageTheme.toolButtonCornerRadius)
+        senkrechtPanel.content = senkrecht
+
+        for panel in [waagerechtPanel, senkrechtPanel] {
+            panel.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(panel)
+        }
+        return (waagerechtPanel, senkrechtPanel)
+    }
+
+    /// Setzt die Lineale an ihren Platz: das waagerechte unter die
+    /// Werkzeugleiste, beide innerhalb der freien Arbeitsfläche zwischen
+    /// Ebenen- und Eigenschaften-Panel (Nutzer-Auftrag: unterhalb der
+    /// Werkzeuge, endend vor dem Ebenen-Widget).
+    @discardableResult
+    private func constrainRulers(
+        horizontal waagerechtPanel: GlassPanel,
+        vertical senkrechtPanel: GlassPanel,
+        in container: NSView,
+        rightOf layersPanel: NSView,
+        leftOf inspectorPanel: NSView,
+        above undoBar: NSView
+    ) -> NSLayoutConstraint {
+        let dicke = AssemblageTheme.rulerThickness
+        // Am Container statt an der Werkzeugleiste, obwohl es optisch unter ihr
+        // sitzt: Beim automatischen Ausblenden fährt die Werkzeugleiste aus dem
+        // Fenster, das Lineal soll aber sichtbar bleiben (Nutzer-Auftrag) und
+        // darf ihr deshalb nicht angehängt sein.
+        let waagerechtTop = waagerechtPanel.topAnchor.constraint(
+            equalTo: container.topAnchor, constant: Self.rulerTopWhenToolbarVisible
+        )
+        NSLayoutConstraint.activate([
+            waagerechtTop,
+            waagerechtPanel.heightAnchor.constraint(equalToConstant: dicke),
+            // Beginnt erst nach dem Ebenen-Panel und endet vor dem
+            // Eigenschaften-Panel: Das Lineal misst genau den Ausschnitt der
+            // Leinwand, den man zwischen den beiden auch sieht.
+            waagerechtPanel.leadingAnchor.constraint(
+                equalTo: layersPanel.trailingAnchor, constant: AssemblageTheme.margin
+            ),
+            waagerechtPanel.trailingAnchor.constraint(
+                equalTo: inspectorPanel.leadingAnchor, constant: -AssemblageTheme.margin
+            ),
+
+            senkrechtPanel.topAnchor.constraint(equalTo: waagerechtPanel.bottomAnchor, constant: 10),
+            senkrechtPanel.leadingAnchor.constraint(equalTo: waagerechtPanel.leadingAnchor),
+            senkrechtPanel.widthAnchor.constraint(equalToConstant: dicke),
+            // Endet über der Verlaufsleiste, die unten an derselben Flucht
+            // beginnt.
+            senkrechtPanel.bottomAnchor.constraint(equalTo: undoBar.topAnchor, constant: -10)
+        ])
+        guard let waagerecht = horizontalRuler, let senkrecht = verticalRuler else { return waagerechtTop }
+
+        // Nullpunkt und Massstab werden bei jedem Zeichnen frisch aus der Lage
+        // der Leinwand abgeleitet, statt sie zwischenzuspeichern — `convert`
+        // rechnet Zoom und Bildlauf bereits mit, und beides ändert sich
+        // laufend.
+        waagerecht.geometryProvider = { [weak self, weak waagerecht] in
+            guard let self, let waagerecht else { return nil }
+            let groesse = canvasViewController.canvasDocumentSize
+            guard groesse.width > 0 else { return nil }
+            let leinwand = waagerecht.convert(canvasViewController.canvasRectInWindow, from: nil)
+            // Nullpunkt in der Leinwandmitte, nicht an ihrer Kante.
+            return RulerGeometry(
+                zero: leinwand.midX,
+                scale: leinwand.width / groesse.width,
+                documentLength: groesse.width
+            )
+        }
+        senkrecht.geometryProvider = { [weak self, weak senkrecht] in
+            guard let self, let senkrecht else { return nil }
+            let groesse = canvasViewController.canvasDocumentSize
+            guard groesse.height > 0 else { return nil }
+            let leinwand = senkrecht.convert(canvasViewController.canvasRectInWindow, from: nil)
+            // Nullpunkt in der Leinwandmitte. Nach oben zählt das Lineal
+            // positiv — das besorgt `CanvasRulerView.achsenrichtung`.
+            return RulerGeometry(
+                zero: leinwand.midY,
+                scale: leinwand.height / groesse.height,
+                documentLength: groesse.height
+            )
+        }
+
+        canvasViewController.onCanvasGeometryChange = { [weak waagerecht, weak senkrecht] in
+            waagerecht?.refresh()
+            senkrecht?.refresh()
+        }
+        return waagerechtTop
+    }
+
+    /// Oberkante des waagerechten Lineals bei sichtbarer Werkzeugleiste:
+    /// direkt darunter. Als Rechnung statt als feste Zahl, damit eine andere
+    /// Zeilenhöhe nicht stillschweigend zu einer Überlappung führt.
+    private static var rulerTopWhenToolbarVisible: CGFloat {
+        AssemblageTheme.margin + ToolbarController.toolbarRowHeight + 10
+    }
+
+    /// Oberkante des Lineals, wenn die Werkzeugleiste ausgefahren ist: knapp
+    /// unter den Ampel-Knöpfen, die im obersten Streifen liegen bleiben.
+    private static let rulerTopWhenToolbarHidden: CGFloat = 30
 
     override func loadView() {
         let container = NSView()
@@ -92,24 +275,33 @@ final class DocumentStageViewController: NSViewController {
         layersPanel.content = makeLayersPanelContent()
         layersPanel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(layersPanel)
+        // Als Variable, weil das automatische Ausblenden genau diese Konstante
+        // verschiebt (siehe `makeAutoHideController`).
+        let layersLeading = layersPanel.leadingAnchor.constraint(
+            equalTo: container.leadingAnchor, constant: AssemblageTheme.margin
+        )
         NSLayoutConstraint.activate([
-            // Derselbe Abstand zur Fensterkante wie bei allen anderen
-            // schwebenden Panels; der Streifen darüber gehört den echten
-            // Ampel-Knöpfen (siehe unten und `adoptTrafficLights()`).
+            // Der Streifen ganz oben gehört den echten Ampel-Knöpfen (siehe
+            // unten und `adoptTrafficLights()`).
             layersPanel.topAnchor.constraint(equalTo: container.topAnchor, constant: AssemblageTheme.margin),
             layersPanel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -AssemblageTheme.margin),
-            layersPanel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: AssemblageTheme.margin),
+            layersLeading,
             layersPanel.widthAnchor.constraint(equalToConstant: AssemblageTheme.layersPanelWidth)
         ])
 
         // Die echten Fenster-Knöpfe sitzen im freien Streifen über dem
-        // Ebenen-Panel, linksbündig mit dessen Kante. Grösse kommt aus der
+        // Ebenen-Panel, in derselben Flucht. Grösse kommt aus der
         // intrinsischen Grösse des Hosts, der sie erst zur Laufzeit aufnimmt
         // (`adoptTrafficLights()`).
         trafficLightHost.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(trafficLightHost)
         NSLayoutConstraint.activate([
-            trafficLightHost.leadingAnchor.constraint(equalTo: layersPanel.leadingAnchor),
+            // Am Container statt am Ebenen-Panel: Sonst führe beim
+            // automatischen Ausblenden das Panel die Schliessen-, Ablegen- und
+            // Vollbild-Knöpfe mit aus dem Fenster hinaus.
+            trafficLightHost.leadingAnchor.constraint(
+                equalTo: container.leadingAnchor, constant: AssemblageTheme.margin
+            ),
             trafficLightHost.centerYAnchor.constraint(
                 equalTo: container.topAnchor, constant: AssemblageTheme.margin / 2
             )
@@ -117,8 +309,11 @@ final class DocumentStageViewController: NSViewController {
 
         let toolbarRow = toolbarController.buildFloatingToolbarRow()
         container.addSubview(toolbarRow)
+        let toolbarTop = toolbarRow.topAnchor.constraint(
+            equalTo: container.topAnchor, constant: AssemblageTheme.margin
+        )
         NSLayoutConstraint.activate([
-            toolbarRow.topAnchor.constraint(equalTo: container.topAnchor, constant: AssemblageTheme.margin),
+            toolbarTop,
             toolbarRow.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -AssemblageTheme.margin)
         ])
         let toolbarLeading = toolbarRow.leadingAnchor.constraint(
@@ -136,15 +331,20 @@ final class DocumentStageViewController: NSViewController {
         // in den Überlappungsbereich käme.
         toolbarLeading.isActive = true
 
+        // Die Lineale entstehen schon hier, weil der Regler-Streifen gleich
+        // unter dem waagerechten hängt; ihre eigenen Zwänge kommen erst am
+        // Ende, wenn auch Eigenschaften-Panel und Verlaufsleiste stehen.
+        let (horizontalRulerPanel, verticalRulerPanel) = makeRulerPanels(in: container)
+
         // Regler für Pinsel/Lasso/Farbe — im Mockup nicht vorgesehen (siehe
         // `ToolbarController.buildToolSettingsBar`), deshalb als eigene,
-        // nur bei Bedarf sichtbare Pille direkt unter der Werkzeugleiste.
+        // nur bei Bedarf sichtbare Pille unter Werkzeugleiste und Lineal.
         let settingsBar = toolbarController.buildToolSettingsBar()
         self.settingsBar = settingsBar
         settingsBar.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(settingsBar)
         NSLayoutConstraint.activate([
-            settingsBar.topAnchor.constraint(equalTo: toolbarRow.bottomAnchor, constant: 10),
+            settingsBar.topAnchor.constraint(equalTo: horizontalRulerPanel.bottomAnchor, constant: 10),
             settingsBar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -AssemblageTheme.margin),
             settingsBar.heightAnchor.constraint(equalToConstant: 44)
         ])
@@ -168,10 +368,13 @@ final class DocumentStageViewController: NSViewController {
         )
         self.inspectorTopBelowToolbar = inspectorTopBelowToolbar
         self.inspectorTopBelowSettingsBar = inspectorTopBelowSettingsBar
+        let inspectorTrailing = inspectorPanel.trailingAnchor.constraint(
+            equalTo: container.trailingAnchor, constant: -AssemblageTheme.margin
+        )
         NSLayoutConstraint.activate([
             inspectorTopBelowToolbar,
             inspectorPanel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -AssemblageTheme.margin),
-            inspectorPanel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -AssemblageTheme.margin),
+            inspectorTrailing,
             inspectorPanel.widthAnchor.constraint(equalToConstant: AssemblageTheme.inspectorPanelWidth),
             // Nur die linke Kante begrenzt die Mindestbreite: Pinsel- und
             // Farbregler brauchen rund 570 pt und dürfen deshalb weiter nach
@@ -190,25 +393,121 @@ final class DocumentStageViewController: NSViewController {
         let undoBar = toolbarController.buildUndoBar()
         undoBar.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(undoBar)
+        let undoBottom = undoBar.bottomAnchor.constraint(
+            equalTo: container.bottomAnchor, constant: -AssemblageTheme.margin
+        )
         NSLayoutConstraint.activate([
             undoBar.leadingAnchor.constraint(equalTo: layersPanel.trailingAnchor, constant: AssemblageTheme.margin),
-            undoBar.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -AssemblageTheme.margin),
+            undoBottom,
             undoBar.heightAnchor.constraint(equalToConstant: 44)
         ])
+
+        // Erst hier, weil die Lineale sich an Ebenen-Panel, Eigenschaften-Panel
+        // und Verlaufsleiste ausrichten — die muss es dafür alle schon geben.
+        let rulerTop = constrainRulers(
+            horizontal: horizontalRulerPanel,
+            vertical: verticalRulerPanel,
+            in: container,
+            rightOf: layersPanel,
+            leftOf: inspectorPanel,
+            above: undoBar
+        )
 
         let zoomBar = toolbarController.buildZoomBar()
         zoomBar.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(zoomBar)
+        let zoomBottom = zoomBar.bottomAnchor.constraint(
+            equalTo: container.bottomAnchor, constant: -AssemblageTheme.margin
+        )
         NSLayoutConstraint.activate([
             // Das Eigenschaften-Panel klebt selbst am rechten Fensterrand;
             // rechts daneben gibt es keinen Platz. Links davon bleibt die
             // Pille unten rechts auf der Leinwand, ohne Inhalt zu überdecken.
             zoomBar.trailingAnchor.constraint(equalTo: inspectorPanel.leadingAnchor, constant: -AssemblageTheme.margin),
-            zoomBar.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -AssemblageTheme.margin),
+            zoomBottom,
             zoomBar.heightAnchor.constraint(equalToConstant: 44)
         ])
 
+        autoHideController = makeAutoHideController(
+            container: container,
+            layersPanel: (layersPanel, layersLeading),
+            toolbarRow: (toolbarRow, toolbarTop),
+            settingsBar: settingsBar,
+            inspectorPanel: (inspectorPanel, inspectorTrailing),
+            ruler: (horizontalRulerPanel, rulerTop),
+            undoBar: (undoBar, undoBottom),
+            zoomBar: (zoomBar, zoomBottom)
+        )
+
         view = container
+        applyStageTint()
+    }
+
+    /// Verdrahtet das automatische Ausblenden (Menü „Darstellung").
+    ///
+    /// Welches Widget wohin fährt, steht hier an einer Stelle beisammen:
+    /// Ebenen-Panel nach links, Werkzeugleiste nach oben, Eigenschaften-Panel
+    /// nach rechts — die drei verschwinden ganz. Verlaufs- und Zoomleiste
+    /// rücken nur an die Unterkante, das Lineal nach oben unter die
+    /// Ampel-Knöpfe: Diese drei bleiben immer sichtbar (Nutzer-Auftrag).
+    ///
+    /// Das senkrechte Lineal braucht keinen eigenen Eintrag — es hängt am
+    /// waagerechten und am Ebenen-Panel und rückt dadurch von selbst an den
+    /// linken Rand, sobald das Panel hinausfährt.
+    private func makeAutoHideController(
+        container: NSView,
+        layersPanel: (view: NSView, leading: NSLayoutConstraint),
+        toolbarRow: (view: NSView, top: NSLayoutConstraint),
+        settingsBar: NSView,
+        inspectorPanel: (view: NSView, trailing: NSLayoutConstraint),
+        ruler: (view: NSView, top: NSLayoutConstraint),
+        undoBar: (view: NSView, bottom: NSLayoutConstraint),
+        zoomBar: (view: NSView, bottom: NSLayoutConstraint)
+    ) -> WidgetAutoHideController {
+        let rand = AssemblageTheme.margin
+        // Nur noch ein Hauch Abstand zur Kante für die Widgets, die sichtbar
+        // bleiben, aber Platz machen sollen.
+        let anDerKante: CGFloat = 4
+
+        let items: [WidgetAutoHideController.Item] = [
+            .init(
+                view: layersPanel.view, edge: .left, constraint: layersPanel.leading,
+                shownConstant: rand,
+                hiddenConstant: -(AssemblageTheme.layersPanelWidth + rand)
+            ),
+            .init(
+                view: toolbarRow.view, edge: .top, constraint: toolbarRow.top,
+                shownConstant: rand,
+                hiddenConstant: -(ToolbarController.toolbarRowHeight + rand)
+            ),
+            .init(
+                view: inspectorPanel.view, edge: .right, constraint: inspectorPanel.trailing,
+                shownConstant: -rand,
+                hiddenConstant: AssemblageTheme.inspectorPanelWidth + rand
+            ),
+            .init(
+                view: ruler.view, edge: .top, constraint: ruler.top,
+                shownConstant: Self.rulerTopWhenToolbarVisible,
+                hiddenConstant: Self.rulerTopWhenToolbarHidden
+            ),
+            .init(
+                view: undoBar.view, edge: .bottom, constraint: undoBar.bottom,
+                shownConstant: -rand, hiddenConstant: -anDerKante
+            ),
+            .init(
+                view: zoomBar.view, edge: .bottom, constraint: zoomBar.bottom,
+                shownConstant: -rand, hiddenConstant: -anDerKante
+            ),
+            // Hängt unter dem Lineal, kann also nicht mit hinausfahren —
+            // blendet deshalb weich aus.
+            .init(
+                view: settingsBar, edge: .top, constraint: ruler.top,
+                shownConstant: Self.rulerTopWhenToolbarVisible,
+                hiddenConstant: Self.rulerTopWhenToolbarHidden,
+                fadesOut: true
+            )
+        ]
+        return WidgetAutoHideController(container: container, items: items)
     }
 
     override func viewDidLayout() {
@@ -289,6 +588,7 @@ final class DocumentStageViewController: NSViewController {
         let title = NSTextField(labelWithString: "EBENEN")
         title.font = .systemFont(ofSize: 11, weight: .bold)
         title.textColor = AssemblageTheme.textSecondary
+        layersHeaderLabel = title
 
         let row = NSStackView(views: [title])
         row.orientation = .horizontal
@@ -299,6 +599,9 @@ final class DocumentStageViewController: NSViewController {
     override func viewDidAppear() {
         super.viewDidAppear()
         observeWindowUpdatesForTrafficLights()
+        // Erst jetzt gibt es ein Fenster, dessen Mausbewegungen der
+        // Ausblend-Controller mitlesen kann.
+        autoHideController?.activateIfEnabled()
     }
 
     /// AppKit holt sich die umgehängten Ampel-Knöpfe von sich aus in die
@@ -320,21 +623,30 @@ final class DocumentStageViewController: NSViewController {
     }
 
     private func makeLayersFooter() -> NSView {
-        let duplicate = NSButton(
-            image: MockupIcons.image(.duplicate, pointSize: 14, tintColor: AssemblageTheme.textPrimary),
-            target: self, action: #selector(duplicateSelected(_:))
-        )
-        duplicate.isBordered = false
+        // Leer erstellen und `cell` vor Bild/Ziel tauschen — siehe
+        // ausführlicher Kommentar zum selben Muster in
+        // `ToolbarController.makeToolButton`.
+        let duplicate = NSButton()
+        duplicate.cell = AquaButtonCell()
+        duplicate.target = self
+        duplicate.action = #selector(duplicateSelected(_:))
+        duplicate.image = MockupIcons.image(.duplicate, pointSize: 14, tintColor: AssemblageTheme.textPrimary)
+        duplicate.isBordered = true
+        duplicate.wantsLayer = true
         duplicate.toolTip = "Duplizieren"
         self.duplicateButton = duplicate
+        self.duplicateButtonRef = duplicate
 
-        let delete = NSButton(
-            image: MockupIcons.image(.delete, pointSize: 14, tintColor: AssemblageTheme.textPrimary),
-            target: self, action: #selector(deleteSelected(_:))
-        )
-        delete.isBordered = false
+        let delete = NSButton()
+        delete.cell = AquaButtonCell()
+        delete.target = self
+        delete.action = #selector(deleteSelected(_:))
+        delete.image = MockupIcons.image(.delete, pointSize: 14, tintColor: AssemblageTheme.textPrimary)
+        delete.isBordered = true
+        delete.wantsLayer = true
         delete.toolTip = "Löschen"
         self.deleteButton = delete
+        self.deleteButtonRef = delete
 
         let blendMenu = NSPopUpButton(frame: .zero, pullsDown: false)
         blendMenu.bezelStyle = .texturedRounded
