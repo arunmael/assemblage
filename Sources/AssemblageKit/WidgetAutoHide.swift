@@ -80,6 +80,20 @@ final class WidgetAutoHideController {
         let placeLock: ((NSButton) -> Void)?
         /// Vom Nutzer festgestellt: bleibt draussen, bis er es wieder löst.
         var isPinned = false
+        /// Ein anderes Widget, dessen Sichtbarkeit dieses hier übernimmt.
+        ///
+        /// Nötig für die beiden Anhängsel: Das Lineal sitzt unter der
+        /// Werkzeugleiste und der Regler-Streifen gehört zu den
+        /// Werkzeug-Spezifikationen. Nur die Kante zu vergleichen reichte
+        /// nicht — stellt man die Werkzeugleiste mit dem Schloss fest, ist
+        /// ihre Kante trotzdem „nicht geweckt", und das Lineal rückte unter
+        /// die stehengebliebene Leiste (Nutzer-Rückmeldung). Dasselbe liess
+        /// den Regler-Streifen bei festgestelltem Eigenschaften-Panel ganz
+        /// verschwinden.
+        ///
+        /// Schwach, weil der Controller die Einträge ohnehin am Leben hält
+        /// und ein Zyklus zwischen zwei Einträgen sonst beide festhielte.
+        weak var follows: Item?
 
         init(
             view: NSView?,
@@ -102,6 +116,14 @@ final class WidgetAutoHideController {
         }
     }
 
+    /// Wann ein Eintrag draussen steht: entweder ist seine Kante geweckt oder
+    /// er ist festgestellt — beides gemessen an dem Widget, an dem er hängt
+    /// (siehe `Item.follows`).
+    private func isVisible(_ item: Item, revealed: Set<Edge>) -> Bool {
+        let massgeblich = item.follows ?? item
+        return revealed.contains(massgeblich.edge) || massgeblich.isPinned
+    }
+
     /// Wie nah der Zeiger einer Kante kommen muss, damit ihre Widgets
     /// zurückkommen. Grosszügiger als ein blosser Fensterrand-Streifen: Zu
     /// schmal getroffen wirkte das Einblenden launisch (Nutzer-Rückmeldung).
@@ -110,6 +132,19 @@ final class WidgetAutoHideController {
     /// Zusätzlicher Fangbereich rings um den Platzhalter-Griff. Er ist das
     /// sichtbare Ziel, also darf man ihn auch grosszügig treffen.
     nonisolated static let handleReach: CGFloat = 44
+
+    /// Dicke eines Platzhalters und sein Abstand zur Fensterkante.
+    nonisolated static let handleThickness: CGFloat = 9
+    nonisolated static let handleInset: CGFloat = 3
+
+    /// Wie weit ein Widget von der Fensterkante wegbleiben muss, damit es dem
+    /// Platzhalter nicht ins Gehege kommt.
+    ///
+    /// Betrifft alles, was beim Ausblenden der Panels an den Rand nachrückt:
+    /// die beiden Lineale und die Zoom-/Verlaufsleiste. Ohne diese Schranke
+    /// rutschten sie bis auf x = 0 und lagen genau über dem grauen Rahmen
+    /// (Nutzer-Rückmeldung).
+    nonisolated static let placeholderClearance: CGFloat = handleInset + handleThickness + 6
 
     private weak var container: NSView?
     private var items: [Item] = []
@@ -171,8 +206,8 @@ final class WidgetAutoHideController {
     /// dazu am Widget selbst — und *diese* Anker bewegen sich beim Ausfahren
     /// nicht. So passt der Rahmen ohne eine einzige nachgeführte Konstante.
     private func addHandles(to container: NSView) {
-        let dicke: CGFloat = 9
-        let abstand: CGFloat = 3
+        let dicke = Self.handleThickness
+        let abstand = Self.handleInset
 
         for item in items where item.pinnable {
             guard let widget = item.view else { continue }
@@ -276,8 +311,13 @@ final class WidgetAutoHideController {
 
     /// Nur für Tests: stellt die Widgets einer Kante fest, ohne dass jemand
     /// auf das Schloss klicken müsste.
+    ///
+    /// Nur die Einträge mit Schloss — genau die kann der Nutzer feststellen.
+    /// Anhängsel wie Lineal und Regler-Streifen folgen ihrem Widget von
+    /// selbst (siehe `Item.follows`); sie hier mitzusetzen würde den
+    /// Zusammenhang im Test verdecken.
     func setPinnedForTesting(edge: Edge, pinned: Bool) {
-        for item in items where item.edge == edge {
+        for item in items where item.edge == edge && item.pinnable {
             item.isPinned = pinned
         }
         refreshLockIcons()
@@ -454,7 +494,7 @@ final class WidgetAutoHideController {
         // gar nichts entscheiden und auf das nächste Layout warten.
         guard let container, !container.bounds.isEmpty else { return }
         var sichtbare = items.compactMap { item -> (edge: Edge, frame: NSRect)? in
-            guard let view = item.view, revealed.contains(item.edge) else { return nil }
+            guard let view = item.view, isVisible(item, revealed: revealed) else { return nil }
             return (item.edge, view.frame)
         }
         // Die Schlösser zählen zu ihrem Widget: Beim Werkzeugleisten-Schloss
@@ -462,7 +502,7 @@ final class WidgetAutoHideController {
         // ohne diese Zeilen fuhr die Leiste genau dann ein, wenn man das
         // Schloss anklicken wollte (Nutzer-Rückmeldung).
         sichtbare += locks.compactMap { item, knopf -> (edge: Edge, frame: NSRect)? in
-            guard revealed.contains(item.edge), let eltern = knopf.superview else { return nil }
+            guard isVisible(item, revealed: revealed), let eltern = knopf.superview else { return nil }
             let imContainer = container.convert(knopf.bounds, from: eltern)
             // Etwas grosszügiger als der Knopf selbst: 20 pt sind ein kleines
             // Ziel, und der Weg dorthin darf nicht schon zu spät sein.
@@ -494,7 +534,7 @@ final class WidgetAutoHideController {
             for item in items {
                 // Ein festgestelltes Widget bleibt draussen, egal wo der
                 // Zeiger steht.
-                let sichtbar = neu.contains(item.edge) || item.isPinned
+                let sichtbar = isVisible(item, revealed: neu)
                 item.constraint?.constant = sichtbar ? item.shownConstant : item.hiddenConstant
                 if item.fadesOut {
                     item.view?.animator().alphaValue = sichtbar ? 1 : 0
@@ -504,14 +544,14 @@ final class WidgetAutoHideController {
             // Ein Platzhalter zeigt sich nur, solange sein Widget wirklich
             // versteckt ist — und nur bei eingeschaltetem Ausblenden.
             for (item, griff) in handles {
-                let versteckt = !neu.contains(item.edge) && !item.isPinned
+                let versteckt = !isVisible(item, revealed: neu)
                 griff.animator().alphaValue = eingeschaltet && versteckt ? 1 : 0
             }
 
             // Schlösser gibt es nur im Ausblende-Betrieb; sie erscheinen mit
             // ihrem Widget.
             for (item, knopf) in locks {
-                let sichtbar = neu.contains(item.edge) || item.isPinned
+                let sichtbar = isVisible(item, revealed: neu)
                 knopf.isHidden = !eingeschaltet
                 knopf.animator().alphaValue = eingeschaltet && sichtbar ? 1 : 0
                 knopf.isEnabled = eingeschaltet && sichtbar

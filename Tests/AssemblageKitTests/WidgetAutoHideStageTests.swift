@@ -43,7 +43,7 @@ final class WidgetAutoHideStageTests: XCTestCase {
         steuerung.update(mouse: NSPoint(x: container.bounds.midX, y: container.bounds.midY))
         container.layoutSubtreeIfNeeded()
 
-        let lineal = try XCTUnwrap(stage.horizontalRuler?.superview)
+        let lineal = try XCTUnwrap(stage.horizontalRulerPanel)
         XCTAssertTrue(
             container.bounds.contains(lineal.frame),
             "das Lineal muss sichtbar bleiben, es rückt nur an den Rand: \(lineal.frame)"
@@ -149,6 +149,88 @@ final class WidgetAutoHideStageTests: XCTestCase {
             inspector.frame.maxX, container.bounds.maxX + 1,
             "das festgestellte Eigenschaften-Panel darf nicht hinausfahren"
         )
+    }
+
+    // MARK: - Anhängsel folgen ihrem Widget
+
+    /// Stellt man die Werkzeugleiste mit dem Schloss fest, muss das Lineal
+    /// unter ihr bleiben. Vorher richtete es sich nur nach der Fensterkante
+    /// und rückte unter die stehengebliebene Leiste (Nutzer-Rückmeldung).
+    func testThePinnedToolbarKeepsTheRulerBelowIt() throws {
+        let (stage, container) = try makeStage()
+        let steuerung = try XCTUnwrap(stage.autoHideController)
+        let werkzeuge = try XCTUnwrap(stage.toolbarRowForTesting)
+        let lineal = try XCTUnwrap(stage.horizontalRulerPanel)
+
+        steuerung.setPinnedForTesting(edge: .top, pinned: true)
+        steuerung.update(mouse: NSPoint(x: container.bounds.midX, y: container.bounds.midY))
+        container.layoutSubtreeIfNeeded()
+
+        XCTAssertFalse(
+            lineal.frame.intersects(werkzeuge.frame),
+            "Lineal \(lineal.frame) darf die Werkzeugleiste \(werkzeuge.frame) nicht überlappen"
+        )
+    }
+
+    /// Der Regler-Streifen gehört zu den Werkzeug-Spezifikationen: Ist das
+    /// Eigenschaften-Panel festgestellt, muss er sichtbar bleiben, auch wenn
+    /// der Zeiger längst mitten auf der Leinwand steht.
+    func testThePinnedInspectorKeepsTheSettingsBarVisible() throws {
+        let (stage, container) = try makeStage()
+        let steuerung = try XCTUnwrap(stage.autoHideController)
+        let streifen = try XCTUnwrap(stage.settingsBar)
+
+        steuerung.setPinnedForTesting(edge: .right, pinned: true)
+        steuerung.update(mouse: NSPoint(x: container.bounds.midX, y: container.bounds.midY))
+        container.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(streifen.alphaValue, 1, accuracy: 0.001)
+    }
+
+    /// Und umgekehrt: ohne festgestelltes Panel verblasst er mit ihm.
+    func testTheSettingsBarFadesWithTheInspector() throws {
+        let (stage, container) = try makeStage()
+        let steuerung = try XCTUnwrap(stage.autoHideController)
+        let streifen = try XCTUnwrap(stage.settingsBar)
+
+        steuerung.update(mouse: NSPoint(x: container.bounds.midX, y: container.bounds.midY))
+        container.layoutSubtreeIfNeeded()
+        XCTAssertEqual(streifen.alphaValue, 0, accuracy: 0.001)
+
+        steuerung.update(mouse: NSPoint(x: container.bounds.maxX - 2, y: container.bounds.midY))
+        container.layoutSubtreeIfNeeded()
+        XCTAssertEqual(streifen.alphaValue, 1, accuracy: 0.001)
+    }
+
+    // MARK: - Platz für die Platzhalter
+
+    /// Sind die Panels draussen, rücken Lineale und die beiden Pillen an den
+    /// Rand nach — aber nicht auf die Platzhalter (Nutzer-Rückmeldung).
+    func testTheWidgetsThatStayVisibleKeepClearOfThePlaceholders() throws {
+        let (stage, container) = try makeStage()
+        let steuerung = try XCTUnwrap(stage.autoHideController)
+
+        steuerung.update(mouse: NSPoint(x: container.bounds.midX, y: container.bounds.midY))
+        container.layoutSubtreeIfNeeded()
+
+        let abstand = WidgetAutoHideController.placeholderClearance
+        let teile: [NSView] = [
+            try XCTUnwrap(stage.horizontalRulerPanel),
+            try XCTUnwrap(stage.verticalRulerPanel),
+            try XCTUnwrap(stage.undoBar),
+            try XCTUnwrap(stage.zoomBar)
+        ]
+
+        for ansicht in teile {
+            XCTAssertGreaterThanOrEqual(
+                ansicht.frame.minX, container.bounds.minX + abstand - 0.5,
+                "\(ansicht.frame) liegt auf dem linken Platzhalter"
+            )
+            XCTAssertLessThanOrEqual(
+                ansicht.frame.maxX, container.bounds.maxX - abstand + 0.5,
+                "\(ansicht.frame) liegt auf dem rechten Platzhalter"
+            )
+        }
     }
 
     /// Am rechten Rand kommt das Eigenschaften-Panel zurück — und nur das.

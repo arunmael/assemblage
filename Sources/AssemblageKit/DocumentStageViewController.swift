@@ -27,6 +27,15 @@ final class DocumentStageViewController: NSViewController {
     private(set) weak var layersPanel: GlassPanel?
     private(set) weak var horizontalRuler: CanvasRulerView?
     private(set) weak var verticalRuler: CanvasRulerView?
+    /// Die Glas-Panels der Lineale und die beiden schwebenden Pillen.
+    ///
+    /// Getrennt von den Linealen selbst: Deren `superview` ist die
+    /// Inhaltsansicht *innerhalb* des Panels, deren Rahmen relativ zum Panel
+    /// und damit für Lagevergleiche im Fenster unbrauchbar ist.
+    private(set) weak var horizontalRulerPanel: GlassPanel?
+    private(set) weak var verticalRulerPanel: GlassPanel?
+    private(set) weak var undoBar: NSView?
+    private(set) weak var zoomBar: NSView?
 
     private let state: DocumentState
     private var observations: Set<AnyCancellable> = []
@@ -273,6 +282,8 @@ final class DocumentStageViewController: NSViewController {
         waagerechtPanel.content = waagerecht
         let senkrechtPanel = GlassPanel(cornerRadius: AssemblageTheme.toolButtonCornerRadius)
         senkrechtPanel.content = senkrecht
+        horizontalRulerPanel = waagerechtPanel
+        verticalRulerPanel = senkrechtPanel
 
         for panel in [waagerechtPanel, senkrechtPanel] {
             panel.translatesAutoresizingMaskIntoConstraints = false
@@ -302,17 +313,35 @@ final class DocumentStageViewController: NSViewController {
         let waagerechtTop = waagerechtPanel.topAnchor.constraint(
             equalTo: container.topAnchor, constant: Self.rulerTopWhenToolbarVisible
         )
+        // Beginnt erst nach dem Ebenen-Panel und endet vor dem
+        // Eigenschaften-Panel: Das Lineal misst genau den Ausschnitt der
+        // Leinwand, den man zwischen den beiden auch sieht.
+        //
+        // Nachgiebig, mit einer harten Schranke am Fensterrand davor: Fährt
+        // ein Panel hinaus, wandert seine Kante bis vor den Fensterrand, und
+        // das Lineal rutschte bis auf die Platzhalter (Nutzer-Rückmeldung).
+        // So folgt es dem Panel, solange es da ist, und bleibt sonst vor dem
+        // grauen Rahmen stehen.
+        let abstandZumPlatzhalter = WidgetAutoHideController.placeholderClearance
+        let waagerechtLeading = waagerechtPanel.leadingAnchor.constraint(
+            equalTo: layersPanel.trailingAnchor, constant: AssemblageTheme.margin
+        )
+        let waagerechtTrailing = waagerechtPanel.trailingAnchor.constraint(
+            equalTo: inspectorPanel.leadingAnchor, constant: -AssemblageTheme.margin
+        )
+        waagerechtLeading.priority = .defaultHigh
+        waagerechtTrailing.priority = .defaultHigh
+
         NSLayoutConstraint.activate([
             waagerechtTop,
             waagerechtPanel.heightAnchor.constraint(equalToConstant: dicke),
-            // Beginnt erst nach dem Ebenen-Panel und endet vor dem
-            // Eigenschaften-Panel: Das Lineal misst genau den Ausschnitt der
-            // Leinwand, den man zwischen den beiden auch sieht.
+            waagerechtLeading,
+            waagerechtTrailing,
             waagerechtPanel.leadingAnchor.constraint(
-                equalTo: layersPanel.trailingAnchor, constant: AssemblageTheme.margin
+                greaterThanOrEqualTo: container.leadingAnchor, constant: abstandZumPlatzhalter
             ),
             waagerechtPanel.trailingAnchor.constraint(
-                equalTo: inspectorPanel.leadingAnchor, constant: -AssemblageTheme.margin
+                lessThanOrEqualTo: container.trailingAnchor, constant: -abstandZumPlatzhalter
             ),
 
             senkrechtPanel.topAnchor.constraint(equalTo: waagerechtPanel.bottomAnchor, constant: 10),
@@ -371,6 +400,14 @@ final class DocumentStageViewController: NSViewController {
     /// Oberkante des Lineals, wenn die Werkzeugleiste ausgefahren ist: knapp
     /// unter den Ampel-Knöpfen, die im obersten Streifen liegen bleiben.
     private static let rulerTopWhenToolbarHidden: CGFloat = 30
+
+    /// Abstand von Zoom- und Verlaufsleiste zur Fensterunterkante.
+    ///
+    /// Grösser als der übliche Rand: Beide schweben frei über der Leinwand,
+    /// und in den unteren Ecken laufen die Platzhalter der seitlichen Panels
+    /// aus. Etwas höher gesetzt geraten sie sich dort nicht mehr in die Quere
+    /// (Nutzer-Auftrag).
+    private static let floatingBarBottomInset: CGFloat = AssemblageTheme.margin + 14
 
     override func loadView() {
         let container = NSView()
@@ -521,13 +558,24 @@ final class DocumentStageViewController: NSViewController {
         // Verlaufsleiste steht jetzt neben dem Ebenen-Panel unten links, der
         // Zoom unten rechts auf der freien Leinwand.
         let undoBar = toolbarController.buildUndoBar()
+        self.undoBar = undoBar
         undoBar.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(undoBar)
         let undoBottom = undoBar.bottomAnchor.constraint(
-            equalTo: container.bottomAnchor, constant: -AssemblageTheme.margin
+            equalTo: container.bottomAnchor, constant: -Self.floatingBarBottomInset
         )
+        // Wie bei den Linealen: folgt dem Ebenen-Panel, bleibt aber vor dem
+        // Platzhalter stehen, wenn das Panel hinausgefahren ist.
+        let undoLeading = undoBar.leadingAnchor.constraint(
+            equalTo: layersPanel.trailingAnchor, constant: AssemblageTheme.margin
+        )
+        undoLeading.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            undoBar.leadingAnchor.constraint(equalTo: layersPanel.trailingAnchor, constant: AssemblageTheme.margin),
+            undoLeading,
+            undoBar.leadingAnchor.constraint(
+                greaterThanOrEqualTo: container.leadingAnchor,
+                constant: WidgetAutoHideController.placeholderClearance
+            ),
             undoBottom,
             undoBar.heightAnchor.constraint(equalToConstant: 44)
         ])
@@ -544,16 +592,26 @@ final class DocumentStageViewController: NSViewController {
         )
 
         let zoomBar = toolbarController.buildZoomBar()
+        self.zoomBar = zoomBar
         zoomBar.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(zoomBar)
         let zoomBottom = zoomBar.bottomAnchor.constraint(
-            equalTo: container.bottomAnchor, constant: -AssemblageTheme.margin
+            equalTo: container.bottomAnchor, constant: -Self.floatingBarBottomInset
         )
+        // Das Eigenschaften-Panel klebt selbst am rechten Fensterrand; rechts
+        // daneben gibt es keinen Platz. Links davon bleibt die Pille unten
+        // rechts auf der Leinwand, ohne Inhalt zu überdecken — und vor dem
+        // Platzhalter, wenn das Panel hinausgefahren ist.
+        let zoomTrailing = zoomBar.trailingAnchor.constraint(
+            equalTo: inspectorPanel.leadingAnchor, constant: -AssemblageTheme.margin
+        )
+        zoomTrailing.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            // Das Eigenschaften-Panel klebt selbst am rechten Fensterrand;
-            // rechts daneben gibt es keinen Platz. Links davon bleibt die
-            // Pille unten rechts auf der Leinwand, ohne Inhalt zu überdecken.
-            zoomBar.trailingAnchor.constraint(equalTo: inspectorPanel.leadingAnchor, constant: -AssemblageTheme.margin),
+            zoomTrailing,
+            zoomBar.trailingAnchor.constraint(
+                lessThanOrEqualTo: container.trailingAnchor,
+                constant: -WidgetAutoHideController.placeholderClearance
+            ),
             zoomBottom,
             zoomBar.heightAnchor.constraint(equalToConstant: 44)
         ])
@@ -634,42 +692,54 @@ final class DocumentStageViewController: NSViewController {
         layersAutoHideItem = layersItem
         inspectorAutoHideItem = inspectorItem
 
+        let toolbarItem = WidgetAutoHideController.Item(
+            view: toolbarRow.view, edge: .top, constraint: toolbarRow.top,
+            shownConstant: rand,
+            hiddenConstant: -(ToolbarController.toolbarRowHeight + rand),
+            pinnable: true
+        )
+        let rulerItem = WidgetAutoHideController.Item(
+            view: ruler.view, edge: .top, constraint: ruler.top,
+            shownConstant: Self.rulerTopWhenToolbarVisible,
+            hiddenConstant: Self.rulerTopWhenToolbarHidden
+        )
+        let settingsBarItem = WidgetAutoHideController.Item(
+            view: settingsBar, edge: .right, constraint: nil,
+            shownConstant: 0, hiddenConstant: 0,
+            fadesOut: true
+        )
+
         let items: [WidgetAutoHideController.Item] = [
             layersItem,
-            .init(
-                view: toolbarRow.view, edge: .top, constraint: toolbarRow.top,
-                shownConstant: rand,
-                hiddenConstant: -(ToolbarController.toolbarRowHeight + rand),
-                pinnable: true
-            ),
+            toolbarItem,
             inspectorItem,
-            .init(
-                view: ruler.view, edge: .top, constraint: ruler.top,
-                shownConstant: Self.rulerTopWhenToolbarVisible,
-                hiddenConstant: Self.rulerTopWhenToolbarHidden
-            ),
+            rulerItem,
             .init(
                 view: undoBar.view, edge: .bottom, constraint: undoBar.bottom,
-                shownConstant: -rand, hiddenConstant: -anDerKante
+                shownConstant: -Self.floatingBarBottomInset, hiddenConstant: -anDerKante
             ),
             .init(
                 view: zoomBar.view, edge: .bottom, constraint: zoomBar.bottom,
-                shownConstant: -rand, hiddenConstant: -anDerKante
+                shownConstant: -Self.floatingBarBottomInset, hiddenConstant: -anDerKante
             ),
             // Der Regler-Streifen (Pinsel-/Farbregler) gehört inhaltlich zu
             // den Werkzeug-Spezifikationen und kommt deshalb mit dem
-            // Eigenschaften-Panel an der **rechten** Kante heraus, nicht an
-            // der oberen (Nutzer-Auftrag) — obwohl er unter dem Lineal hängt.
+            // Eigenschaften-Panel heraus, nicht mit der Werkzeugleiste
+            // (Nutzer-Auftrag) — obwohl er unter dem Lineal hängt.
             //
             // Ohne eigenen Zwang: Er hängt an der Unterkante des Lineals und
             // kann sich nicht selbst bewegen; ausgeblendet wird er deshalb
             // durch Verblassen.
-            .init(
-                view: settingsBar, edge: .right, constraint: nil,
-                shownConstant: 0, hiddenConstant: 0,
-                fadesOut: true
-            )
+            settingsBarItem
         ]
+
+        // Beide Anhängsel folgen dem Widget, zu dem sie gehören — nicht bloss
+        // dessen Fensterkante. Sonst rückt das Lineal unter eine
+        // festgestellte Werkzeugleiste, und der Regler-Streifen bleibt bei
+        // festgestelltem Eigenschaften-Panel unsichtbar (Nutzer-Rückmeldung).
+        rulerItem.follows = toolbarItem
+        settingsBarItem.follows = inspectorItem
+
         return WidgetAutoHideController(container: container, items: items)
     }
 
