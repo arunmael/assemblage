@@ -172,6 +172,83 @@ final class HandleTests: XCTestCase {
                        "gleiche Skalierung heisst bei nicht-quadratischem Inhalt gleiches Verhältnis")
     }
 
+    // MARK: - Quadrat und Kreis
+
+    /// Knapp neben dem Quadrat gezogen — die Ebene soll trotzdem exakt
+    /// quadratisch werden. Ein 200×100-Inhalt kann das nur, wenn die beiden
+    /// Skalierungen sich unterscheiden; die Umschalttaste hilft hier also
+    /// gerade nicht.
+    func testNearlySquareSnapsToExactlySquare() {
+        let start = Transform2D(x: 200, y: 200)
+        let breit = Size(width: 200, height: 100)
+
+        // Feste Kanten liegen bei x = 100 und y = 150 (Inhalt 200×100,
+        // Skalierung 1). Gezogen auf 150×156 — sechs Punkte neben dem Quadrat.
+        let neu = start.resized(
+            handle: .bottomRight,
+            draggedTo: Point(x: 250, y: 306),
+            contentSize: breit,
+            squareSnapDistance: 14
+        )
+
+        XCTAssertEqual(
+            abs(neu.scaleX) * breit.width, abs(neu.scaleY) * breit.height, accuracy: 0.001,
+            "Breite und Höhe auf der Leinwand müssen gleich sein"
+        )
+    }
+
+    /// Zu weit weg vom Quadrat: Dann darf nichts einrasten, sonst spränge die
+    /// Ebene bei jedem Zug.
+    func testFarFromSquareDoesNotSnap() {
+        let start = Transform2D(x: 200, y: 200)
+
+        let neu = start.resized(
+            handle: .bottomRight,
+            draggedTo: Point(x: 400, y: 200),
+            contentSize: hundert,
+            squareSnapDistance: 14
+        )
+
+        XCTAssertNotEqual(
+            abs(neu.scaleX) * hundert.width, abs(neu.scaleY) * hundert.height, accuracy: 1
+        )
+    }
+
+    /// Auch am Kantengriff: Dort bewegt sich nur eine Seite, die andere ist
+    /// das Mass für das Quadrat.
+    func testEdgeHandleSnapsToSquare() {
+        let start = Transform2D(x: 200, y: 200)
+        let breit = Size(width: 200, height: 100)
+
+        // Feste linke Kante bei x = 100, Höhe bleibt 100 — gezogen auf Breite 106.
+        let neu = start.resized(
+            handle: .right,
+            draggedTo: Point(x: 206, y: 200),
+            contentSize: breit,
+            squareSnapDistance: 14
+        )
+
+        XCTAssertEqual(abs(neu.scaleX) * breit.width, 100, accuracy: 0.001)
+    }
+
+    /// Die Umschalttaste hält das Verhältnis des Inhalts; das Quadrat-
+    /// Einrasten muss dann schweigen, sonst stritten zwei Regeln.
+    func testSquareSnapStaysOutOfTheWayWhenAspectRatioIsHeld() {
+        let start = Transform2D(x: 200, y: 200)
+        let breit = Size(width: 200, height: 100)
+
+        let neu = start.resized(
+            handle: .bottomRight,
+            draggedTo: Point(x: 250, y: 306),
+            contentSize: breit,
+            keepingAspectRatio: true,
+            squareSnapDistance: 14
+        )
+
+        XCTAssertEqual(abs(neu.scaleX), abs(neu.scaleY), accuracy: 0.001,
+                       "Verhältnis 2:1 bleibt, also kein Quadrat")
+    }
+
     // MARK: - Drehen
 
     func testRotationFollowsTheCursor() {

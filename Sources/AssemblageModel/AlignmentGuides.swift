@@ -25,6 +25,28 @@ public enum GuideOrientation: Equatable, Sendable {
     case horizontal
 }
 
+/// Woran eine Hilfslinie ausgerichtet ist.
+///
+/// Bewusst als nackte Aufzählung ohne Beschriftung: Diese Datei läuft auch
+/// unter Linux und kennt keine Sprache. Wie das dem Nutzer heisst („Mitte",
+/// „Unterer Rand"), entscheidet die Oberfläche.
+public enum AlignmentReference: Equatable, Sendable {
+    /// Mitte der Leinwand.
+    case canvasCenter
+    /// Linke bzw. obere Leinwandkante.
+    case canvasEdgeLow
+    /// Rechte bzw. untere Leinwandkante.
+    case canvasEdgeHigh
+    /// Ein Drittel der Leinwand (Drittel-Regel).
+    case canvasThird
+    /// Mitte einer anderen Ebene.
+    case layerCenter
+    /// Kante einer anderen Ebene.
+    case layerEdge
+    /// Gleicher Abstand zu zwei Nachbarn.
+    case distribution
+}
+
 /// Eine einzelne Hilfslinie, wie sie der Canvas zum Zeichnen braucht.
 ///
 /// `start`/`end` sind die Ausdehnung der Linie auf der jeweils anderen Achse
@@ -35,12 +57,22 @@ public struct AlignmentGuideLine: Equatable, Sendable {
     public let position: Double
     public let start: Double
     public let end: Double
+    /// Woran hier ausgerichtet wird — damit die Oberfläche die Linie benennen
+    /// kann. Eine blosse Linie zeigt, *dass* etwas einrastet, nicht *was*.
+    public let reference: AlignmentReference
 
-    public init(orientation: GuideOrientation, position: Double, start: Double, end: Double) {
+    public init(
+        orientation: GuideOrientation,
+        position: Double,
+        start: Double,
+        end: Double,
+        reference: AlignmentReference = .layerEdge
+    ) {
         self.orientation = orientation
         self.position = position
         self.start = start
         self.end = end
+        self.reference = reference
     }
 }
 
@@ -109,17 +141,21 @@ public enum AlignmentGuides {
     ///    bewussteste aller Positionierungsabsichten.
     /// 2. Leinwand-Kante — ebenfalls von der Leinwand, aber weniger absichtsvoll
     ///    als exakte Zentrierung.
-    /// 3. Mitte einer anderen Ebene — eine zentrierte Beziehung zu einem Geschwister-
+    /// 3. Leinwand-Drittel — die klassische Bildaufteilung; von der Leinwand
+    ///    abgeleitet wie die beiden davor, aber weniger eindeutig als Mitte
+    ///    und Kante, weil es je Achse zwei davon gibt.
+    /// 4. Mitte einer anderen Ebene — eine zentrierte Beziehung zu einem Geschwister-
     ///    Objekt ist visuell auffälliger als eine reine Kantenberührung.
-    /// 4. Kante einer anderen Ebene — Standardfall des bündigen Ausrichtens.
-    /// 5. Gleicher Abstand — hängt von mindestens zwei anderen Ebenen ab und ist
+    /// 5. Kante einer anderen Ebene — Standardfall des bündigen Ausrichtens.
+    /// 6. Gleicher Abstand — hängt von mindestens zwei anderen Ebenen ab und ist
     ///    damit der am wenigsten "absichtliche", am ehesten zufällige Treffer.
     private enum GuidePriority: Int, Comparable {
         case canvasCenter = 0
         case canvasEdge = 1
-        case layerCenter = 2
-        case layerEdge = 3
-        case distribution = 4
+        case canvasThird = 2
+        case layerCenter = 3
+        case layerEdge = 4
+        case distribution = 5
 
         static func < (lhs: GuidePriority, rhs: GuidePriority) -> Bool { lhs.rawValue < rhs.rawValue }
     }
@@ -192,6 +228,16 @@ public enum AlignmentGuides {
             includesOppositeEdges: false
         )
 
+        // Drittel der Leinwand — die geläufigste Bildaufteilung überhaupt und
+        // von Hand nicht zu treffen. Bewusst nur die *Mitte* der gezogenen
+        // Ebene: Eine Kante auf einer Drittellinie ist keine Aussage, ein
+        // Motiv darauf schon.
+        candidates += thirdsCandidates(
+            dragged: dragged, draggedOrth: draggedOrth,
+            canvasLength: canvasSize.length(on: axis), canvasOrth: canvasOrth,
+            axis: axis
+        )
+
         // Andere Ebenen: Kantenausrichtung (gleiche und gegenüberliegende Kante) und Zentrieren.
         for other in otherFrames {
             let otherRange = other.range(on: axis)
@@ -237,8 +283,20 @@ public enum AlignmentGuides {
         let extentStart = min(draggedOrth.low, referenceOrth.low)
         let extentEnd = max(draggedOrth.high, referenceOrth.high)
 
-        func line(at position: Double) -> AlignmentGuideLine {
-            AlignmentGuideLine(orientation: orientation, position: position, start: extentStart, end: extentEnd)
+        func line(at position: Double, _ reference: AlignmentReference) -> AlignmentGuideLine {
+            AlignmentGuideLine(
+                orientation: orientation, position: position,
+                start: extentStart, end: extentEnd, reference: reference
+            )
+        }
+
+        // Bei der Leinwand sagt die Kante zusätzlich, *welche* — „unterer
+        // Rand" ist eine Auskunft, „Kante" nicht. Bei anderen Ebenen bleibt
+        // es bei „Kante": Welche der beiden, sieht man an der Linie selbst.
+        let istLeinwand = edgePriority == .canvasEdge
+        func kantenBezug(_ referenceValue: Double) -> AlignmentReference {
+            guard istLeinwand else { return .layerEdge }
+            return referenceValue == reference.low ? .canvasEdgeLow : .canvasEdgeHigh
         }
 
         var result: [Candidate] = []
@@ -259,7 +317,7 @@ public enum AlignmentGuides {
                 offset: offset,
                 priority: edgePriority,
                 referencePosition: referenceValue,
-                lines: [line(at: referenceValue)]
+                lines: [line(at: referenceValue, kantenBezug(referenceValue))]
             ))
         }
 
@@ -268,10 +326,44 @@ public enum AlignmentGuides {
             offset: centerOffset,
             priority: centerPriority,
             referencePosition: reference.center,
-            lines: [line(at: reference.center)]
+            lines: [line(
+                at: reference.center,
+                centerPriority == .canvasCenter ? .canvasCenter : .layerCenter
+            )]
         ))
 
         return result
+    }
+
+    /// Mitte der gezogenen Ebene auf ein Drittel der Leinwand.
+    ///
+    /// Die Linie läuft über die ganze Leinwandbreite bzw. -höhe und nicht nur
+    /// bis zur Ebene: Ein Drittel ist eine Eigenschaft des Bildes, nicht eine
+    /// Beziehung zwischen zwei Objekten.
+    private static func thirdsCandidates(
+        dragged: AxisRange,
+        draggedOrth: AxisRange,
+        canvasLength: Double,
+        canvasOrth: AxisRange,
+        axis: Axis
+    ) -> [Candidate] {
+        guard canvasLength > 0 else { return [] }
+        let orientation: GuideOrientation = (axis == .x) ? .vertical : .horizontal
+
+        return [canvasLength / 3, canvasLength * 2 / 3].map { drittel in
+            Candidate(
+                offset: drittel - dragged.center,
+                priority: .canvasThird,
+                referencePosition: drittel,
+                lines: [AlignmentGuideLine(
+                    orientation: orientation,
+                    position: drittel,
+                    start: min(canvasOrth.low, draggedOrth.low),
+                    end: max(canvasOrth.high, draggedOrth.high),
+                    reference: .canvasThird
+                )]
+            )
+        }
     }
 
     /// Gleicher Abstand: Rastet ein, wenn die gezogene Ebene zwischen zwei unmittelbar
@@ -323,8 +415,14 @@ public enum AlignmentGuides {
                 priority: .distribution,
                 referencePosition: target,
                 lines: [
-                    AlignmentGuideLine(orientation: orientation, position: left.high, start: extentStart, end: extentEnd),
-                    AlignmentGuideLine(orientation: orientation, position: right.low, start: extentStart, end: extentEnd)
+                    AlignmentGuideLine(
+                        orientation: orientation, position: left.high,
+                        start: extentStart, end: extentEnd, reference: .distribution
+                    ),
+                    AlignmentGuideLine(
+                        orientation: orientation, position: right.low,
+                        start: extentStart, end: extentEnd, reference: .distribution
+                    )
                 ]
             ))
         }

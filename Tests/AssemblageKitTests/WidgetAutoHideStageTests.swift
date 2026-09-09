@@ -50,9 +50,48 @@ final class WidgetAutoHideStageTests: XCTestCase {
         )
     }
 
-    /// Zu jedem verschwindenden Widget gehört ein Schloss, und es steht neben
-    /// dem Widget statt darauf — sonst verdeckte es dessen Inhalt.
-    func testEveryHidingWidgetHasALockBesideIt() throws {
+    /// Alle Schlösser im Ansichtsbaum, egal wie tief sie eingehängt sind.
+    private func schloesser(in view: NSView) -> [NSButton] {
+        var gefunden: [NSButton] = []
+        if let knopf = view as? NSButton, knopf.accessibilityLabel() == "Widget offen halten" {
+            gefunden.append(knopf)
+        }
+        for kind in view.subviews { gefunden += schloesser(in: kind) }
+        return gefunden
+    }
+
+    /// Zu jedem verschwindenden Widget gehört genau ein Schloss.
+    func testEveryHidingWidgetHasALock() throws {
+        let (_, container) = try makeStage()
+
+        XCTAssertEqual(
+            schloesser(in: container).count, 3, "Ebenen, Werkzeuge und Eigenschaften"
+        )
+    }
+
+    /// Das Schloss des Ebenen-Panels sitzt in dessen Fusszeile, direkt neben
+    /// dem Mülleimer — ausserhalb des Panels war es unerreichbar, weil das
+    /// Panel einfuhr, sobald der Zeiger es verliess (Nutzer-Rückmeldung).
+    func testTheLayersLockSitsInsideThePanelNextToTheBin() throws {
+        let (stage, container) = try makeStage()
+        let steuerung = try XCTUnwrap(stage.autoHideController)
+        let ebenen = try XCTUnwrap(stage.layersPanel)
+
+        steuerung.update(mouse: NSPoint(x: 2, y: container.bounds.midY))
+        container.layoutSubtreeIfNeeded()
+
+        let schloss = try XCTUnwrap(
+            schloesser(in: ebenen).first, "das Schloss muss im Ebenen-Panel hängen"
+        )
+        XCTAssertTrue(
+            ebenen.bounds.insetBy(dx: -1, dy: -1).contains(ebenen.convert(schloss.bounds, from: schloss)),
+            "und vollständig darin liegen"
+        )
+    }
+
+    /// Das Schloss des Eigenschaften-Panels sitzt unten rechts in dessen Ecke,
+    /// mit etwas Abstand zum Rand (Nutzer-Auftrag).
+    func testTheInspectorLockSitsInItsBottomRightCorner() throws {
         let (stage, container) = try makeStage()
         let steuerung = try XCTUnwrap(stage.autoHideController)
         let inspector = try XCTUnwrap(stage.inspectorPanel)
@@ -60,17 +99,38 @@ final class WidgetAutoHideStageTests: XCTestCase {
         steuerung.update(mouse: NSPoint(x: container.bounds.maxX - 2, y: container.bounds.midY))
         container.layoutSubtreeIfNeeded()
 
-        let schloesser = container.subviews.compactMap { $0 as? NSButton }
-            .filter { $0.accessibilityLabel() == "Widget offen halten" }
-        XCTAssertEqual(schloesser.count, 3, "Ebenen, Werkzeuge und Eigenschaften")
-
-        let amInspector = try XCTUnwrap(
-            schloesser.first { $0.frame.maxX <= inspector.frame.minX + 1 },
-            "das Schloss des Eigenschaften-Panels muss links davon liegen: \(schloesser.map(\.frame))"
+        let schloss = try XCTUnwrap(
+            schloesser(in: inspector).first, "das Schloss muss im Eigenschaften-Panel hängen"
         )
-        XCTAssertFalse(
-            amInspector.frame.intersects(inspector.frame),
-            "das Schloss darf das Widget nicht überlappen"
+        let rahmen = inspector.convert(schloss.bounds, from: schloss)
+        XCTAssertEqual(inspector.bounds.maxX - rahmen.maxX, 14, accuracy: 1, "Abstand nach rechts")
+        // Der Container ist nicht geflippt: unten heisst kleines y.
+        XCTAssertEqual(rahmen.minY - inspector.bounds.minY, 14, accuracy: 1, "Abstand nach unten")
+    }
+
+    /// Fährt der Zeiger auf ein Schloss, darf sich dessen Widget nicht
+    /// schliessen — sonst kommt man nie hin (Nutzer-Rückmeldung zur
+    /// Werkzeugleiste, deren Schloss neben ihr liegt).
+    func testHoveringALockKeepsItsWidgetOut() throws {
+        let (stage, container) = try makeStage()
+        let steuerung = try XCTUnwrap(stage.autoHideController)
+        let werkzeuge = try XCTUnwrap(stage.toolbarRowForTesting)
+
+        // Erst an die Oberkante, damit die Werkzeugleiste herauskommt …
+        steuerung.update(mouse: NSPoint(x: container.bounds.midX, y: container.bounds.maxY - 2))
+        container.layoutSubtreeIfNeeded()
+
+        let schloss = try XCTUnwrap(
+            schloesser(in: container).first { $0.superview === container },
+            "das Schloss der Werkzeugleiste hängt neben ihr im Container"
+        )
+        // … dann mitten auf ihr Schloss.
+        steuerung.update(mouse: NSPoint(x: schloss.frame.midX, y: schloss.frame.midY))
+        container.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(
+            container.bounds.contains(werkzeuge.frame),
+            "die Werkzeugleiste muss draussen bleiben: \(werkzeuge.frame)"
         )
     }
 

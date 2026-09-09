@@ -47,14 +47,21 @@ final class WidgetAutoHideController {
     final class Item {
         weak var view: NSView?
         let edge: Edge
-        /// Der Zwang, der das Widget an seiner Kante hält.
-        let constraint: NSLayoutConstraint
+        /// Der Zwang, der das Widget an seiner Kante hält — oder `nil` für
+        /// Widgets, die gar nicht hinausfahren, sondern nur aus- und
+        /// einblenden (der Regler-Streifen hängt am Lineal und kann sich
+        /// nicht selbst bewegen).
+        let constraint: NSLayoutConstraint?
         /// Konstante im sichtbaren Zustand …
         let shownConstant: CGFloat
         /// … und im versteckten. Bei den Widgets, die sichtbar bleiben sollen
         /// (Zoom, Verlauf, Lineal), ist der Unterschied nur klein: Sie rücken
         /// an den Rand, statt zu verschwinden.
-        let hiddenConstant: CGFloat
+        ///
+        /// Veränderbar, weil die seitlichen Panels sich in der Breite ziehen
+        /// lassen (siehe `PanelResizing.swift`): Wie weit ein Panel hinaus
+        /// muss, um zu verschwinden, ist genau seine Breite.
+        var hiddenConstant: CGFloat
         /// Widgets, die beim Verstecken zusätzlich ausblenden, weil sie an
         /// einem sichtbar bleibenden Widget hängen und deshalb nicht
         /// hinausfahren können (der Regler-Streifen unter dem Lineal).
@@ -62,17 +69,27 @@ final class WidgetAutoHideController {
         /// Ob das Widget ein Schloss bekommt, mit dem es sich offen halten
         /// lässt. Nur sinnvoll bei den Widgets, die überhaupt verschwinden.
         let pinnable: Bool
+        /// Wohin das Schloss gehört. `nil` heisst: neben das Widget, auf die
+        /// Leinwandseite (die Vorgabe, siehe `addLocks`).
+        ///
+        /// Als Rückruf und nicht als Aufzählung von Ecken, weil nur der
+        /// Aufrufer den Ort kennt: Beim Ebenen-Panel gehört das Schloss in
+        /// dessen Fusszeile neben den Mülleimer, beim Eigenschaften-Panel
+        /// unten rechts hinein — beides liegt *innerhalb* fremder
+        /// Ansichtsbäume, die dieser Controller nicht kennen sollte.
+        let placeLock: ((NSButton) -> Void)?
         /// Vom Nutzer festgestellt: bleibt draussen, bis er es wieder löst.
         var isPinned = false
 
         init(
             view: NSView?,
             edge: Edge,
-            constraint: NSLayoutConstraint,
+            constraint: NSLayoutConstraint?,
             shownConstant: CGFloat,
             hiddenConstant: CGFloat,
             fadesOut: Bool = false,
-            pinnable: Bool = false
+            pinnable: Bool = false,
+            placeLock: ((NSButton) -> Void)? = nil
         ) {
             self.view = view
             self.edge = edge
@@ -81,6 +98,7 @@ final class WidgetAutoHideController {
             self.hiddenConstant = hiddenConstant
             self.fadesOut = fadesOut
             self.pinnable = pinnable
+            self.placeLock = placeLock
         }
     }
 
@@ -100,10 +118,10 @@ final class WidgetAutoHideController {
     private var resizeObservation: NSObjectProtocol?
     private var keyObservation: NSObjectProtocol?
     private var revealed: Set<Edge> = [.left, .top, .right, .bottom]
-    /// Die kleinen Griffe an den vier Fensterkanten — sie zeigen, wo etwas
-    /// versteckt ist, damit die leere Fläche nicht ratlos macht
-    /// (Nutzer-Auftrag).
-    private var handles: [Edge: NSView] = [:]
+    /// Die Platzhalter — je verschwindendem Widget einer, genau so lang wie
+    /// das Widget selbst. Sie zeigen, wo etwas versteckt ist, damit die leere
+    /// Fläche nicht ratlos macht (Nutzer-Auftrag).
+    private var handles: [(item: Item, view: NSView)] = []
     private var locks: [(item: Item, button: NSButton)] = []
 
     init(container: NSView, items: [Item]) {
@@ -135,58 +153,79 @@ final class WidgetAutoHideController {
 
     // MARK: - Griffe und Schlösser
 
-    /// Ein schmaler Griff je Kante, mittig — wie der Streifen, den ein
-    /// ausgeblendetes Dock übrig lässt. Er ist reine Anzeige und nimmt keine
-    /// Klicks an, damit er der Leinwand nicht im Weg steht.
+    /// Ein grauer Platzhalter-Rahmen je verschwindendem Widget, an dessen
+    /// Fensterkante — so lang wie das Widget selbst, von dessen Anfang bis zu
+    /// dessen Ende (Nutzer-Auftrag).
+    ///
+    /// Die frühere Fassung war ein kurzer Strich mittig an jeder Fensterkante:
+    /// zu klein, und vier gleich aussehende Striche waren nicht
+    /// auseinanderzuhalten. Der Platzhalter zeigt jetzt die *Ausdehnung*
+    /// dessen, was dort herauskommt.
+    ///
+    /// Nur für Widgets, die wirklich verschwinden (`pinnable`): Zoom-,
+    /// Verlaufsleiste und Lineal bleiben ohnehin sichtbar, ein Platzhalter
+    /// neben ihnen wäre eine Ankündigung von nichts.
+    ///
+    /// Der Trick beim Anhängen: Auf der Achse, an der das Widget hinausfährt,
+    /// hängt der Platzhalter am Container (er bleibt am Rand stehen), quer
+    /// dazu am Widget selbst — und *diese* Anker bewegen sich beim Ausfahren
+    /// nicht. So passt der Rahmen ohne eine einzige nachgeführte Konstante.
     private func addHandles(to container: NSView) {
-        let laenge: CGFloat = 56
-        let dicke: CGFloat = 5
+        let dicke: CGFloat = 9
         let abstand: CGFloat = 3
 
-        for kante in [Edge.left, .top, .right, .bottom] {
+        for item in items where item.pinnable {
+            guard let widget = item.view else { continue }
+
             let griff = AutoHideHandleView()
             griff.translatesAutoresizingMaskIntoConstraints = false
             griff.alphaValue = 0
             container.addSubview(griff)
-            handles[kante] = griff
+            handles.append((item, griff))
 
-            switch kante {
+            switch item.edge {
             case .left:
                 NSLayoutConstraint.activate([
                     griff.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: abstand),
-                    griff.centerYAnchor.constraint(equalTo: container.centerYAnchor),
                     griff.widthAnchor.constraint(equalToConstant: dicke),
-                    griff.heightAnchor.constraint(equalToConstant: laenge)
+                    griff.topAnchor.constraint(equalTo: widget.topAnchor),
+                    griff.bottomAnchor.constraint(equalTo: widget.bottomAnchor)
                 ])
             case .right:
                 NSLayoutConstraint.activate([
                     griff.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -abstand),
-                    griff.centerYAnchor.constraint(equalTo: container.centerYAnchor),
                     griff.widthAnchor.constraint(equalToConstant: dicke),
-                    griff.heightAnchor.constraint(equalToConstant: laenge)
+                    griff.topAnchor.constraint(equalTo: widget.topAnchor),
+                    griff.bottomAnchor.constraint(equalTo: widget.bottomAnchor)
                 ])
             case .top:
                 NSLayoutConstraint.activate([
                     griff.topAnchor.constraint(equalTo: container.topAnchor, constant: abstand),
-                    griff.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-                    griff.widthAnchor.constraint(equalToConstant: laenge),
-                    griff.heightAnchor.constraint(equalToConstant: dicke)
+                    griff.heightAnchor.constraint(equalToConstant: dicke),
+                    griff.leadingAnchor.constraint(equalTo: widget.leadingAnchor),
+                    griff.trailingAnchor.constraint(equalTo: widget.trailingAnchor)
                 ])
             case .bottom:
                 NSLayoutConstraint.activate([
                     griff.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -abstand),
-                    griff.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-                    griff.widthAnchor.constraint(equalToConstant: laenge),
-                    griff.heightAnchor.constraint(equalToConstant: dicke)
+                    griff.heightAnchor.constraint(equalToConstant: dicke),
+                    griff.leadingAnchor.constraint(equalTo: widget.leadingAnchor),
+                    griff.trailingAnchor.constraint(equalTo: widget.trailingAnchor)
                 ])
             }
         }
     }
 
-    /// Je verschwindendem Widget ein kleines Schloss an der Seite, die zur
-    /// Leinwand zeigt (Nutzer-Auftrag). Neben dem Widget statt darauf, damit es
-    /// keinen Inhalt verdeckt; es fährt mit dem Widget mit, weil es an ihm
-    /// hängt.
+    /// Je verschwindendem Widget ein kleines Schloss (Nutzer-Auftrag).
+    ///
+    /// Wo es sitzt, bestimmt der Aufrufer über `Item.placeLock`. Die frühere
+    /// Fassung setzte es immer *neben* das Widget, auf die Leinwandseite —
+    /// dort war es beim Ebenen- und beim Eigenschaften-Panel unerreichbar:
+    /// Ein Schloss ausserhalb des Widgets liegt nicht mehr über dem Widget,
+    /// also verschwand dieses, sobald man mit dem Zeiger hinfuhr.
+    ///
+    /// Ohne eigene Angabe bleibt es bei der alten Regel — die passt für die
+    /// Werkzeugleiste, deren Schloss links daneben liegt und mit ihr wandert.
     private func addLocks(to container: NSView) {
         for item in items where item.pinnable {
             guard let widget = item.view else { continue }
@@ -198,21 +237,31 @@ final class WidgetAutoHideController {
             knopf.target = self
             knopf.action = #selector(togglePin(_:))
             knopf.alphaValue = 0
+            // Ausgeblendet statt nur durchsichtig: In der Fusszeile des
+            // Ebenen-Panels sitzt es in einem `NSStackView`, der ihm sonst
+            // auch bei ausgeschaltetem Ausblenden Platz freihielte.
+            knopf.isHidden = !WidgetAutoHideSettings.shared.isEnabled
             knopf.toolTip = "Widget offen halten"
             knopf.setAccessibilityLabel("Widget offen halten")
             knopf.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(knopf)
-
             NSLayoutConstraint.activate([
                 knopf.widthAnchor.constraint(equalToConstant: 20),
-                knopf.heightAnchor.constraint(equalToConstant: 20),
-                knopf.centerYAnchor.constraint(equalTo: widget.centerYAnchor),
-                // Links hängende Widgets bekommen das Schloss rechts von sich,
-                // alle anderen links — immer auf der Leinwandseite.
-                item.edge == .left
-                    ? knopf.leadingAnchor.constraint(equalTo: widget.trailingAnchor, constant: 6)
-                    : knopf.trailingAnchor.constraint(equalTo: widget.leadingAnchor, constant: -6)
+                knopf.heightAnchor.constraint(equalToConstant: 20)
             ])
+
+            if let placeLock = item.placeLock {
+                placeLock(knopf)
+            } else {
+                container.addSubview(knopf)
+                NSLayoutConstraint.activate([
+                    knopf.centerYAnchor.constraint(equalTo: widget.centerYAnchor),
+                    // Links hängende Widgets bekommen das Schloss rechts von
+                    // sich, alle anderen links — immer auf der Leinwandseite.
+                    item.edge == .left
+                        ? knopf.leadingAnchor.constraint(equalTo: widget.trailingAnchor, constant: 6)
+                        : knopf.trailingAnchor.constraint(equalTo: widget.leadingAnchor, constant: -6)
+                ])
+            }
             locks.append((item, knopf))
         }
         refreshLockIcons()
@@ -404,13 +453,22 @@ final class WidgetAutoHideController {
         // Aus einer leeren Fläche käme nur Unsinn heraus — dann lieber
         // gar nichts entscheiden und auf das nächste Layout warten.
         guard let container, !container.bounds.isEmpty else { return }
-        let sichtbare = items.compactMap { item -> (edge: Edge, frame: NSRect)? in
+        var sichtbare = items.compactMap { item -> (edge: Edge, frame: NSRect)? in
             guard let view = item.view, revealed.contains(item.edge) else { return nil }
             return (item.edge, view.frame)
         }
-        let griffe = handles.compactMap { kante, ansicht -> (edge: Edge, frame: NSRect)? in
-            (kante, ansicht.frame)
+        // Die Schlösser zählen zu ihrem Widget: Beim Werkzeugleisten-Schloss
+        // liegt der Knopf neben der Leiste, also ausserhalb ihres Rahmens —
+        // ohne diese Zeilen fuhr die Leiste genau dann ein, wenn man das
+        // Schloss anklicken wollte (Nutzer-Rückmeldung).
+        sichtbare += locks.compactMap { item, knopf -> (edge: Edge, frame: NSRect)? in
+            guard revealed.contains(item.edge), let eltern = knopf.superview else { return nil }
+            let imContainer = container.convert(knopf.bounds, from: eltern)
+            // Etwas grosszügiger als der Knopf selbst: 20 pt sind ein kleines
+            // Ziel, und der Weg dorthin darf nicht schon zu spät sein.
+            return (item.edge, imContainer.insetBy(dx: -10, dy: -10))
         }
+        let griffe = handles.map { (edge: $0.item.edge, frame: $0.view.frame) }
         let neu = Self.revealedEdges(
             mouse: mouse,
             in: container.bounds,
@@ -437,25 +495,24 @@ final class WidgetAutoHideController {
                 // Ein festgestelltes Widget bleibt draussen, egal wo der
                 // Zeiger steht.
                 let sichtbar = neu.contains(item.edge) || item.isPinned
-                item.constraint.constant = sichtbar ? item.shownConstant : item.hiddenConstant
+                item.constraint?.constant = sichtbar ? item.shownConstant : item.hiddenConstant
                 if item.fadesOut {
                     item.view?.animator().alphaValue = sichtbar ? 1 : 0
                 }
             }
 
-            // Ein Griff zeigt sich nur, solange an seiner Kante wirklich etwas
+            // Ein Platzhalter zeigt sich nur, solange sein Widget wirklich
             // versteckt ist — und nur bei eingeschaltetem Ausblenden.
-            for (kante, griff) in handles {
-                let etwasVersteckt = items.contains {
-                    $0.edge == kante && !neu.contains(kante) && !$0.isPinned
-                }
-                griff.animator().alphaValue = eingeschaltet && etwasVersteckt ? 1 : 0
+            for (item, griff) in handles {
+                let versteckt = !neu.contains(item.edge) && !item.isPinned
+                griff.animator().alphaValue = eingeschaltet && versteckt ? 1 : 0
             }
 
             // Schlösser gibt es nur im Ausblende-Betrieb; sie erscheinen mit
             // ihrem Widget.
             for (item, knopf) in locks {
                 let sichtbar = neu.contains(item.edge) || item.isPinned
+                knopf.isHidden = !eingeschaltet
                 knopf.animator().alphaValue = eingeschaltet && sichtbar ? 1 : 0
                 knopf.isEnabled = eingeschaltet && sichtbar
             }
@@ -465,11 +522,11 @@ final class WidgetAutoHideController {
     }
 }
 
-/// Der schmale Griff an einer Fensterkante: zeigt an, dass dort Widgets
-/// warten, ohne selbst bedienbar zu sein.
+/// Der Platzhalter an einer Fensterkante: ein grauer Rahmen genau dort, wo ein
+/// verstecktes Widget wieder herauskommt — ohne selbst bedienbar zu sein.
 ///
 /// Nimmt ausdrücklich keine Klicks an (`hitTest` gibt `nil` zurück) — er liegt
-/// über der Leinwand, und ein Strich, der Werkzeugklicks schluckt, wäre ein
+/// über der Leinwand, und ein Rahmen, der Werkzeugklicks schluckt, wäre ein
 /// Ärgernis.
 @MainActor
 final class AutoHideHandleView: NSView {
@@ -479,9 +536,18 @@ final class AutoHideHandleView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func draw(_ dirtyRect: NSRect) {
-        let radius = min(bounds.width, bounds.height) / 2
-        let form = NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius)
-        (AssemblageTheme.aqua?.panelBorder ?? AssemblageTheme.textTertiary).setFill()
+        // Rahmen statt Vollfläche: Ein leerer Umriss liest sich als „hier ist
+        // Platz für etwas", ein gefüllter Balken als Bedienelement.
+        let strichbreite: CGFloat = 1
+        let flaeche = bounds.insetBy(dx: strichbreite / 2, dy: strichbreite / 2)
+        let radius = min(flaeche.width, flaeche.height) / 2
+        let form = NSBezierPath(roundedRect: flaeche, xRadius: radius, yRadius: radius)
+
+        let grau = AssemblageTheme.aqua?.panelBorder ?? AssemblageTheme.textTertiary
+        grau.withAlphaComponent(0.12).setFill()
         form.fill()
+        grau.setStroke()
+        form.lineWidth = strichbreite
+        form.stroke()
     }
 }

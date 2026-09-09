@@ -24,6 +24,7 @@ final class DocumentStageViewController: NSViewController {
     /// der mehreren gleichartigen `GlassPanel`-Subviews.
     private(set) weak var settingsBar: GlassPanel?
     private(set) weak var inspectorPanel: GlassPanel?
+    private(set) weak var layersPanel: GlassPanel?
     private(set) weak var horizontalRuler: CanvasRulerView?
     private(set) weak var verticalRuler: CanvasRulerView?
 
@@ -32,6 +33,10 @@ final class DocumentStageViewController: NSViewController {
 
     private weak var duplicateButton: NSButton?
     private weak var deleteButton: NSButton?
+    /// Die Knopfreihe in der Fusszeile des Ebenen-Panels — dort landet das
+    /// Schloss des automatischen Ausblendens, rechts neben dem Mülleimer
+    /// (Nutzer-Auftrag).
+    private weak var layersFooterControls: NSStackView?
     private weak var blendModeButton: NSPopUpButton?
 
     /// Nimmt die drei echten Fenster-Knöpfe auf (siehe `adoptTrafficLights()`).
@@ -54,7 +59,23 @@ final class DocumentStageViewController: NSViewController {
     private weak var deleteButtonRef: NSButton?
     private var themeSubscription: AnyCancellable?
     private var backgroundOpacitySubscription: AnyCancellable?
+    private var panelWidthSubscription: AnyCancellable?
     private(set) var autoHideController: WidgetAutoHideController?
+
+    /// Die beiden vom Nutzer ziehbaren Breiten (siehe `PanelResizing.swift`).
+    private var layersWidthConstraint: NSLayoutConstraint?
+    private var inspectorWidthConstraint: NSLayoutConstraint?
+    /// Die Werkzeugleiste begrenzt mit, wie breit das Ebenen-Panel werden
+    /// darf: Sie beginnt rechts davon und muss ihre Cluster unterbringen.
+    private weak var toolbarRow: NSView?
+    /// Nur für Tests: Die Werkzeugleiste ist eine von mehreren gleichartigen
+    /// Ansichten im Container und über die Reihenfolge nicht zu finden.
+    var toolbarRowForTesting: NSView? { toolbarRow }
+    /// Die beiden Ausblende-Einträge, deren Versteckposition von der Breite
+    /// abhängt — sie müssen beim Ziehen mitwandern, sonst bliebe beim
+    /// Ausfahren ein Streifen stehen oder das Panel schösse zu weit hinaus.
+    private weak var layersAutoHideItem: WidgetAutoHideController.Item?
+    private weak var inspectorAutoHideItem: WidgetAutoHideController.Item?
 
     init(
         state: DocumentState,
@@ -84,6 +105,100 @@ final class DocumentStageViewController: NSViewController {
             .sink { [weak self] _ in DispatchQueue.main.async { self?.refreshTheme() } }
         backgroundOpacitySubscription = BackgroundOpacityManager.shared.$opacity
             .sink { [weak self] _ in DispatchQueue.main.async { self?.applyStageTint() } }
+        // Ein Fenster zieht, alle folgen: Die Panelbreite ist eine Vorliebe
+        // des Nutzers, nicht eine Eigenschaft eines einzelnen Dokuments.
+        panelWidthSubscription = PanelWidthSettings.shared.$layersWidth
+            .combineLatest(PanelWidthSettings.shared.$inspectorWidth)
+            .sink { [weak self] _, _ in
+                DispatchQueue.main.async { self?.applyPanelWidths() }
+            }
+    }
+
+    /// Zieht die beiden Breiten-Zwänge auf den gespeicherten Stand nach — und
+    /// mit ihnen die Versteckpositionen des automatischen Ausblendens.
+    private func applyPanelWidths() {
+        let ebenen = PanelWidthSettings.shared.layersWidth
+        let eigenschaften = PanelWidthSettings.shared.inspectorWidth
+        layersWidthConstraint?.constant = ebenen
+        inspectorWidthConstraint?.constant = eigenschaften
+        layersAutoHideItem?.hiddenConstant = -(ebenen + AssemblageTheme.margin)
+        inspectorAutoHideItem?.hiddenConstant = eigenschaften + AssemblageTheme.margin
+    }
+
+    // MARK: - Breite der seitlichen Panels
+
+    /// Mindestbreite der freien Leinwandfläche zwischen beiden Panels. Ohne
+    /// diese Schranke liessen sich die Panels so weit aufziehen, dass das
+    /// waagerechte Lineal dazwischen keine Breite mehr hätte — Auto Layout
+    /// bräche dann einen der Zwänge auf.
+    private static let minimumCanvasGap: CGFloat = 220
+
+    /// Wie breit ein Panel im aktuellen Fenster höchstens werden darf.
+    private func maximumPanelWidth(forLayers: Bool) -> CGFloat {
+        let fenster = view.bounds.width
+        let rand = AssemblageTheme.margin
+        let anderes = forLayers
+            ? (inspectorWidthConstraint?.constant ?? 0)
+            : (layersWidthConstraint?.constant ?? 0)
+
+        var grenze = fenster - anderes - 4 * rand - Self.minimumCanvasGap
+        if forLayers, let toolbarRow {
+            // Die Werkzeugleiste reicht vom Ebenen-Panel bis zum rechten
+            // Fensterrand und darf nicht gestaucht werden.
+            grenze = min(grenze, fenster - toolbarRow.fittingSize.width - 2 * rand)
+        }
+        return max(PanelWidthSettings.minimum, grenze)
+    }
+
+    private func addResizeGrip(
+        _ side: PanelResizeGripView.Side,
+        to panel: NSView,
+        in container: NSView
+    ) {
+        let griff = PanelResizeGripView(side: side)
+        griff.translatesAutoresizingMaskIntoConstraints = false
+        // Als Geschwister *über* dem Panel statt darin: Der Inhalt der Panels
+        // kommt aus SwiftUI, und ein AppKit-Griff darin müsste sich durch
+        // dessen Layout zwängen.
+        container.addSubview(griff, positioned: .above, relativeTo: panel)
+
+        NSLayoutConstraint.activate([
+            griff.topAnchor.constraint(equalTo: panel.topAnchor),
+            griff.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
+            griff.widthAnchor.constraint(equalToConstant: PanelResizeGripView.thickness),
+            // Innerhalb der Kante, nicht darauf: siehe Klassenkommentar von
+            // `PanelResizeGripView`.
+            side == .trailingEdge
+                ? griff.trailingAnchor.constraint(equalTo: panel.trailingAnchor)
+                : griff.leadingAnchor.constraint(equalTo: panel.leadingAnchor)
+        ])
+
+        let istEbenen = side == .trailingEdge
+        griff.currentWidth = { [weak self] in
+            guard let self else { return 0 }
+            return (istEbenen ? layersWidthConstraint : inspectorWidthConstraint)?.constant ?? 0
+        }
+        griff.maximumWidth = { [weak self] in
+            self?.maximumPanelWidth(forLayers: istEbenen) ?? PanelWidthSettings.maximum
+        }
+        // Erst den gemeinsamen Stand setzen, dann sofort selbst anwenden:
+        // Das Abonnement oben läuft einen Durchlauf später (siehe Kommentar
+        // dort) — beim Ziehen hinkte das Panel dadurch dem Zeiger hinterher.
+        griff.apply = { [weak self] breite in
+            if istEbenen {
+                PanelWidthSettings.shared.setLayersWidth(breite)
+            } else {
+                PanelWidthSettings.shared.setInspectorWidth(breite)
+            }
+            self?.applyPanelWidths()
+        }
+        griff.reset = {
+            if istEbenen {
+                PanelWidthSettings.shared.resetLayersWidth()
+            } else {
+                PanelWidthSettings.shared.resetInspectorWidth()
+            }
+        }
     }
 
     /// Zieht Kopfzeilen-Beschriftung und Fusszeilen-Icons des Ebenen-Panels
@@ -275,19 +390,28 @@ final class DocumentStageViewController: NSViewController {
         layersPanel.content = makeLayersPanelContent()
         layersPanel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(layersPanel)
+        self.layersPanel = layersPanel
         // Als Variable, weil das automatische Ausblenden genau diese Konstante
         // verschiebt (siehe `makeAutoHideController`).
         let layersLeading = layersPanel.leadingAnchor.constraint(
             equalTo: container.leadingAnchor, constant: AssemblageTheme.margin
         )
+        // Ebenfalls als Variable: Der Griff an der Innenkante zieht daran
+        // (siehe `addResizeGrip`), und das automatische Ausblenden muss die
+        // neue Breite mitbekommen.
+        let layersWidth = layersPanel.widthAnchor.constraint(
+            equalToConstant: PanelWidthSettings.shared.layersWidth
+        )
+        self.layersWidthConstraint = layersWidth
         NSLayoutConstraint.activate([
             // Der Streifen ganz oben gehört den echten Ampel-Knöpfen (siehe
             // unten und `adoptTrafficLights()`).
             layersPanel.topAnchor.constraint(equalTo: container.topAnchor, constant: AssemblageTheme.margin),
             layersPanel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -AssemblageTheme.margin),
             layersLeading,
-            layersPanel.widthAnchor.constraint(equalToConstant: AssemblageTheme.layersPanelWidth)
+            layersWidth
         ])
+        addResizeGrip(.trailingEdge, to: layersPanel, in: container)
 
         // Die echten Fenster-Knöpfe sitzen im freien Streifen über dem
         // Ebenen-Panel, in derselben Flucht. Grösse kommt aus der
@@ -308,6 +432,7 @@ final class DocumentStageViewController: NSViewController {
         ])
 
         let toolbarRow = toolbarController.buildFloatingToolbarRow()
+        self.toolbarRow = toolbarRow
         container.addSubview(toolbarRow)
         let toolbarTop = toolbarRow.topAnchor.constraint(
             equalTo: container.topAnchor, constant: AssemblageTheme.margin
@@ -371,17 +496,22 @@ final class DocumentStageViewController: NSViewController {
         let inspectorTrailing = inspectorPanel.trailingAnchor.constraint(
             equalTo: container.trailingAnchor, constant: -AssemblageTheme.margin
         )
+        let inspectorWidth = inspectorPanel.widthAnchor.constraint(
+            equalToConstant: PanelWidthSettings.shared.inspectorWidth
+        )
+        self.inspectorWidthConstraint = inspectorWidth
         NSLayoutConstraint.activate([
             inspectorTopBelowToolbar,
             inspectorPanel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -AssemblageTheme.margin),
             inspectorTrailing,
-            inspectorPanel.widthAnchor.constraint(equalToConstant: AssemblageTheme.inspectorPanelWidth),
+            inspectorWidth,
             // Nur die linke Kante begrenzt die Mindestbreite: Pinsel- und
             // Farbregler brauchen rund 570 pt und dürfen deshalb weiter nach
             // links wachsen; eine feste Gleichbreite mit den 248 pt des
             // Inspectors würde diese Regler unbedienbar zusammendrücken.
             settingsBar.leadingAnchor.constraint(lessThanOrEqualTo: inspectorPanel.leadingAnchor)
         ])
+        addResizeGrip(.leadingEdge, to: inspectorPanel, in: container)
         toolbarController.onSettingsBarVisibilityChange = { [weak self] isVisible in
             self?.inspectorTopBelowToolbar?.isActive = !isVisible
             self?.inspectorTopBelowSettingsBar?.isActive = isVisible
@@ -469,25 +599,50 @@ final class DocumentStageViewController: NSViewController {
         // bleiben, aber Platz machen sollen.
         let anDerKante: CGFloat = 4
 
+        // Die beiden seitlichen Panels merken wir uns: Ihre Versteckposition
+        // ist ihre Breite, und die zieht der Nutzer selbst (`applyPanelWidths`).
+        let layersItem = WidgetAutoHideController.Item(
+            view: layersPanel.view, edge: .left, constraint: layersPanel.leading,
+            shownConstant: rand,
+            hiddenConstant: -(PanelWidthSettings.shared.layersWidth + rand),
+            pinnable: true,
+            // In die Fusszeile, direkt rechts neben den Mülleimer: Neben dem
+            // Panel war das Schloss nicht erreichbar, weil das Panel schon
+            // einfuhr, sobald der Zeiger es verliess (Nutzer-Rückmeldung).
+            placeLock: { [weak self] knopf in
+                guard let reihe = self?.layersFooterControls else { return }
+                // 0 = Duplizieren, 1 = Löschen, danach der Dehnraum.
+                reihe.insertArrangedSubview(knopf, at: min(2, reihe.arrangedSubviews.count))
+            }
+        )
+        let inspectorItem = WidgetAutoHideController.Item(
+            view: inspectorPanel.view, edge: .right, constraint: inspectorPanel.trailing,
+            shownConstant: -rand,
+            hiddenConstant: PanelWidthSettings.shared.inspectorWidth + rand,
+            pinnable: true,
+            // Unten rechts in die Ecke des Panels, mit demselben kleinen
+            // Abstand zum Rand wie überall sonst (Nutzer-Auftrag).
+            placeLock: { [weak self] knopf in
+                guard let panel = self?.inspectorPanel else { return }
+                panel.addSubview(knopf)
+                NSLayoutConstraint.activate([
+                    knopf.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -14),
+                    knopf.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -14)
+                ])
+            }
+        )
+        layersAutoHideItem = layersItem
+        inspectorAutoHideItem = inspectorItem
+
         let items: [WidgetAutoHideController.Item] = [
-            .init(
-                view: layersPanel.view, edge: .left, constraint: layersPanel.leading,
-                shownConstant: rand,
-                hiddenConstant: -(AssemblageTheme.layersPanelWidth + rand),
-                pinnable: true
-            ),
+            layersItem,
             .init(
                 view: toolbarRow.view, edge: .top, constraint: toolbarRow.top,
                 shownConstant: rand,
                 hiddenConstant: -(ToolbarController.toolbarRowHeight + rand),
                 pinnable: true
             ),
-            .init(
-                view: inspectorPanel.view, edge: .right, constraint: inspectorPanel.trailing,
-                shownConstant: -rand,
-                hiddenConstant: AssemblageTheme.inspectorPanelWidth + rand,
-                pinnable: true
-            ),
+            inspectorItem,
             .init(
                 view: ruler.view, edge: .top, constraint: ruler.top,
                 shownConstant: Self.rulerTopWhenToolbarVisible,
@@ -501,12 +656,17 @@ final class DocumentStageViewController: NSViewController {
                 view: zoomBar.view, edge: .bottom, constraint: zoomBar.bottom,
                 shownConstant: -rand, hiddenConstant: -anDerKante
             ),
-            // Hängt unter dem Lineal, kann also nicht mit hinausfahren —
-            // blendet deshalb weich aus.
+            // Der Regler-Streifen (Pinsel-/Farbregler) gehört inhaltlich zu
+            // den Werkzeug-Spezifikationen und kommt deshalb mit dem
+            // Eigenschaften-Panel an der **rechten** Kante heraus, nicht an
+            // der oberen (Nutzer-Auftrag) — obwohl er unter dem Lineal hängt.
+            //
+            // Ohne eigenen Zwang: Er hängt an der Unterkante des Lineals und
+            // kann sich nicht selbst bewegen; ausgeblendet wird er deshalb
+            // durch Verblassen.
             .init(
-                view: settingsBar, edge: .top, constraint: ruler.top,
-                shownConstant: Self.rulerTopWhenToolbarVisible,
-                hiddenConstant: Self.rulerTopWhenToolbarHidden,
+                view: settingsBar, edge: .right, constraint: nil,
+                shownConstant: 0, hiddenConstant: 0,
                 fadesOut: true
             )
         ]
@@ -669,6 +829,7 @@ final class DocumentStageViewController: NSViewController {
         controls.orientation = .horizontal
         controls.alignment = .centerY
         controls.spacing = 8
+        layersFooterControls = controls
 
         let stack = NSStackView(views: [divider, controls])
         stack.orientation = .vertical

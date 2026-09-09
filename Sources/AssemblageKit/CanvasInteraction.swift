@@ -172,7 +172,15 @@ struct CanvasDrag {
     ///
     /// `constrains` ist die Umschalttaste: beim Skalieren hält sie das
     /// Seitenverhältnis, beim Drehen rastet sie in Schritten ein.
-    mutating func transform(draggedTo point: Point, constrains: Bool) -> Transform2D? {
+    ///
+    /// `squareSnapDistance` reicht die Fangbreite für das exakte Quadrat
+    /// durch (siehe `Transform2D.resized`); sie kommt vom Canvas, weil nur er
+    /// die Zoomstufe kennt.
+    mutating func transform(
+        draggedTo point: Point,
+        constrains: Bool,
+        squareSnapDistance: Double = 0
+    ) -> Transform2D? {
         let dx = point.x - startPoint.x
         let dy = point.y - startPoint.y
 
@@ -193,7 +201,8 @@ struct CanvasDrag {
                 handle: handle,
                 draggedTo: point,
                 contentSize: contentSize,
-                keepingAspectRatio: constrains
+                keepingAspectRatio: constrains,
+                squareSnapDistance: squareSnapDistance
             )
 
         case .rotate:

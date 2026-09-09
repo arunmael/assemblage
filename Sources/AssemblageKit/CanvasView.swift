@@ -70,6 +70,10 @@ final class CanvasView: NSView {
     private let lassoPreviewShape = CAShapeLayer()
     /// Sichtbarer Strich, solange ein neuer Freihandzug aufgenommen wird.
     private let freehandPreviewShape = CAShapeLayer()
+    /// Kurzer Text am gezogenen Objekt: sagt, worauf gerade eingerastet ist
+    /// („Quadrat", „Kreis", „Mitte"). Eine blosse Linie zeigt, *dass* etwas
+    /// einrastet, aber nicht *was* — und genau das war die Rückmeldung.
+    private let hintBadge = CATextLayer()
 
     /// Kantenlänge der gezeichneten Griffe, in Bildschirmpunkten.
     ///
@@ -88,6 +92,10 @@ final class CanvasView: NSView {
     /// arbeitet man feiner und will nicht aus grosser Entfernung eingefangen
     /// werden. Geteilt wird durch die Zoomstufe an der Aufrufstelle.
     static let snapDistance: Double = 8
+    /// Fangbreite für das exakte Quadrat bzw. den exakten Kreis, ebenfalls in
+    /// Bildschirmpunkten. Grosszügiger als die Ausrichtungshilfen: Hier gibt
+    /// es nur ein einziges Ziel, das man nicht versehentlich trifft.
+    static let squareSnapDistance: Double = 14
 
     private var drag: CanvasDrag?
     private var dropTargetShapeID: UUID?
@@ -253,6 +261,13 @@ final class CanvasView: NSView {
         overlayLayer.addSublayer(lassoPreviewShape)
         overlayLayer.addSublayer(freehandPreviewShape)
         overlayLayer.addSublayer(handleShapes)
+        // Zuoberst: Der Hinweis darf von nichts verdeckt werden.
+        overlayLayer.addSublayer(hintBadge)
+        hintBadge.isHidden = true
+        hintBadge.alignmentMode = .center
+        hintBadge.foregroundColor = NSColor.white.cgColor
+        hintBadge.backgroundColor = NSColor.systemPink.cgColor
+        hintBadge.masksToBounds = true
         guideShapes.fillColor = nil
         // Kräftiges Magenta wie in anderen Gestaltungsprogrammen: Die Linien
         // müssen sich von der Auswahlfarbe unterscheiden, sonst hält man sie
@@ -430,6 +445,7 @@ final class CanvasView: NSView {
     var selectionOutlineLayerForTesting: CAShapeLayer { selectionOutline }
     var handleLayerForTesting: CAShapeLayer { handleShapes }
     var guideLayerForTesting: CAShapeLayer { guideShapes }
+    var hintBadgeForTesting: CATextLayer { hintBadge }
     var cropPreviewLayerForTesting: CALayer { cropPreviewLayer }
     var lassoPreviewLayerForTesting: CAShapeLayer { lassoPreviewShape }
     var freehandPreviewLayerForTesting: CAShapeLayer { freehandPreviewShape }
@@ -1207,7 +1223,8 @@ final class CanvasView: NSView {
 
         let neu = laufend.transform(
             draggedTo: canvasPoint(from: event),
-            constrains: event.modifierFlags.contains(.shift)
+            constrains: event.modifierFlags.contains(.shift),
+            squareSnapDistance: Self.squareSnapDistance / Double(zoomScale)
         )
         drag = laufend
 
@@ -1215,12 +1232,19 @@ final class CanvasView: NSView {
 
         // Nur beim Verschieben einrasten. Beim Skalieren und Drehen würde es
         // die Ebene unter dem Griff wegspringen lassen, statt zu helfen.
-        if case .move = laufend.kind {
+        switch laufend.kind {
+        case .move:
+            // Zeigt die Hilfslinien und benennt sie gleich mit.
             neu = einrasten(neu, of: laufend)
             updateShapeDropTarget(for: laufend, center: Point(x: neu.x, y: neu.y))
-        } else {
+        case .resize:
             zeigeAusrichtungslinien([])
             updateShapeDropHighlight(nil)
+            zeigeFormhinweis(for: laufend, transform: neu)
+        case .rotate:
+            zeigeAusrichtungslinien([])
+            updateShapeDropHighlight(nil)
+            zeigeHinweis(nil)
         }
 
         // Die Undo-Klammer erst beim ersten echten Ziehen öffnen: Ein blosser
@@ -1263,7 +1287,52 @@ final class CanvasView: NSView {
         var eingerastet = transform
         eingerastet.x += ergebnis.offsetX
         eingerastet.y += ergebnis.offsetY
+
+        zeigeHinweis(
+            Self.beschriftung(fuer: ergebnis.lines),
+            above: Rect(
+                x: gezogen.x + ergebnis.offsetX,
+                y: gezogen.y + ergebnis.offsetY,
+                width: gezogen.width,
+                height: gezogen.height
+            )
+        )
         return eingerastet
+    }
+
+    /// Wie die gerade eingerasteten Hilfslinien zusammen heissen — oder `nil`,
+    /// wenn nichts eingerastet ist.
+    ///
+    /// Die Übersetzung liegt hier und nicht im Modell: `AlignmentGuides`
+    /// rechnet nur Geometrie und läuft auch unter Linux, wo es keine
+    /// Oberfläche und keine Sprache gibt.
+    private static func beschriftung(fuer linien: [AlignmentGuideLine]) -> String? {
+        guard !linien.isEmpty else { return nil }
+
+        // Genau in der Mitte der Leinwand: Zwei Linien, beide „Mitte" — als
+        // „Mitte · Mitte" wäre das Kauderwelsch.
+        let mitten = linien.filter { $0.reference == .canvasCenter }
+        if mitten.count == 2, linien.count == 2 { return "Mitte der Leinwand" }
+
+        var namen: [String] = []
+        for linie in linien {
+            let name = Self.name(of: linie)
+            if !namen.contains(name) { namen.append(name) }
+        }
+        return namen.joined(separator: " · ")
+    }
+
+    private static func name(of linie: AlignmentGuideLine) -> String {
+        let senkrecht = linie.orientation == .vertical
+        switch linie.reference {
+        case .canvasCenter: return senkrecht ? "Waagerecht mittig" : "Senkrecht mittig"
+        case .canvasEdgeLow: return senkrecht ? "Linker Rand" : "Oberer Rand"
+        case .canvasEdgeHigh: return senkrecht ? "Rechter Rand" : "Unterer Rand"
+        case .canvasThird: return "Drittel"
+        case .layerCenter: return "Auf Ebene zentriert"
+        case .layerEdge: return "An Ebene ausgerichtet"
+        case .distribution: return "Gleicher Abstand"
+        }
     }
 
     private func zeigeAusrichtungslinien(_ linien: [AlignmentGuideLine]) {
@@ -1288,6 +1357,72 @@ final class CanvasView: NSView {
             guideShapes.path = pfad
             guideShapes.lineWidth = 1 / zoomScale
         }
+    }
+
+    // MARK: - Hinweis am gezogenen Objekt
+
+    /// Zeigt den Hinweis über der Oberkante von `frame` — oder blendet ihn
+    /// aus, wenn `text` `nil` ist.
+    ///
+    /// Alle Masse werden durch die Zoomstufe geteilt: Der Hinweis liegt in
+    /// Leinwandkoordinaten und würde sonst bei 800 % zur Plakatwand und bei
+    /// 20 % unleserlich.
+    private func zeigeHinweis(_ text: String?, above frame: Rect? = nil) {
+        guard let text, let frame else {
+            withoutAnimation { hintBadge.isHidden = true }
+            return
+        }
+        let zoom = max(Double(zoomScale), 0.01)
+        let schriftgroesse = 11.0 / zoom
+        let attribute: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: schriftgroesse, weight: .semibold)
+        ]
+        let textbreite = (text as NSString).size(withAttributes: attribute).width
+        let breite = textbreite + 14 / zoom
+        let hoehe = 18.0 / zoom
+
+        withoutAnimation {
+            hintBadge.isHidden = false
+            hintBadge.string = text
+            hintBadge.font = NSFont.systemFont(ofSize: schriftgroesse, weight: .semibold)
+            hintBadge.fontSize = schriftgroesse
+            hintBadge.cornerRadius = hoehe / 2
+            hintBadge.contentsScale = window?.backingScaleFactor ?? 2
+            hintBadge.frame = CGRect(
+                x: frame.x + frame.width / 2 - breite / 2,
+                // Über der Oberkante, mit demselben Abstand wie der Drehgriff
+                // — dort ist erfahrungsgemäss Platz.
+                y: frame.y - hoehe - 10 / zoom,
+                width: breite,
+                height: hoehe
+            )
+        }
+    }
+
+    /// „Quadrat" bzw. „Kreis", sobald beim Skalieren beide Seiten gleich lang
+    /// sind — sonst nichts.
+    private func zeigeFormhinweis(for laufend: CanvasDrag, transform: Transform2D) {
+        let breite = laufend.contentSize.width * abs(transform.scaleX)
+        let hoehe = laufend.contentSize.height * abs(transform.scaleY)
+        // Toleranz, nicht Gleichheit: Zwischen Einrasten und Anzeige liegen
+        // Fliesskommarechnungen.
+        guard breite > 0, abs(breite - hoehe) < 0.01 else {
+            zeigeHinweis(nil)
+            return
+        }
+        let rund: Bool
+        switch document.layer(withID: laufend.layerID)?.content {
+        case .shape(let form): rund = form.kind == .ellipse
+        case .image(let bild): rund = bild.clipShape == .ellipse
+        default: rund = false
+        }
+        zeigeHinweis(
+            rund ? "Kreis" : "Quadrat",
+            above: transform.boundingFrame(
+                contentSize: laufend.contentSize,
+                distortion: document.layer(withID: laufend.layerID)?.distortion
+            )
+        )
     }
 
     private func updateShapeDropTarget(for drag: CanvasDrag, center: Point) {
@@ -1401,6 +1536,7 @@ final class CanvasView: NSView {
         let shapeID = dropTargetShapeID
         zeigeAusrichtungslinien([])
         updateShapeDropHighlight(nil)
+        zeigeHinweis(nil)
         defer { drag = nil }
         guard let laufend = drag, laufend.hasPassedThreshold else { return }
         if case .move = laufend.kind, let shapeID {

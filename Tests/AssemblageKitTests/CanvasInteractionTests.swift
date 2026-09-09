@@ -129,14 +129,17 @@ final class CanvasInteractionTests: XCTestCase {
     // MARK: - Ziehen
 
     func testDraggingMovesTheLayerByTheCursorOffset() throws {
+        // Ziel bewusst abseits aller Fangpunkte der 400×400-Leinwand (Kanten
+        // 0/400, Mitte 200, Drittel 133,3 und 266,7) — sonst prüfte der Test
+        // das Einrasten statt den Versatz.
         canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 200, y: 200))
-        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 260, y: 230))
-        canvas.mouseUp(with: try ereignis(.leftMouseUp, atCanvasX: 260, y: 230))
+        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 255, y: 235))
+        canvas.mouseUp(with: try ereignis(.leftMouseUp, atCanvasX: 255, y: 235))
 
         let letzte = try XCTUnwrap(protokoll.aenderungen.last)
         XCTAssertEqual(letzte.id, ebeneID)
-        XCTAssertEqual(letzte.transform.x, 260, accuracy: 0.001)
-        XCTAssertEqual(letzte.transform.y, 230, accuracy: 0.001)
+        XCTAssertEqual(letzte.transform.x, 255, accuracy: 0.001)
+        XCTAssertEqual(letzte.transform.y, 235, accuracy: 0.001)
         XCTAssertEqual(protokoll.begonnen, 1, "genau eine Undo-Klammer")
         XCTAssertEqual(protokoll.beendet, ["Ebene verschieben"])
     }
@@ -271,6 +274,52 @@ final class CanvasInteractionTests: XCTestCase {
         XCTAssertEqual(canvas.selectedLayerID, ebeneID)
     }
 
+    // MARK: - Quadrat und Kreis beim Skalieren
+
+    /// Knapp neben dem Quadrat gezogen: Die Ebene rastet darauf ein, und ein
+    /// Hinweis sagt, worauf.
+    func testResizingNearASquareSnapsAndSaysSo() throws {
+        canvas.selectedLayerID = ebeneID
+
+        // Griff unten rechts der 100×100-Ebene bei (250, 250); gezogen auf
+        // 150 breit und 146 hoch — vier Punkte neben dem Quadrat.
+        canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 250, y: 250))
+        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 300, y: 296))
+
+        let letzte = try XCTUnwrap(protokoll.aenderungen.last)
+        XCTAssertEqual(
+            abs(letzte.transform.scaleX), abs(letzte.transform.scaleY), accuracy: 0.001,
+            "bei quadratischem Inhalt heisst gleiche Skalierung gleiche Kantenlänge"
+        )
+        XCTAssertEqual(canvas.hintBadgeForTesting.string as? String, "Quadrat")
+        XCTAssertFalse(canvas.hintBadgeForTesting.isHidden)
+    }
+
+    /// Nach dem Loslassen darf der Hinweis nicht stehen bleiben.
+    func testTheHintDisappearsWhenTheDragEnds() throws {
+        canvas.selectedLayerID = ebeneID
+
+        canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 250, y: 250))
+        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 300, y: 296))
+        canvas.mouseUp(with: try ereignis(.leftMouseUp, atCanvasX: 300, y: 296))
+
+        XCTAssertTrue(canvas.hintBadgeForTesting.isHidden)
+    }
+
+    /// Weit weg vom Quadrat bleibt es beim freien Verzerren, ohne Hinweis.
+    func testResizingFarFromASquareKeepsBothSidesFree() throws {
+        canvas.selectedLayerID = ebeneID
+
+        canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 250, y: 250))
+        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 350, y: 260))
+
+        let letzte = try XCTUnwrap(protokoll.aenderungen.last)
+        XCTAssertNotEqual(
+            abs(letzte.transform.scaleX), abs(letzte.transform.scaleY), accuracy: 0.05
+        )
+        XCTAssertTrue(canvas.hintBadgeForTesting.isHidden)
+    }
+
     /// Die Fangbereiche der Griffe müssen mit dem Zoom mitgehen: Bei
     /// vierfacher Vergrösserung ist ein Bildschirmpunkt nur ein Viertel
     /// Leinwandpunkt, der Fangbereich in Leinwandkoordinaten also kleiner.
@@ -324,12 +373,25 @@ final class CanvasInteractionTests: XCTestCase {
     /// nicht mehr frei platzieren.
     func testDraggingFarFromAnyGuideDoesNotSnap() throws {
         canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 200, y: 200))
-        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 137, y: 262))
+        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 170, y: 235))
 
         let letzte = try XCTUnwrap(protokoll.aenderungen.last)
-        XCTAssertEqual(letzte.transform.x, 137, accuracy: 0.001)
-        XCTAssertEqual(letzte.transform.y, 262, accuracy: 0.001)
+        XCTAssertEqual(letzte.transform.x, 170, accuracy: 0.001)
+        XCTAssertEqual(letzte.transform.y, 235, accuracy: 0.001)
         XCTAssertNil(linienSchicht.path, "und keine Linien ohne Einrasten")
+    }
+
+    /// Die Drittel der Leinwand sind der zweite Ort, an dem man ein Motiv
+    /// bewusst platziert — von Hand trifft man sie nie genau.
+    func testDraggingNearACanvasThirdSnapsToIt() throws {
+        canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 200, y: 200))
+        // Waagrecht 4 Punkte neben dem ersten Drittel (133,3 bei 400 breit),
+        // senkrecht abseits von allem.
+        canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 137, y: 235))
+
+        let letzte = try XCTUnwrap(protokoll.aenderungen.last)
+        XCTAssertEqual(letzte.transform.x, 400.0 / 3, accuracy: 0.001, "auf das Drittel eingerastet")
+        XCTAssertEqual(letzte.transform.y, 235, accuracy: 0.001, "senkrecht unverändert")
     }
 
     /// Nach dem Loslassen dürfen keine Linien stehen bleiben — sie sind eine

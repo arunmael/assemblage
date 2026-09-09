@@ -96,11 +96,20 @@ extension Transform2D {
     /// Die dem Griff **gegenüberliegende** Kante bleibt dabei fest — zieht man
     /// oben links, bleibt unten rechts, wo es war. Alles andere fühlt sich an,
     /// als rutschte die Ebene unter dem Zeiger weg.
+    ///
+    /// `squareSnapDistance` ist die Fangbreite für ein exaktes Quadrat (und
+    /// damit für den exakten Kreis, denn eine Ellipse in einem Quadrat *ist*
+    /// ein Kreis): Kommt die Ebene der Gleichheit von Breite und Höhe bis auf
+    /// diesen Abstand nahe, rastet sie darauf ein. 0 schaltet das ab.
+    /// Freihändig genau gleich lange Seiten zu treffen gelingt sonst nie,
+    /// und die Umschalttaste hilft dabei nicht: Sie hält das Seitenverhältnis
+    /// des *Inhalts*, macht aus einem 3:2-Bild also nie ein Quadrat.
     public func resized(
         handle: ResizeHandle,
         draggedTo point: Point,
         contentSize: Size,
-        keepingAspectRatio: Bool = false
+        keepingAspectRatio: Bool = false,
+        squareSnapDistance: Double = 0
     ) -> Transform2D {
         guard contentSize.width > 0, contentSize.height > 0 else { return self }
 
@@ -131,6 +140,28 @@ extension Transform2D {
             // Die feste Kante liegt gegenüber dem Griff — von dort aus neu messen.
             if offset.x < 0 { left = right - width } else { right = left + width }
             if offset.y < 0 { top = bottom - height } else { bottom = top + height }
+        }
+
+        // Quadrat/Kreis: nur ohne Umschalttaste, sonst kämen sich zwei
+        // Seitenverhältnis-Regeln in die Quere.
+        if !keepingAspectRatio,
+           squareSnapDistance > 0,
+           abs(abs(width) - abs(height)) <= squareSnapDistance {
+            // An einem Eckgriff die Mitte zwischen beiden Seiten nehmen: So
+            // wandert die Ecke am wenigsten weit unter dem Zeiger weg. An
+            // einem Kantengriff bewegt sich ohnehin nur eine Seite, die
+            // andere ist das Mass.
+            if handle.changesWidth, handle.changesHeight {
+                let seite = (abs(width) + abs(height)) / 2
+                width = seite * (width < 0 ? -1 : 1)
+                height = seite * (height < 0 ? -1 : 1)
+            } else if handle.changesWidth {
+                width = abs(height) * (width < 0 ? -1 : 1)
+            } else {
+                height = abs(width) * (height < 0 ? -1 : 1)
+            }
+            if offset.x < 0 { left = right - width } else if offset.x > 0 { right = left + width }
+            if offset.y < 0 { top = bottom - height } else if offset.y > 0 { bottom = top + height }
         }
 
         // Nicht auf null zusammenfallen lassen; das Vorzeichen (und damit eine
