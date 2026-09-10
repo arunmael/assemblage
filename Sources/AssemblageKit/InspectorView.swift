@@ -481,7 +481,12 @@ struct InspectorView: View {
                 .controlSize(.large)
                 .frame(minHeight: 36)
         }
-        .padding(.vertical, 3)
+        // Von 3 auf 6 pt: Bei sechs gestapelten Reglern hintereinander (z. B.
+        // die Bild-Anpassungen) sass die vorige, knappe Zeilenhöhe zu dicht
+        // beieinander — HIG-Vorgabe „genug Raum um Steuerelemente" (layout.md
+        // › Best practices). Reine Abstandsänderung, kein neuer Zwischenraum-
+        // Typ und keine Farbe.
+        .padding(.vertical, 6)
     }
 
     private func textField(_ title: String, value: Binding<String>, actionName: String) -> some View {
