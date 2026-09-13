@@ -27,14 +27,13 @@ import AssemblageModel
 /// `addLayer` einzufügen (z. B. weil `performDragOperation` doch noch
 /// abbricht), passiert nichts weiter Schädliches — die Originaldatei wurde
 /// zwar schon über `DocumentResources.addOriginal` in den Paket-`FileWrapper`
-/// gehängt, aber an nichts im Dokument referenziert. Sie wird beim nächsten
-/// Sichern von `removeUnreferencedFiles` wieder entfernt, und bis dahin liegt
-/// sie nur im Speicher, nicht auf der Platte. Fügt der Aufrufer die Ebenen
+/// gehängt, aber an nichts im Dokument referenziert. Beim Sichern wird sie
+/// aus dem Paket ausgespart. Fügt der Aufrufer die Ebenen
 /// ein und macht das per ⌘Z rückgängig, entfernt das nur die Ebenen aus
 /// `Document.layers` — die Originaldatei bleibt bewusst im Paket liegen,
 /// sonst würde ein anschliessendes Wiederholen (⇧⌘Z) sie erneut von der
-/// Platte lesen müssen. Auch das räumt `removeUnreferencedFiles` beim
-/// nächsten Sichern auf. Es braucht also keinen eigenen Undo-Mechanismus in
+/// Platte lesen müssen. Diese Ressourcen bleiben für die Lebensdauer der
+/// Sitzung verfügbar, auch nach dem Sichern. Es braucht keinen eigenen Undo-Mechanismus in
 /// dieser Datei.
 enum ImageImporter {
 

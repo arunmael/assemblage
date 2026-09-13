@@ -1,6 +1,7 @@
 import AssemblageModel
 
-/// Legt aus den Rohpunkten eines Mauszugs eine neue Freihand-Ebene an.
+/// Legt aus den Rohpunkten eines Mauszugs einen Freihand-Zug an oder hängt
+/// ihn an die ausgewählte, passende Zeichenebene an.
 @MainActor
 enum FreehandDrawCommand {
 
@@ -15,8 +16,34 @@ enum FreehandDrawCommand {
               let ersterTeilpfad = pfad.subpaths.first,
               ersterTeilpfad.anchors.count >= 2,
               let rahmen = pfad.boundingBox,
+              rahmen.x.isFinite, rahmen.y.isFinite,
+              rahmen.width.isFinite, rahmen.height.isFinite,
+              strokeWidth.isFinite,
               let owner = state.owner
         else { return }
+
+        if let id = state.selectedLayerID,
+           var ausgewaehlt = state.document.layer(withID: id),
+           case .shape(var ausgewaehlterInhalt) = ausgewaehlt.content,
+           ausgewaehlterInhalt.kind == .freehand {
+            let istLeer = ausgewaehlterInhalt.path?.isEmpty ?? true
+            let stiftPasst = ausgewaehlterInhalt.strokeColorHex.caseInsensitiveCompare(strokeColorHex) == .orderedSame
+                && abs(ausgewaehlterInhalt.strokeWidth - strokeWidth) <= 0.001
+            if istLeer || stiftPasst {
+                if istLeer {
+                    ausgewaehlterInhalt.strokeColorHex = strokeColorHex
+                    ausgewaehlterInhalt.strokeWidth = strokeWidth
+                    ausgewaehlt.content = .shape(ausgewaehlterInhalt)
+                }
+                if let ergebnis = ausgewaehlt.appendingFreehandStroke(canvasPath: pfad) {
+                    owner.modify("Freihand zeichnen") { dokument in
+                        try? dokument.updateLayer(id: id) { $0 = ergebnis }
+                    }
+                    state.selectedLayerID = id
+                    return
+                }
+            }
+        }
 
         let normalisiert = pfad.normalized()
         let mindestbreite = max(strokeWidth, 0)
@@ -52,8 +79,9 @@ enum FreehandDrawCommand {
             ))
         )
 
+        let index = LayerInsertion.indexAboveSelection(in: state)
         owner.modify("Freihand zeichnen") { dokument in
-            _ = try? dokument.addLayer(ebene)
+            _ = try? dokument.addLayer(ebene, at: index)
         }
         state.selectedLayerID = ebene.id
     }

@@ -17,9 +17,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         crashReporter.start()
     }
 
-    /// Beim Klick aufs Dock-Symbol ohne offenes Fenster: leeres Dokument
-    /// anlegen, statt gar nichts zu tun.
-    public func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool { true }
+    /// Existiert schon ein zuletzt benutztes Projekt, startet Assemblage mit
+    /// der Übersicht statt mit einem weiteren leeren Dokument. AppKit fragt
+    /// diese Methode erst, wenn weder ein Dokument geöffnet noch
+    /// wiederhergestellt wurde; Datei-Doppelklick und Wiederherstellung
+    /// behalten dadurch ihren normalen Dokumentweg.
+    public func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        let hatProjekt = NSDocumentController.shared.recentDocumentURLs.contains { url in
+            url.pathExtension.caseInsensitiveCompare(AssemblageDocument.fileExtension) == .orderedSame
+                && FileManager.default.fileExists(atPath: url.path)
+        }
+        if hatProjekt {
+            ProjectsWindowController.showProjects()
+            return false
+        }
+        return true
+    }
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
@@ -59,6 +72,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func fileMenu() -> NSMenu {
         let menu = NSMenu(title: "Ablage")
         menu.addItem(withTitle: "Neu", action: #selector(NSDocumentController.newDocument(_:)), keyEquivalent: "n")
+        let projects = NSMenuItem(title: "Projekte…", action: #selector(showProjects(_:)), keyEquivalent: "o")
+        projects.keyEquivalentModifierMask = [.command, .shift]
+        projects.target = self
+        menu.addItem(projects)
         menu.addItem(withTitle: "Öffnen…", action: #selector(NSDocumentController.openDocument(_:)), keyEquivalent: "o")
 
         let recent = NSMenuItem(title: "Benutzte Dokumente", action: nil, keyEquivalent: "")
@@ -205,6 +222,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         text.keyEquivalentModifierMask = [.command, .option]
         menu.addItem(text)
 
+        menu.addItem(withTitle: "Leere Ebene",
+                     action: #selector(DocumentWindowController.insertEmptyDrawingLayer(_:)),
+                     keyEquivalent: "")
         menu.addItem(withTitle: "Malebene",
                      action: #selector(DocumentWindowController.insertPaintLayer(_:)),
                      keyEquivalent: "")
@@ -448,9 +468,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Im Dock ablegen", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         menu.addItem(withTitle: "Zoomen", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         menu.addItem(.separator())
+        let projects = NSMenuItem(title: "Projekte", action: #selector(showProjects(_:)), keyEquivalent: "")
+        projects.target = self
+        menu.addItem(projects)
         menu.addItem(withTitle: "Alle nach vorne bringen", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         NSApp.windowsMenu = menu
         return menu
+    }
+
+    @objc @MainActor private func showProjects(_ sender: Any?) {
+        ProjectsWindowController.showProjects()
     }
 
     private func helpMenu() -> NSMenu {

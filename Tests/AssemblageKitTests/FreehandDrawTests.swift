@@ -92,6 +92,80 @@ final class FreehandDrawTests: XCTestCase {
         undoManager.undo()
         XCTAssertTrue(dokument.state.document.layers.isEmpty)
     }
+
+    func testZweiterStrichMitGleichemStiftWirdAnAusgewaehlteFreihandEbeneAngehaengt() throws {
+        let dokument = AssemblageDocument()
+        zeichne(in: dokument, farbe: "#1D3557", breite: 6, von: 10, bis: 90)
+        let id = try XCTUnwrap(dokument.state.selectedLayerID)
+
+        zeichne(in: dokument, farbe: "#1d3557", breite: 6.0005, von: 150, bis: 230)
+
+        XCTAssertEqual(dokument.state.document.layers.count, 1)
+        XCTAssertEqual(dokument.state.selectedLayerID, id)
+        guard case .shape(let inhalt) = dokument.state.document.layers[0].content else {
+            return XCTFail("Der Zug muss eine Formebene bleiben")
+        }
+        XCTAssertEqual(inhalt.path?.subpaths.count, 2)
+    }
+
+    func testAndereFarbeOderBreiteErzeugtEineNeueEbene() {
+        for (farbe, breite) in [("#FFFFFF", 6.0), ("#1D3557", 7.0)] {
+            let dokument = AssemblageDocument()
+            zeichne(in: dokument, farbe: "#1D3557", breite: 6, von: 10, bis: 90)
+
+            zeichne(in: dokument, farbe: farbe, breite: breite, von: 150, bis: 230)
+
+            XCTAssertEqual(dokument.state.document.layers.count, 2)
+        }
+    }
+
+    func testErsterStrichAufLeererZeichenebeneUebernimmtStiftwerte() throws {
+        let dokument = AssemblageDocument()
+        let id = DrawingLayerCommand.insertEmptyLayer(
+            into: dokument.state, strokeColorHex: "#000000", strokeWidth: 2
+        )
+
+        zeichne(in: dokument, farbe: "#ABCDEF", breite: 11, von: 20, bis: 120)
+
+        XCTAssertEqual(dokument.state.document.layers.count, 1)
+        XCTAssertEqual(dokument.state.selectedLayerID, id)
+        guard case .shape(let inhalt) = dokument.state.document.layers[0].content else {
+            return XCTFail("Die Zeichenebene muss eine Formebene bleiben")
+        }
+        XCTAssertEqual(inhalt.strokeColorHex, "#ABCDEF")
+        XCTAssertEqual(inhalt.strokeWidth, 11)
+        XCTAssertEqual(inhalt.path?.subpaths.count, 1)
+    }
+
+    func testStrichAufBildEbeneErzeugtNeueEbeneDirektDarueber() {
+        let dokument = AssemblageDocument()
+        let bild = Layer(name: "Bild", content: .image(ImageLayerContent(originalFileReference: "bild.png")))
+        let oben = Layer(name: "Oben", content: .text(TextLayerContent(string: "Oben")))
+        dokument.modify("Vorbereiten") { $0.layers = [bild, oben] }
+        dokument.state.selectedLayerID = bild.id
+
+        zeichne(in: dokument, farbe: "#1D3557", breite: 6, von: 10, bis: 90)
+
+        XCTAssertEqual(dokument.state.document.layers.count, 3)
+        XCTAssertEqual(dokument.state.document.layers[0].id, bild.id)
+        XCTAssertEqual(dokument.state.document.layers[2].id, oben.id)
+        XCTAssertEqual(dokument.state.document.layers[1].id, dokument.state.selectedLayerID)
+    }
+
+    private func zeichne(
+        in dokument: AssemblageDocument,
+        farbe: String,
+        breite: Double,
+        von: Double,
+        bis: Double
+    ) {
+        FreehandDrawCommand.insert(
+            rawPoints: [Point(x: von, y: 20), Point(x: bis, y: 70)],
+            strokeColorHex: farbe,
+            strokeWidth: breite,
+            into: dokument.state
+        )
+    }
 }
 
 private extension Array {

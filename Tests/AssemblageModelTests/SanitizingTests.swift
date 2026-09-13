@@ -10,6 +10,31 @@ import XCTest
 /// 2.1 ausschliesst.
 final class SanitizingTests: XCTestCase {
 
+    func testSavingPreservesFreehandPathAndShapeBorder() throws {
+        let path = FreehandStroke.path(from: [.zero, Point(x: 30, y: 40)])
+        let document = Document(preset: .instagramPost, layers: [Layer(
+            name: "Zeichnung", content: .shape(ShapeLayerContent(
+                kind: .freehand, size: Size(width: 30, height: 40),
+                strokeColorHex: "#AB1234", strokeWidth: 7, path: path)))])
+        XCTAssertEqual(try DocumentPackage.decode(DocumentPackage.encode(document)), document)
+    }
+
+    func testBrokenClipPathCanStillBeSaved() throws {
+        let path = VectorPath(subpath: PathSubpath(anchors: [
+            PathAnchor(point: Point(x: .nan, y: 2), controlIn: .zero,
+                       controlOut: Point(x: 3, y: .infinity))
+        ], isClosed: true))
+        let document = Document(preset: .instagramPost, layers: [Layer(
+            name: "Bild", content: .image(ImageLayerContent(
+                originalFileReference: "originals/a.png", clipShape: .freehand,
+                clipShapePath: path)))])
+        let restored = try DocumentPackage.decode(DocumentPackage.encode(document))
+        guard case .image(let content) = restored.layers[0].content else { return XCTFail() }
+        XCTAssertEqual(content.clipShapePath?.subpaths[0].anchors[0].point, Point(x: 0, y: 2))
+        XCTAssertEqual(content.clipShapePath?.subpaths[0].anchors[0].controlOut, Point(x: 3, y: 0))
+        XCTAssertEqual(content.clipShapePath?.subpaths[0].isClosed, true)
+    }
+
     // MARK: - Die Gegenprobe zuerst
 
     /// Das Wichtigste an einer Bereinigung ist, was sie **nicht** tut. Ändert

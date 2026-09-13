@@ -55,4 +55,19 @@ final class PaintLayerCommandTests: XCTestCase {
         XCTAssertFalse(PaintLayerCommand.insertBlankLayer(into: document.state))
         XCTAssertTrue(document.state.document.layers.isEmpty)
     }
+
+    func testMalebeneLandetDirektUeberDerAuswahl() {
+        let document = aufbau()
+        let unten = Layer(name: "Unten", content: .text(TextLayerContent(string: "Unten")))
+        let mitte = Layer(name: "Mitte", content: .text(TextLayerContent(string: "Mitte")))
+        let oben = Layer(name: "Oben", content: .text(TextLayerContent(string: "Oben")))
+        document.modify("Vorbereiten") { $0.layers = [unten, mitte, oben] }
+        document.state.selectedLayerID = mitte.id
+
+        XCTAssertTrue(PaintLayerCommand.insertBlankLayer(into: document.state))
+
+        XCTAssertEqual(document.state.document.layers[1].id, mitte.id)
+        XCTAssertEqual(document.state.document.layers[2].id, document.state.selectedLayerID)
+        XCTAssertEqual(document.state.document.layers[3].id, oben.id)
+    }
 }

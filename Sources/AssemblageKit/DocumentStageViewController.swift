@@ -36,8 +36,10 @@ final class DocumentStageViewController: NSViewController {
     private(set) weak var verticalRulerPanel: GlassPanel?
     private(set) weak var undoBar: NSView?
     private(set) weak var zoomBar: NSView?
+    private(set) weak var alignmentHintBar: GlassPanel?
 
     private let state: DocumentState
+    private weak var commandTarget: DocumentWindowController?
     private var observations: Set<AnyCancellable> = []
 
     private weak var duplicateButton: NSButton?
@@ -61,15 +63,17 @@ final class DocumentStageViewController: NSViewController {
     private var inspectorTopBelowSettingsBar: NSLayoutConstraint?
 
     /// Feste Referenzen für den Themenwechsel — anders als `ToolbarController`
-    /// hat dieser Controller nur zwei fest verdrahtete Icon-Knöpfe, eine
+    /// hat dieser Controller nur drei fest verdrahtete Icon-Knöpfe, eine
     /// eigene Registrierungsliste wäre hier Overkill.
     private weak var layersHeaderLabel: NSTextField?
+    private weak var addLayerButtonRef: NSButton?
     private weak var duplicateButtonRef: NSButton?
     private weak var deleteButtonRef: NSButton?
     private var themeSubscription: AnyCancellable?
     private var backgroundOpacitySubscription: AnyCancellable?
     private var panelWidthSubscription: AnyCancellable?
     private(set) var autoHideController: WidgetAutoHideController?
+    private var alignmentHintAnimationGeneration = 0
 
     /// Die beiden vom Nutzer ziehbaren Breiten (siehe `PanelResizing.swift`).
     private var layersWidthConstraint: NSLayoutConstraint?
@@ -92,6 +96,7 @@ final class DocumentStageViewController: NSViewController {
         commandTarget: DocumentWindowController
     ) {
         self.state = state
+        self.commandTarget = commandTarget
         self.canvasViewController = canvasViewController
         self.layersHostingController = NSHostingController(rootView: LayerListView(state: state))
         self.inspectorHostingController = NSHostingController(rootView: InspectorView(state: state))
@@ -217,6 +222,10 @@ final class DocumentStageViewController: NSViewController {
     /// `ToolbarController`).
     private func refreshTheme() {
         layersHeaderLabel?.textColor = AssemblageTheme.textSecondary
+        if let addLayerButtonRef {
+            addLayerButtonRef.image = MockupIcons.image(.layersAdd, pointSize: 14, tintColor: AssemblageTheme.textPrimary)
+            addLayerButtonRef.needsDisplay = true
+        }
         if let duplicateButtonRef {
             duplicateButtonRef.image = MockupIcons.image(.duplicate, pointSize: 14, tintColor: AssemblageTheme.textPrimary)
             duplicateButtonRef.needsDisplay = true
@@ -616,6 +625,25 @@ final class DocumentStageViewController: NSViewController {
             zoomBar.heightAnchor.constraint(equalToConstant: 44)
         ])
 
+        let alignmentHintBar = toolbarController.buildAlignmentHintBar()
+        self.alignmentHintBar = alignmentHintBar
+        alignmentHintBar.translatesAutoresizingMaskIntoConstraints = false
+        alignmentHintBar.alphaValue = 0
+        alignmentHintBar.isHidden = true
+        container.addSubview(alignmentHintBar)
+        NSLayoutConstraint.activate([
+            alignmentHintBar.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            alignmentHintBar.bottomAnchor.constraint(
+                equalTo: container.bottomAnchor,
+                constant: -Self.floatingBarBottomInset
+            ),
+            alignmentHintBar.heightAnchor.constraint(equalToConstant: 32)
+        ])
+        canvasViewController.onAlignmentHint = { [weak self, weak alignmentHintBar] text in
+            guard let self, let alignmentHintBar else { return }
+            self.setAlignmentHint(text, in: alignmentHintBar)
+        }
+
         autoHideController = makeAutoHideController(
             container: container,
             layersPanel: (layersPanel, layersLeading),
@@ -629,6 +657,37 @@ final class DocumentStageViewController: NSViewController {
 
         view = container
         applyStageTint()
+    }
+
+    /// Blendet die Ausrichtungsanzeige unabhängig vom allgemeinen Widget-
+    /// Ausblenden ein und aus. Eine Generation verhindert, dass der Abschluss
+    /// einer alten Ausblendanimation einen inzwischen neuen Hinweis versteckt.
+    private func setAlignmentHint(_ text: String?, in panel: GlassPanel) {
+        alignmentHintAnimationGeneration += 1
+        let generation = alignmentHintAnimationGeneration
+
+        if let text {
+            toolbarController.setAlignmentHint(text)
+            if panel.isHidden {
+                panel.alphaValue = 0
+                panel.isHidden = false
+            }
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.15
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            context.allowsImplicitAnimation = true
+            panel.animator().alphaValue = text == nil ? 0 : 1
+        } completionHandler: { [weak self, weak panel] in
+            MainActor.assumeIsolated {
+                guard let self,
+                      self.alignmentHintAnimationGeneration == generation,
+                      text == nil
+                else { return }
+                panel?.isHidden = true
+            }
+        }
     }
 
     /// Verdrahtet das automatische Ausblenden (Menü „Darstellung").
@@ -859,6 +918,16 @@ final class DocumentStageViewController: NSViewController {
         // Leer erstellen und `cell` vor Bild/Ziel tauschen — siehe
         // ausführlicher Kommentar zum selben Muster in
         // `ToolbarController.makeToolButton`.
+        let add = NSButton()
+        add.cell = AquaButtonCell()
+        add.target = commandTarget
+        add.action = #selector(DocumentWindowController.insertEmptyDrawingLayer(_:))
+        add.image = MockupIcons.image(.layersAdd, pointSize: 14, tintColor: AssemblageTheme.textPrimary)
+        add.isBordered = true
+        add.wantsLayer = true
+        add.toolTip = "Leere Ebene"
+        self.addLayerButtonRef = add
+
         let duplicate = NSButton()
         duplicate.cell = AquaButtonCell()
         duplicate.target = self
@@ -895,7 +964,7 @@ final class DocumentStageViewController: NSViewController {
         divider.boxType = .separator
         divider.translatesAutoresizingMaskIntoConstraints = false
 
-        let controls = NSStackView(views: [duplicate, delete, NSView(), blendMenu])
+        let controls = NSStackView(views: [add, duplicate, delete, NSView(), blendMenu])
         controls.orientation = .horizontal
         controls.alignment = .centerY
         controls.spacing = 8

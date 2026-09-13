@@ -375,9 +375,14 @@ enum MaskRendering {
     ) -> (Int, Int) {
         if let referenz { return (referenz.width, referenz.height) }
         if let cropRect, cropRect.width > 0, cropRect.height > 0 {
-            return (Int(cropRect.width.rounded()), Int(cropRect.height.rounded()))
+            guard let width = Int(exactly: cropRect.width.rounded()),
+                  let height = Int(exactly: cropRect.height.rounded()),
+                  width <= Int32.max, height <= Int32.max
+            else { return (0, 0) }
+            return (width, height)
         }
-        guard displayedSize.width > 0, displayedSize.height > 0 else { return (0, 0) }
+        guard displayedSize.width.isFinite, displayedSize.height.isFinite,
+              displayedSize.width > 0, displayedSize.height > 0 else { return (0, 0) }
         let obergrenze: CGFloat = 2048
         let faktor = min(2, obergrenze / max(displayedSize.width, displayedSize.height))
         return (

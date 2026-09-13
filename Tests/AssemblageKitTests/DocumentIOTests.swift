@@ -50,6 +50,32 @@ final class DocumentIOTests: XCTestCase {
         return reopened
     }
 
+    func testSaveDoesNotDestroyResourcesNeededByUndoAndRedo() throws {
+        let document = AssemblageDocument()
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        document.undoManager = undo
+        let data = try pngData()
+        let reference = document.state.resources.addOriginal(data, fileExtension: "png")
+        let layer = Layer(name: "Foto", content: .image(ImageLayerContent(originalFileReference: reference)))
+        undo.beginUndoGrouping()
+        document.modify("Einfügen") { try? $0.addLayer(layer) }
+        undo.endUndoGrouping()
+        undo.beginUndoGrouping()
+        document.modify("Löschen") { try? $0.removeLayer(id: layer.id) }
+        undo.endUndoGrouping()
+        _ = try roundTrip(document, named: "Geloescht")
+        XCTAssertEqual(document.state.resources.data(for: reference), data)
+        undo.undo()
+        XCTAssertEqual(document.state.document.layers, [layer])
+        let reopened = try roundTrip(document, named: "Wiederhergestellt")
+        XCTAssertEqual(reopened.state.resources.data(for: reference), data)
+        undo.redo()
+        _ = try roundTrip(document, named: "ErneutGeloescht")
+        undo.undo()
+        XCTAssertEqual(document.state.resources.data(for: reference), data)
+    }
+
     // MARK: - Runde durch die Platte
 
     func testDocumentSurvivesSaveAndOpen() throws {

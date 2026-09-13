@@ -84,8 +84,7 @@ final class DocumentResources {
         unterSperre { wrappers[name] = wrapper }
     }
 
-    /// Entfernt Dateien, auf die keine Ebene mehr zeigt. Wird beim Sichern
-    /// aufgerufen, damit Pakete nicht unbegrenzt wachsen (Plan 2.1).
+    /// Nur verwenden, wenn auch Undo/Redo keine dieser Dateien mehr benötigt.
     func removeUnreferencedFiles(for document: AssemblageModel.Document) {
         for name in DocumentPackage.unreferencedFileNames(in: fileNames, for: document) {
             unterSperre { _ = wrappers.removeValue(forKey: name) }
@@ -93,14 +92,18 @@ final class DocumentResources {
     }
 
     /// Baut das komplette Paket zum Sichern zusammen.
-    func makeFileWrapper(documentData: Data) -> FileWrapper {
+    func makeFileWrapper(documentData: Data, referencedFileNames: Set<String>? = nil) -> FileWrapper {
         var children: [String: FileWrapper] = [:]
 
         let documentWrapper = FileWrapper(regularFileWithContents: documentData)
         documentWrapper.preferredFilename = DocumentPackage.documentFileName
         children[DocumentPackage.documentFileName] = documentWrapper
 
-        let momentaufnahme = unterSperre { wrappers }
+        // Nur das gespeicherte Paket ausdünnen. Die Sitzung benötigt frühere
+        // Originale und Masken weiterhin für Undo/Redo und laufende Exporte.
+        let momentaufnahme = unterSperre {
+            wrappers.filter { referencedFileNames?.contains($0.key) ?? true }
+        }
         for directory in [DocumentPackage.originalsDirectoryName, DocumentPackage.masksDirectoryName] {
             let contents = momentaufnahme
                 .filter { $0.key.hasPrefix("\(directory)/") }

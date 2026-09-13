@@ -42,8 +42,9 @@ enum PaintLayerCommand {
             content: .image(ImageLayerContent(originalFileReference: referenz))
         )
 
+        let index = LayerInsertion.indexAboveSelection(in: state)
         owner.modify("Malebene einfügen") { document in
-            _ = try? document.addLayer(layer)
+            _ = try? document.addLayer(layer, at: index)
         }
         state.selectedLayerID = layer.id
         return true

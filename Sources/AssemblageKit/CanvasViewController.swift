@@ -21,6 +21,11 @@ final class CanvasViewController: NSViewController {
     private var freehandStrokeWidth = 6.0
     private var themeSubscription: AnyCancellable?
 
+    /// Aktuelle Stiftwerte für Befehle ausserhalb des Canvas, etwa „Leere Ebene".
+    var currentFreehandSettings: (colorHex: String, width: Double) {
+        (freehandColorHex, freehandStrokeWidth)
+    }
+
     init(state: DocumentState) {
         self.state = state
         super.init(nibName: nil, bundle: nil)
@@ -54,6 +59,9 @@ final class CanvasViewController: NSViewController {
 
         canvasView.interactionDelegate = self
         canvasView.keyboardCommandDelegate = self
+        canvasView.onAlignmentHintChange = { [weak self] hinweis in
+            self?.onAlignmentHint?(hinweis)
+        }
         canvasView.selectedLayerID = state.selectedLayerID
 
         // Die Zoomstufe ändert sich auch durch Pinch und Bildlauf, nicht nur
@@ -315,6 +323,7 @@ final class CanvasViewController: NSViewController {
     /// bei den eigenen Menübefehlen gesetzt zu werden.
     var zoomPercent: Int { Int((scrollView.magnification * 100).rounded()) }
     var onZoomPercentChange: ((Int) -> Void)?
+    var onAlignmentHint: ((String?) -> Void)?
 
     // MARK: - Lage der Leinwand (Grundlage der Lineale)
 

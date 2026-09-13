@@ -184,11 +184,11 @@ final class AssemblageDocument: NSDocument {
 
     override func fileWrapper(ofType typeName: String) throws -> FileWrapper {
         let document = state.document
-        // Originale gelöschter Ebenen mitschleppen wäre teuer: ein Paket
-        // würde mit jedem Import wachsen und nie kleiner werden.
-        state.resources.removeUnreferencedFiles(for: document)
+        // Ressourcen früherer Zustände bleiben für Undo/Redo in der Sitzung.
+        // Auf die Platte kommen nur die aktuell referenzierten Dateien.
         return state.resources.makeFileWrapper(
-            documentData: try DocumentPackage.encode(document)
+            documentData: try DocumentPackage.encode(document),
+            referencedFileNames: Set(document.referencedFileNames)
         )
     }
 }

@@ -36,7 +36,10 @@ final class GlassPanel: NSView {
     /// gesetzt (Kapsel-/Pillenform, z. B. Zoom- und Verlaufsleiste) statt
     /// einen festen Radius zu behalten.
     var isPill: Bool {
-        didSet { needsLayout = true }
+        didSet {
+            needsLayout = true
+            if #available(macOS 27.0, *) { invalidateCornerConfiguration() }
+        }
     }
 
     private var fixedCornerRadius: CGFloat
@@ -129,13 +132,44 @@ final class GlassPanel: NSView {
 
     override func layout() {
         super.layout()
-        applyCornerRadius(isPill ? bounds.height / 2 : fixedCornerRadius)
+        applyCornerRadius(currentCornerRadius())
         gradientLayer.frame = bounds
         // Schmale Glanzkante exakt an der Oberkante (nicht die halbe Höhe):
         // die Aqua-Titelleisten-Glanzkante im Referenzfoto ist ein paar
         // Pixel hoch, kein grosser Diagonal-Streifen über das ganze Panel.
         let highlightHeight = min(10, bounds.height * 0.3)
         highlightLayer.frame = CGRect(x: 0, y: bounds.height - highlightHeight, width: bounds.width, height: highlightHeight)
+    }
+
+    /// Corner Concentricity (macOS 27, Apple): Statt eines fest verdrahteten
+    /// Radius liefert `cornerConfiguration` unten dem System die Vorgabe
+    /// „konzentrisch zum umschliessenden Fenster, mindestens `fixedCornerRadius`
+    /// gross" — AppKit rechnet daraus pro Panel den tatsächlichen, zum
+    /// Fensterrand passenden Radius aus (`effectiveCornerRadii`). Auf älteren
+    /// Systemen (< 27) bleibt es beim bisherigen, von Hand getunten Fixwert;
+    /// `containerConcentric` bekommt genau diesen Fixwert als Untergrenze,
+    /// das Ergebnis kann also nie kleiner/unrunder wirken als bisher.
+    private func currentCornerRadius() -> CGFloat {
+        if isPill { return bounds.height / 2 }
+        if #available(macOS 27.0, *), let effective = effectiveCornerRadii {
+            return effective.topLeft
+        }
+        return fixedCornerRadius
+    }
+
+    @available(macOS 27.0, *)
+    override var cornerConfiguration: NSViewCornerConfiguration? {
+        isPill ? .capsule : .uniformCorners(radius: .containerConcentric(fixedCornerRadius))
+    }
+
+    @available(macOS 27.0, *)
+    override func viewDidChangeEffectiveCornerRadii() {
+        super.viewDidChangeEffectiveCornerRadii()
+        // AppKit löst die konzentrische Vorgabe unter Umständen erst nach
+        // diesem Panel-Layout auf (z. B. wenn sich erst das Fenster selbst
+        // einordnet) — bei einer Änderung deshalb sofort neu anwenden statt
+        // auf das nächste `layout()` zu warten.
+        applyCornerRadius(currentCornerRadius())
     }
 
     private func applyCornerRadius(_ radius: CGFloat) {
@@ -222,6 +256,6 @@ final class GlassPanel: NSView {
             layer?.shadowColor = AssemblageTheme.glassShadowColor.cgColor
         }
 
-        applyCornerRadius(isPill ? bounds.height / 2 : fixedCornerRadius)
+        applyCornerRadius(currentCornerRadius())
     }
 }

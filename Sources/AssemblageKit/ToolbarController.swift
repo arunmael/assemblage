@@ -150,6 +150,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
     private weak var shapeMenuTitleItem: NSMenuItem?
     private weak var gridMenuTitleItem: NSMenuItem?
     private weak var zoomPercentLabel: NSTextField?
+    private weak var alignmentHintLabel: NSTextField?
     private weak var zoomLCDBackdrop: NSView?
     private var zoomLCDPadding: (leading: NSLayoutConstraint, trailing: NSLayoutConstraint, top: NSLayoutConstraint, bottom: NSLayoutConstraint)?
     private var themeSubscription: AnyCancellable?
@@ -203,6 +204,7 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         gridMenuTitleItem?.image = MockupIcons.image(.collageGrid, pointSize: 16, tintColor: AssemblageTheme.textPrimary)
         updatePresentation()
         applyZoomLCDStyle()
+        alignmentHintLabel?.textColor = AssemblageTheme.textSecondary
     }
 
     // MARK: - Werkzeugzustand
@@ -1103,7 +1105,30 @@ final class ToolbarController: NSObject, NSMenuItemValidation, NSTextFieldDelega
         return stack
     }
 
-    // MARK: - Zoom- und Verlaufsleiste
+    // MARK: - Zoom-, Hinweis- und Verlaufsleiste
+
+    /// Die vorübergehende Ausrichtungsanzeige in derselben Pillenform wie die
+    /// Zoomleiste. Sichtbarkeit und Animation steuert die Dokumentbühne.
+    func buildAlignmentHintBar() -> GlassPanel {
+        let hinweis = NSTextField(labelWithString: "")
+        hinweis.font = .systemFont(ofSize: 12, weight: .semibold)
+        hinweis.textColor = AssemblageTheme.textSecondary
+        hinweis.alignment = .center
+        alignmentHintLabel = hinweis
+
+        let stack = NSStackView(views: [hinweis])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 14)
+
+        let panel = GlassPanel(cornerRadius: 0, isPill: true)
+        panel.content = stack
+        return panel
+    }
+
+    func setAlignmentHint(_ text: String) {
+        alignmentHintLabel?.stringValue = text
+    }
 
     /// Die Zoom-Pille — nur Prozentzahl und Minus/Plus, ohne Beschriftung
     /// (auf ausdrücklichen Wunsch ohne „Einpassen"-Text; „An Fenster

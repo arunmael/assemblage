@@ -280,6 +280,8 @@ final class CanvasInteractionTests: XCTestCase {
     /// Hinweis sagt, worauf.
     func testResizingNearASquareSnapsAndSaysSo() throws {
         canvas.selectedLayerID = ebeneID
+        var letzterHinweis: String?
+        canvas.onAlignmentHintChange = { letzterHinweis = $0 }
 
         // Griff unten rechts der 100×100-Ebene bei (250, 250); gezogen auf
         // 150 breit und 146 hoch — vier Punkte neben dem Quadrat.
@@ -291,24 +293,27 @@ final class CanvasInteractionTests: XCTestCase {
             abs(letzte.transform.scaleX), abs(letzte.transform.scaleY), accuracy: 0.001,
             "bei quadratischem Inhalt heisst gleiche Skalierung gleiche Kantenlänge"
         )
-        XCTAssertEqual(canvas.hintBadgeForTesting.string as? String, "Quadrat")
-        XCTAssertFalse(canvas.hintBadgeForTesting.isHidden)
+        XCTAssertEqual(letzterHinweis, "Quadrat")
     }
 
     /// Nach dem Loslassen darf der Hinweis nicht stehen bleiben.
     func testTheHintDisappearsWhenTheDragEnds() throws {
         canvas.selectedLayerID = ebeneID
+        var letzterHinweis: String?
+        canvas.onAlignmentHintChange = { letzterHinweis = $0 }
 
         canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 250, y: 250))
         canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 300, y: 296))
         canvas.mouseUp(with: try ereignis(.leftMouseUp, atCanvasX: 300, y: 296))
 
-        XCTAssertTrue(canvas.hintBadgeForTesting.isHidden)
+        XCTAssertNil(letzterHinweis)
     }
 
     /// Weit weg vom Quadrat bleibt es beim freien Verzerren, ohne Hinweis.
     func testResizingFarFromASquareKeepsBothSidesFree() throws {
         canvas.selectedLayerID = ebeneID
+        var letzterHinweis: String?
+        canvas.onAlignmentHintChange = { letzterHinweis = $0 }
 
         canvas.mouseDown(with: try ereignis(.leftMouseDown, atCanvasX: 250, y: 250))
         canvas.mouseDragged(with: try ereignis(.leftMouseDragged, atCanvasX: 350, y: 260))
@@ -317,7 +322,7 @@ final class CanvasInteractionTests: XCTestCase {
         XCTAssertNotEqual(
             abs(letzte.transform.scaleX), abs(letzte.transform.scaleY), accuracy: 0.05
         )
-        XCTAssertTrue(canvas.hintBadgeForTesting.isHidden)
+        XCTAssertNil(letzterHinweis)
     }
 
     /// Die Fangbereiche der Griffe müssen mit dem Zoom mitgehen: Bei

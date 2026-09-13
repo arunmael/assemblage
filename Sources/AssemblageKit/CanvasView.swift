@@ -34,6 +34,11 @@ final class CanvasView: NSView {
 
     weak var interactionDelegate: CanvasInteractionDelegate?
     weak var keyboardCommandDelegate: CanvasKeyboardCommandDelegate?
+    /// Meldet den gerade aktiven Fanghinweis an die schwebende Anzeige der
+    /// Dokumentbühne. Gleiche Werte werden nicht wiederholt gemeldet, weil
+    /// Mausbewegungen beim Ziehen sehr häufig eintreffen.
+    var onAlignmentHintChange: ((String?) -> Void)?
+    private var letzterAusrichtungshinweis: String?
 
     /// Die ausgewählte Ebene bekommt einen Rahmen. Nur eine — Assemblage
     /// kennt bewusst keine Mehrfachauswahl (Plan 4: „Ein Fenster, ein Fokus").
@@ -70,11 +75,6 @@ final class CanvasView: NSView {
     private let lassoPreviewShape = CAShapeLayer()
     /// Sichtbarer Strich, solange ein neuer Freihandzug aufgenommen wird.
     private let freehandPreviewShape = CAShapeLayer()
-    /// Kurzer Text am gezogenen Objekt: sagt, worauf gerade eingerastet ist
-    /// („Quadrat", „Kreis", „Mitte"). Eine blosse Linie zeigt, *dass* etwas
-    /// einrastet, aber nicht *was* — und genau das war die Rückmeldung.
-    private let hintBadge = CATextLayer()
-
     /// Kantenlänge der gezeichneten Griffe, in Bildschirmpunkten.
     ///
     /// Bewusst grosszügig: Plan 2.2 hält fest, dass kleine Elemente bei
@@ -261,18 +261,11 @@ final class CanvasView: NSView {
         overlayLayer.addSublayer(lassoPreviewShape)
         overlayLayer.addSublayer(freehandPreviewShape)
         overlayLayer.addSublayer(handleShapes)
-        // Zuoberst: Der Hinweis darf von nichts verdeckt werden.
-        overlayLayer.addSublayer(hintBadge)
-        hintBadge.isHidden = true
-        hintBadge.alignmentMode = .center
-        hintBadge.foregroundColor = NSColor.white.cgColor
-        hintBadge.backgroundColor = NSColor.systemPink.cgColor
-        hintBadge.masksToBounds = true
         guideShapes.fillColor = nil
-        // Kräftiges Magenta wie in anderen Gestaltungsprogrammen: Die Linien
-        // müssen sich von der Auswahlfarbe unterscheiden, sonst hält man sie
-        // für einen Teil des Rahmens.
-        guideShapes.strokeColor = NSColor.systemPink.cgColor
+        // Blau statt des früheren Magenta (Nutzer-Auftrag): Die Linien müssen
+        // sich von der Auswahlfarbe unterscheiden, sonst hält man sie für
+        // einen Teil des Rahmens — und Rot liest sich als Warnung.
+        guideShapes.strokeColor = NSColor.systemBlue.cgColor
         shapeDropHighlight.fillColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
         shapeDropHighlight.strokeColor = NSColor.controlAccentColor.cgColor
         shapeDropHighlight.lineDashPattern = [5, 3]
@@ -445,7 +438,6 @@ final class CanvasView: NSView {
     var selectionOutlineLayerForTesting: CAShapeLayer { selectionOutline }
     var handleLayerForTesting: CAShapeLayer { handleShapes }
     var guideLayerForTesting: CAShapeLayer { guideShapes }
-    var hintBadgeForTesting: CATextLayer { hintBadge }
     var cropPreviewLayerForTesting: CALayer { cropPreviewLayer }
     var lassoPreviewLayerForTesting: CAShapeLayer { lassoPreviewShape }
     var freehandPreviewLayerForTesting: CAShapeLayer { freehandPreviewShape }
@@ -1244,7 +1236,7 @@ final class CanvasView: NSView {
         case .rotate:
             zeigeAusrichtungslinien([])
             updateShapeDropHighlight(nil)
-            zeigeHinweis(nil)
+            meldeHinweis(nil)
         }
 
         // Die Undo-Klammer erst beim ersten echten Ziehen öffnen: Ein blosser
@@ -1288,15 +1280,7 @@ final class CanvasView: NSView {
         eingerastet.x += ergebnis.offsetX
         eingerastet.y += ergebnis.offsetY
 
-        zeigeHinweis(
-            Self.beschriftung(fuer: ergebnis.lines),
-            above: Rect(
-                x: gezogen.x + ergebnis.offsetX,
-                y: gezogen.y + ergebnis.offsetY,
-                width: gezogen.width,
-                height: gezogen.height
-            )
-        )
+        meldeHinweis(Self.beschriftung(fuer: ergebnis.lines))
         return eingerastet
     }
 
@@ -1359,44 +1343,14 @@ final class CanvasView: NSView {
         }
     }
 
-    // MARK: - Hinweis am gezogenen Objekt
+    // MARK: - Ausrichtungshinweis
 
-    /// Zeigt den Hinweis über der Oberkante von `frame` — oder blendet ihn
-    /// aus, wenn `text` `nil` ist.
-    ///
-    /// Alle Masse werden durch die Zoomstufe geteilt: Der Hinweis liegt in
-    /// Leinwandkoordinaten und würde sonst bei 800 % zur Plakatwand und bei
-    /// 20 % unleserlich.
-    private func zeigeHinweis(_ text: String?, above frame: Rect? = nil) {
-        guard let text, let frame else {
-            withoutAnimation { hintBadge.isHidden = true }
-            return
-        }
-        let zoom = max(Double(zoomScale), 0.01)
-        let schriftgroesse = 11.0 / zoom
-        let attribute: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: schriftgroesse, weight: .semibold)
-        ]
-        let textbreite = (text as NSString).size(withAttributes: attribute).width
-        let breite = textbreite + 14 / zoom
-        let hoehe = 18.0 / zoom
-
-        withoutAnimation {
-            hintBadge.isHidden = false
-            hintBadge.string = text
-            hintBadge.font = NSFont.systemFont(ofSize: schriftgroesse, weight: .semibold)
-            hintBadge.fontSize = schriftgroesse
-            hintBadge.cornerRadius = hoehe / 2
-            hintBadge.contentsScale = window?.backingScaleFactor ?? 2
-            hintBadge.frame = CGRect(
-                x: frame.x + frame.width / 2 - breite / 2,
-                // Über der Oberkante, mit demselben Abstand wie der Drehgriff
-                // — dort ist erfahrungsgemäss Platz.
-                y: frame.y - hoehe - 10 / zoom,
-                width: breite,
-                height: hoehe
-            )
-        }
+    /// Meldet nur echte Änderungen. So erzeugt ein ruhender Mauszeiger beim
+    /// Ziehen weder unnötige Ansichtsaktualisierungen noch neue Animationen.
+    private func meldeHinweis(_ text: String?) {
+        guard text != letzterAusrichtungshinweis else { return }
+        letzterAusrichtungshinweis = text
+        onAlignmentHintChange?(text)
     }
 
     /// „Quadrat" bzw. „Kreis", sobald beim Skalieren beide Seiten gleich lang
@@ -1407,7 +1361,7 @@ final class CanvasView: NSView {
         // Toleranz, nicht Gleichheit: Zwischen Einrasten und Anzeige liegen
         // Fliesskommarechnungen.
         guard breite > 0, abs(breite - hoehe) < 0.01 else {
-            zeigeHinweis(nil)
+            meldeHinweis(nil)
             return
         }
         let rund: Bool
@@ -1416,13 +1370,7 @@ final class CanvasView: NSView {
         case .image(let bild): rund = bild.clipShape == .ellipse
         default: rund = false
         }
-        zeigeHinweis(
-            rund ? "Kreis" : "Quadrat",
-            above: transform.boundingFrame(
-                contentSize: laufend.contentSize,
-                distortion: document.layer(withID: laufend.layerID)?.distortion
-            )
-        )
+        meldeHinweis(rund ? "Kreis" : "Quadrat")
     }
 
     private func updateShapeDropTarget(for drag: CanvasDrag, center: Point) {
@@ -1536,7 +1484,7 @@ final class CanvasView: NSView {
         let shapeID = dropTargetShapeID
         zeigeAusrichtungslinien([])
         updateShapeDropHighlight(nil)
-        zeigeHinweis(nil)
+        meldeHinweis(nil)
         defer { drag = nil }
         guard let laufend = drag, laufend.hasPassedThreshold else { return }
         if case .move = laufend.kind, let shapeID {

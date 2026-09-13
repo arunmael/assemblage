@@ -168,7 +168,7 @@ enum LayerCreation {
         )
     }
 
-    /// Fügt sie zuoberst ein und wählt sie aus.
+    /// Fügt sie direkt über der Auswahl ein und wählt sie aus.
     static func insert(_ kind: NewLayerKind, into state: DocumentState) {
         guard let owner = state.owner else { return }
         let layer = makeLayer(
@@ -176,8 +176,9 @@ enum LayerCreation {
             canvas: state.document.canvas,
             existingLayers: state.document.layers
         )
+        let index = LayerInsertion.indexAboveSelection(in: state)
         owner.modify(kind.undoActionName) { document in
-            _ = try? document.addLayer(layer)
+            _ = try? document.addLayer(layer, at: index)
         }
         state.selectedLayerID = layer.id
     }

@@ -20,7 +20,7 @@ enum ImageDropCommand {
         state: DocumentState,
         presentingWindow: NSWindow?
     ) {
-        guard let document = state.owner else { return }
+        guard state.owner != nil else { return }
 
         let ergebnis = ImageImporter.import(
             from: pasteboard,
@@ -29,22 +29,7 @@ enum ImageDropCommand {
         )
 
         if !ergebnis.images.isEmpty {
-            // Alle auf einmal gezogenen Bilder bilden einen Undo-Schritt: Wer
-            // fünf Fotos hereinzieht und es sich anders überlegt, will einmal
-            // ⌘Z drücken, nicht fünfmal.
-            document.beginInteraction()
-            document.modify("Bilder einsetzen") { dokument in
-                for bild in ergebnis.images {
-                    try? dokument.addLayer(bild.layer)
-                }
-            }
-            document.endInteraction(
-                actionName: ergebnis.images.count == 1 ? "Bild einsetzen" : "Bilder einsetzen"
-            )
-
-            // Das zuletzt eingesetzte Bild auswählen — man will es meist
-            // gleich verschieben.
-            state.selectedLayerID = ergebnis.images.last?.layer.id
+            insertImportedLayers(ergebnis.images.map(\.layer), into: state)
         }
 
         // Fehlgeschlagene Dateien benennen statt stillschweigend zu schlucken
@@ -64,5 +49,31 @@ enum ImageDropCommand {
                 alert.runModal()
             }
         }
+    }
+
+    /// Fügt einen gemeinsam importierten Bildstapel als einen Undo-Schritt
+    /// direkt über der Auswahl ein. Als eigene Funktion bleibt insbesondere
+    /// die Reihenfolge mehrerer Bilder ohne Pasteboard testbar.
+    static func insertImportedLayers(_ layers: [Layer], into state: DocumentState) {
+        guard !layers.isEmpty, let document = state.owner else { return }
+        let startIndex = LayerInsertion.indexAboveSelection(in: state)
+
+        // Alle auf einmal gezogenen Bilder bilden einen Undo-Schritt: Wer
+        // fünf Fotos hereinzieht und es sich anders überlegt, will einmal
+        // ⌘Z drücken, nicht fünfmal.
+        document.beginInteraction()
+        document.modify("Bilder einsetzen") { dokument in
+            for (offset, layer) in layers.enumerated() {
+                let index = startIndex.map { $0 + offset }
+                _ = try? dokument.addLayer(layer, at: index)
+            }
+        }
+        document.endInteraction(
+            actionName: layers.count == 1 ? "Bild einsetzen" : "Bilder einsetzen"
+        )
+
+        // Das zuletzt eingesetzte Bild auswählen — man will es meist
+        // gleich verschieben.
+        state.selectedLayerID = layers.last?.id
     }
 }

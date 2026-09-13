@@ -49,6 +49,22 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
         window.contentMinSize = NSSize(width: 880, height: 480)
         window.setFrameAutosaveName("AssemblageDocumentWindow")
 
+        // Aufgehen soll das Fenster immer über den ganzen nutzbaren
+        // Bildschirm (Nutzer-Auftrag) — bewusst *nach* dem gesicherten
+        // Rahmen, der damit nur noch die Grösse beim Wiederherstellen einer
+        // Sitzung bestimmt. Nicht `toggleFullScreen`: Vollbild verschiebt das
+        // Fenster in einen eigenen Space und blendet Menüleiste und Dock aus.
+        window.setFrame(
+            WindowPlacement.initialFrame(
+                visibleFrame: (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame
+                    ?? window.frame,
+                minimumSize: window.frameRect(
+                    forContentRect: NSRect(origin: .zero, size: window.contentMinSize)
+                ).size
+            ),
+            display: false
+        )
+
         // Einen bereits zusammengefallen gesicherten Rahmen aufrichten.
         // `contentMinSize` allein genügt nicht: Sie begrenzt das Ziehen am
         // Fensterrand, nicht das Wiederherstellen eines gesicherten Rahmens.
@@ -169,6 +185,17 @@ final class DocumentWindowController: NSWindowController, NSMenuItemValidation {
     }
 
     @IBAction func insertTextLayer(_ sender: Any?) { insertLayer(.text) }
+
+    @IBAction func insertEmptyDrawingLayer(_ sender: Any?) {
+        guard let state = (document as? AssemblageDocument)?.state else { return }
+        let stift = canvasViewController?.currentFreehandSettings
+            ?? (colorHex: "#1D3557", width: 6.0)
+        DrawingLayerCommand.insertEmptyLayer(
+            into: state,
+            strokeColorHex: stift.colorHex,
+            strokeWidth: stift.width
+        )
+    }
 
     @IBAction func insertPaintLayer(_ sender: Any?) {
         guard let state = (document as? AssemblageDocument)?.state else { return }

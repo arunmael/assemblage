@@ -43,7 +43,7 @@ public struct RGBA: Equatable, Sendable {
 
     public var hexString: String {
         func byte(_ component: Double) -> Int {
-            Int((component.clamped(to: 0...1) * 255).rounded())
+            Int((component.finite(or: 0).clamped(to: 0...1) * 255).rounded())
         }
         let base = String(format: "#%02X%02X%02X", byte(red), byte(green), byte(blue))
         // Deckende Farben ohne Alpha-Anteil schreiben: hält document.json

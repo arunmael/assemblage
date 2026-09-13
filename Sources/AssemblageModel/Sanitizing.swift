@@ -33,6 +33,18 @@ extension Point: Sanitizable {
     }
 }
 
+extension VectorPath: Sanitizable {
+    public func sanitized() -> VectorPath {
+        VectorPath(subpaths: subpaths.map { subpath in
+            PathSubpath(anchors: subpath.anchors.map { anchor in
+                PathAnchor(point: anchor.point.sanitized(),
+                           controlIn: anchor.controlIn.sanitized(),
+                           controlOut: anchor.controlOut.sanitized())
+            }, isClosed: subpath.isClosed)
+        })
+    }
+}
+
 extension Rect: Sanitizable {
     public func sanitized() -> Rect {
         // Eine Breite oder Höhe von 0 würde das Element unsichtbar und unselektierbar machen.
@@ -154,7 +166,11 @@ extension QuadDistortion: Sanitizable {
             topLeft: topLeft.sanitized(),
             topRight: topRight.sanitized(),
             bottomRight: bottomRight.sanitized(),
-            bottomLeft: bottomLeft.sanitized()
+            bottomLeft: bottomLeft.sanitized(),
+            topMid: topMid.sanitized(),
+            rightMid: rightMid.sanitized(),
+            bottomMid: bottomMid.sanitized(),
+            leftMid: leftMid.sanitized()
         )
     }
 }
@@ -168,7 +184,7 @@ extension ImageLayerContent: Sanitizable {
             clipShape: clipShape,
             clipShapeCornerRadius: clipShapeCornerRadius.finite(or: 0),
             clipShapePointCount: clipShapePointCount,
-            clipShapePath: clipShapePath,
+            clipShapePath: clipShapePath?.sanitized(),
             clipShapePathSize: clipShapePathSize?.sanitized(),
             borderWidth: borderWidth.finite(or: 0),
             borderColorHex: borderColorHex
@@ -198,7 +214,10 @@ extension ShapeLayerContent: Sanitizable {
             size: size.sanitized(),
             cornerRadius: cornerRadius.finite(or: 0),
             fillColorHex: fillColorHex,
-            pointCount: pointCount
+            pointCount: pointCount,
+            strokeColorHex: strokeColorHex,
+            strokeWidth: strokeWidth.finite(or: 0),
+            path: path?.sanitized()
         )
     }
 }

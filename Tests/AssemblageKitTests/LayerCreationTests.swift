@@ -75,6 +75,21 @@ final class LayerCreationTests: XCTestCase {
         XCTAssertEqual(content.kind, .ellipse)
     }
 
+    func testEinsetzenMitAuswahlLegtEbeneDirektDarueberAb() {
+        let document = AssemblageDocument()
+        let unten = Layer(name: "Unten", content: .text(TextLayerContent(string: "Unten")))
+        let mitte = Layer(name: "Mitte", content: .text(TextLayerContent(string: "Mitte")))
+        let oben = Layer(name: "Oben", content: .text(TextLayerContent(string: "Oben")))
+        document.modify("Vorbereiten") { $0.layers = [unten, mitte, oben] }
+        document.state.selectedLayerID = mitte.id
+
+        LayerCreation.insert(.text, into: document.state)
+
+        XCTAssertEqual(document.state.document.layers[1].id, mitte.id)
+        XCTAssertEqual(document.state.document.layers[2].id, document.state.selectedLayerID)
+        XCTAssertEqual(document.state.document.layers[3].id, oben.id)
+    }
+
     func testZweiNacheinanderEingesetzteEbenenLiegenNichtDeckungsgleich() {
         let document = AssemblageDocument()
 
