@@ -109,16 +109,14 @@ enum LayerFlattening {
     private static func draw(_ content: LayerContent, size: CGSize, in context: CGContext) {
         switch content {
         case .text(let text):
-            // Das gespeicherte CGImage wird beim späteren Bildzeichnen lokal
-            // gespiegelt (siehe `DocumentExporter.drawImage`). `flipped: true`
-            // setzt den Text deshalb absichtlich VORVERKEHRT in die Bitmap;
-            // erst die spätere Spiegelung beim Zeichnen als Bild dreht ihn
-            // wieder richtig herum. Nachgemessen statt angenommen (Problems.md:
-            // eine geflattete Textebene stand nach dem Export auf dem Kopf, als
-            // hier noch `flipped: false` stand — siehe
-            // `LayerFlatteningTests.testRasterizedTextLooksLikeTheEditableOriginal`).
+            // Aufrecht in die Bitmap: Der Kontext zählt y nach oben, AppKit
+            // setzt Text in einem ungeflippten Kontext deshalb richtig herum —
+            // die erste Pixelzeile ist die oberste Textzeile. Früher stand hier
+            // absichtlich ein verkehrter Text, der eine ebenso falsche
+            // Spiegelung in `DocumentExporter.drawImage` ausglich; auf der
+            // Leinwand stand er dadurch auf dem Kopf.
             NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
             TextLayout.attributedString(for: text).draw(in: CGRect(origin: .zero, size: size))
             NSGraphicsContext.restoreGraphicsState()
 
@@ -128,9 +126,13 @@ enum LayerFlattening {
             // Nachbildung hier harmlos — alle drei sind senkrecht symmetrisch.
             // Bei einem Dreieck oder Herz wäre sie es nicht mehr.
             //
-            // Ungeflippt gezeichnet, aus demselben Grund wie beim Text darüber:
-            // Das entstehende Bild wird später beim Zeichnen lokal gespiegelt,
-            // die beiden Schritte heben sich auf.
+            // `ShapePath` beschreibt die Form mit y nach unten wie das Modell,
+            // der Kontext zählt nach oben: einmal spiegeln, damit die Form
+            // aufrecht in der Bitmap steht.
+            context.saveGState()
+            defer { context.restoreGState() }
+            context.translateBy(x: 0, y: size.height)
+            context.scaleBy(x: 1, y: -1)
             if let pfad = ShapePath.cgPath(for: shape, in: CGRect(origin: .zero, size: size)) {
                 context.setFillColor((RGBA(hex: shape.fillColorHex) ?? .white).cgColor)
                 context.addPath(pfad)

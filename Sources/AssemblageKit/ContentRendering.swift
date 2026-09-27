@@ -48,6 +48,45 @@ enum ImageDecoding {
         // Scheitert das Neuzeichnen, lieber das ungedrehte Bild zeigen als gar keines.
         return RenderContext.shared.createCGImage(oriented, from: oriented.extent) ?? image
     }
+
+    /// Die Pixelgrösse nach EXIF-Drehung — nur aus den Kopfdaten, ohne das
+    /// Bild zu dekodieren.
+    static func orientedPixelSize(_ data: Data) -> CGSize? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue,
+              width > 0, height > 0
+        else { return nil }
+        let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+        return (5...8).contains(orientation)
+            ? CGSize(width: height, height: width)
+            : CGSize(width: width, height: height)
+    }
+
+    /// Dekodiert nur so fein, wie `maxPixelEdge` verlangt (längste Kante).
+    ///
+    /// Beim Export wird ein Foto, das im Ergebnis 800 px breit ist, sonst
+    /// trotzdem mit allen 24 Megapixeln dekodiert — rund 100 MB und ein
+    /// Vielfaches der Zeit für Pixel, die beim Zeichnen gleich wieder
+    /// verworfen werden. Verlangt die Ausgabe mindestens die Originalgrösse,
+    /// läuft der gewohnte volle Weg.
+    static func decode(_ data: Data, maxPixelEdge: CGFloat) -> CGImage? {
+        guard maxPixelEdge.isFinite, maxPixelEdge > 0,
+              let original = orientedPixelSize(data),
+              maxPixelEdge < max(original.width, original.height)
+        else { return decode(data) }
+
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: Int(maxPixelEdge.rounded(.up)),
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) ?? decode(data)
+    }
 }
 
 /// Der Pfad einer Formebene (Plan 5.7 und die Vorlagen aus missing.md).

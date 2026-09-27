@@ -48,9 +48,18 @@ final class DistortRenderingTests: XCTestCase {
         ))
         context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
         let data = try XCTUnwrap(context.data)
-        let row = image.height - 1 - y
-        let p = data.advanced(by: row * context.bytesPerRow + x * 4).assumingMemoryBound(to: UInt8.self)
+        // Pufferzeile 0 ist die oberste Bildzeile — ein Export-Bild braucht
+        // keine Umrechnung. Die frühere `height - 1 - y` kehrte es um und
+        // bestätigte so einen auf dem Kopf stehenden Export.
+        let p = data.advanced(by: y * context.bytesPerRow + x * 4).assumingMemoryBound(to: UInt8.self)
         return (p[0], p[1], p[2], p[3])
+    }
+
+    /// Für Bilder aus `CALayer.render(in:)`: Die kommen senkrecht gespiegelt
+    /// im Puffer an (nachgemessen an einem Dreieck, dessen Spitze sonst unten
+    /// läge) und brauchen deshalb die Umrechnung.
+    private func canvasPixel(_ image: CGImage, x: Int, y: Int) throws -> (UInt8, UInt8, UInt8, UInt8) {
+        try pixel(image, x: x, y: image.height - 1 - y)
     }
 
     private func assertSimilarPixel(
@@ -62,7 +71,7 @@ final class DistortRenderingTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) throws {
-        let a = try pixel(canvas, x: x, y: y)
+        let a = try canvasPixel(canvas, x: x, y: y)
         let b = try pixel(export, x: x, y: y)
         for (canvasValue, exportValue) in zip([a.0, a.1, a.2, a.3], [b.0, b.1, b.2, b.3]) {
             XCTAssertEqual(

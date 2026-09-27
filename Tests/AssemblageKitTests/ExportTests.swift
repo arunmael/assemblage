@@ -480,7 +480,9 @@ final class ExportTests: XCTestCase {
         exportContext.draw(exportedImage, in: CGRect(x: 0, y: 0, width: 300, height: 300))
 
         for (x, y) in [(150, 150), (110, 130), (190, 170), (30, 30)] {
-            let fromCanvas = try pixel(of: canvasContext, x: x, y: y)
+            // `CALayer.render(in:)` legt die Leinwand senkrecht gespiegelt in
+            // den Puffer, der Export liegt aufrecht darin.
+            let fromCanvas = try pixel(of: canvasContext, x: x, y: 299 - y)
             let fromExport = try pixel(of: exportContext, x: x, y: y)
             assertRoughly(
                 fromCanvas, fromExport,

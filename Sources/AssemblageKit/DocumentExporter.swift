@@ -120,7 +120,10 @@ enum DocumentExporter {
         pageSize: CGSize
     ) async throws -> Data {
         try await runOffMainActor {
-            try encodedPDFData(of: document, resources: resources, pageSize: pageSize)
+            // Volle Auflösung: Ein PDF hat keine feste Pixeldichte.
+            try OutputResolution.$limitsImageDecoding.withValue(false) {
+                try encodedPDFData(of: document, resources: resources, pageSize: pageSize)
+            }
         }
     }
 
@@ -396,14 +399,11 @@ enum DocumentExporter {
             return
         }
 
-        // Wie bei den anderen Core-Image-Ergebnissen: Das Zeichnen in einen
-        // ungeflippten Quartz-Kontext kippt das Bild, deshalb lokal
-        // gegenspiegeln. (Dieselbe Falle wie bei Bildern, Text und Verziehen.)
-        context.saveGState()
-        context.translateBy(x: 0, y: targetSize.height)
-        context.scaleBy(x: 1, y: -1)
+        // Die Zwischenfläche liegt im selben y-nach-oben-System wie das Ziel
+        // und kommt aufrecht aus Core Image zurück — also ohne Spiegelung
+        // zurücksetzen. Die frühere Gegenspiegelung stellte Formen, Text und
+        // Masken jeder Ebene mit Schatten oder Leuchten auf den Kopf.
         context.draw(fertig, in: surfaceRect)
-        context.restoreGState()
     }
 
     static func effectSurfaceRect(
@@ -505,7 +505,9 @@ enum DocumentExporter {
 
         context.saveGState()
         context.translateBy(x: centreX, y: centreY)
-        context.rotate(by: radians)
+        // Das Modell dreht im Uhrzeigersinn bei y nach unten. Hier zählt y
+        // nach oben, derselbe Drehsinn verlangt deshalb den negativen Winkel.
+        context.rotate(by: -radians)
         context.scaleBy(x: scaleX * exportScale.width, y: scaleY * exportScale.height)
 
         let rect = CGRect(
@@ -882,26 +884,11 @@ enum DocumentExporter {
         else { return }
 
         context.interpolationQuality = .high
-        // `CIContext.createCGImage` liefert wie ein dekodiertes `CGImage`
-        // Zeilen in Bildkoordinaten. Direkt in den ungeflippten Quartz-
-        // Kontext gezeichnet würde das verzogene Viereck innerhalb seiner
-        // Umschliessenden vertikal gespiegelt. Zusätzlich liegt `extent` in
-        // Core-Image-Koordinaten: Seine untere y-Kante muss deshalb aus der
-        // oberen Kante in Quartz-Koordinaten berechnet werden. Bei einem
-        // asymmetrischen Viereck sind `extent.minY` und diese Zielposition
-        // verschieden; dieselbe Zahl für beide verschob den Export sichtbar.
-        let drawingRect = CGRect(
-            x: extent.minX,
-            y: targetSize.height - extent.maxY,
-            width: extent.width,
-            height: extent.height
-        )
-        context.saveGState()
-        context.translateBy(x: drawingRect.midX, y: drawingRect.midY)
-        context.scaleBy(x: 1, y: -1)
-        context.translateBy(x: -drawingRect.midX, y: -drawingRect.midY)
-        context.draw(output, in: drawingRect)
-        context.restoreGState()
+        // Core Image und der Zielkontext zählen y beide nach oben, und die
+        // Eckpunkte wurden bereits in diesem System übergeben. Das Ergebnis
+        // liegt deshalb schon an der richtigen Stelle und aufrecht — ohne
+        // Spiegelung und ohne Umrechnung der Lage.
+        context.draw(output, in: extent)
     }
 
     // MARK: - Inhaltsgrösse
@@ -917,12 +904,17 @@ enum DocumentExporter {
             if let crop = image.cropRect {
                 return CGSize(width: crop.width, height: crop.height)
             }
-            guard let loaded = loadImage(named: image.originalFileReference, resources: resources) else {
+            // Nur die Kopfdaten: Früher wurde hier das ganze Foto dekodiert,
+            // bloss um seine Grösse zu erfahren — und beim Zeichnen gleich
+            // noch einmal.
+            guard let data = resources.data(for: image.originalFileReference),
+                  let size = ImageDecoding.orientedPixelSize(data)
+            else {
                 // Derselbe Platzhalter-Massstab wie `LayerRenderer`, damit
                 // eine fehlende Originaldatei nicht unauffindbar wird.
                 return CGSize(width: 320, height: 320)
             }
-            return CGSize(width: loaded.width, height: loaded.height)
+            return size
 
         case .text(let text):
             return TextLayout.naturalSize(of: text)
@@ -1030,11 +1022,7 @@ enum DocumentExporter {
         context.setAlpha(CGFloat(werte.opacity))
         context.interpolationQuality = .high
 
-        // Dieselbe lokale Spiegelung wie bei Bildinhalten — aus demselben
-        // Grund, siehe `drawImage(_:in:resources:context:)`.
-        context.translateBy(x: rect.midX, y: rect.midY)
-        context.scaleBy(x: 1, y: -1)
-        context.translateBy(x: -rect.midX, y: -rect.midY)
+        // Aufrecht wie ein Foto, siehe `drawImage(_:in:resources:context:)`.
         context.draw(gekachelt, in: rect)
     }
 
@@ -1054,16 +1042,25 @@ enum DocumentExporter {
     }
 
     private static func drawImage(_ content: ImageLayerContent, in rect: CGRect, resources: DocumentResources, context: CGContext) {
-        guard let image = loadImage(named: content.originalFileReference, resources: resources) else {
+        guard let data = resources.data(for: content.originalFileReference),
+              let original = ImageDecoding.orientedPixelSize(data),
+              let image = decodeForOutput(data, original: original, content: content, rect: rect, context: context)
+        else {
             drawMissingImagePlaceholder(in: rect, context: context)
             return
         }
 
         var drawnImage = image
         if let crop = content.cropRect {
+            // Der Zuschnitt liegt in Pixeln des Originals; ist das Bild
+            // verkleinert dekodiert, schrumpft er im selben Verhältnis.
+            let faktor = CGFloat(image.width) / original.width
             // `CGImage.cropping(to:)` erwartet den Ursprung oben links —
             // dieselbe Konvention, die das Modell überall verwendet.
-            guard let cropped = image.cropping(to: CGRect(x: crop.x, y: crop.y, width: crop.width, height: crop.height)) else {
+            guard let cropped = image.cropping(to: CGRect(
+                x: crop.x * faktor, y: crop.y * faktor,
+                width: crop.width * faktor, height: crop.height * faktor
+            ).integral) else {
                 drawMissingImagePlaceholder(in: rect, context: context)
                 return
             }
@@ -1086,18 +1083,12 @@ enum DocumentExporter {
 
         context.interpolationQuality = .high
 
-        // `CGContext.draw(_:in:)` zeichnet ein `CGImage` verkehrt herum,
-        // wenn der Kontext (wie hier) keinen eigenen Geometrie-Flip trägt —
-        // ein gut bekannter Core-Graphics-Stolperstein, empirisch bestätigt:
-        // die obere Bildhälfte landet sonst unten. Lokal um die Rechteckmitte
-        // gespiegelt gleicht das wieder aus, ohne Rotation/Skalierung der
-        // Ebene (die schon in der CTM stecken) zu beeinflussen.
-        context.saveGState()
-        context.translateBy(x: rect.midX, y: rect.midY)
-        context.scaleBy(x: 1, y: -1)
-        context.translateBy(x: -rect.midX, y: -rect.midY)
+        // Ohne Spiegelung: In einem Kontext, dessen y nach oben zählt,
+        // zeichnet `CGContext.draw(_:in:)` ein `CGImage` aufrecht — die erste
+        // Pixelzeile landet oben. Ein früherer „Ausgleich" an dieser Stelle
+        // stellte jedes exportierte Foto auf den Kopf (nachgemessen gegen die
+        // Leinwand in `ExportOrientationTests`).
         context.draw(drawnImage, in: rect)
-        context.restoreGState()
     }
 
     private static func drawImageBorder(
@@ -1191,12 +1182,41 @@ enum DocumentExporter {
 
     // MARK: - Bilddekodierung
 
-    /// Der Export dekodiert jedes Original neu, statt den Zwischenspeicher
-    /// von `ImageStore` zu nutzen: Der ist an den Hauptakteur gebunden, und
-    /// der Export läuft bewusst daneben.
-    private static func loadImage(named name: String, resources: DocumentResources) -> CGImage? {
-        guard let data = resources.data(for: name) else { return nil }
-        return ImageDecoding.decode(data)
+    /// Ob Fotos nur so fein dekodiert werden, wie die Ausgabe es verlangt.
+    /// Beim PDF abgeschaltet: Dort kann man hineinzoomen und drucken, die
+    /// Ausgabe hat keine feste Pixeldichte.
+    enum OutputResolution {
+        @TaskLocal static var limitsImageDecoding = true
+    }
+
+    /// Dekodiert ein Foto so fein, wie es im Zielkontext tatsächlich
+    /// erscheint — und nicht feiner. Nacheinander für jede Ebene, das
+    /// vorherige Foto ist dann schon wieder freigegeben.
+    ///
+    /// Weichzeichnen und Schärfen rechnen mit festen Pixelradien; auf einem
+    /// kleiner dekodierten Bild sähen sie anders aus. Solche Ebenen bleiben
+    /// deshalb beim vollen Original.
+    private static func decodeForOutput(
+        _ data: Data,
+        original: CGSize,
+        content: ImageLayerContent,
+        rect: CGRect,
+        context: CGContext
+    ) -> CGImage? {
+        guard OutputResolution.limitsImageDecoding,
+              content.adjustments.blurRadius == 0,
+              content.adjustments.sharpenAmount == 0,
+              rect.width > 0, rect.height > 0
+        else { return ImageDecoding.decode(data) }
+
+        // Wie viele Gerätepixel eine Einheit von `rect` belegt. `rect` misst
+        // in Pixeln des (zugeschnittenen) Originals, die CTM enthält Ebenen-
+        // und Exportskalierung sowie Drehung.
+        let geraet = context.userSpaceToDeviceSpaceTransform
+        let massstab = max(hypot(geraet.a, geraet.b), hypot(geraet.c, geraet.d))
+        guard massstab.isFinite, massstab > 0 else { return ImageDecoding.decode(data) }
+        let noetig = max(original.width, original.height) * massstab
+        return ImageDecoding.decode(data, maxPixelEdge: noetig)
     }
 
     // MARK: - Hilfskontext

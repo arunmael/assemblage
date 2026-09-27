@@ -46,7 +46,9 @@ final class EffectsRenderingTests: XCTestCase {
         ))
         ctx.draw(bild, in: CGRect(x: 0, y: 0, width: seite, height: seite))
         let daten = try XCTUnwrap(ctx.data).assumingMemoryBound(to: UInt8.self)
-        return Int(daten[(seite - 1 - y) * ctx.bytesPerRow + x * 4 + 3])
+        // Pufferzeile 0 ist die oberste Bildzeile, `y` zählt wie das Modell
+        // von oben — keine Umrechnung nötig.
+        return Int(daten[y * ctx.bytesPerRow + x * 4 + 3])
     }
 
     private func pixels(_ image: CGImage) throws -> [UInt8] {
