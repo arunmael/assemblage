@@ -386,7 +386,7 @@ extension CanvasViewController: CanvasInteractionDelegate, CanvasKeyboardCommand
     func canvasView(_ canvasView: CanvasView, didChangeCropOfLayerWithID id: UUID, to crop: Rect) {
         guard let ebene = state.document.layer(withID: id),
               case .image(let inhalt) = ebene.content,
-              state.images.image(named: inhalt.originalFileReference) != nil,
+              state.images.canDisplay(named: inhalt.originalFileReference),
               let pixelSize = state.images.pixelSize(named: inhalt.originalFileReference)
         else { return }
 

@@ -17,7 +17,7 @@ enum CollageTemplateCommand {
 
     static func apply(_ template: CollageTemplate, to state: DocumentState) {
         apply(template, to: state) { content in
-            guard state.images.image(named: content.originalFileReference) != nil,
+            guard state.images.canDisplay(named: content.originalFileReference),
                   let pixelSize = state.images.pixelSize(named: content.originalFileReference)
             else {
                 return nil
@@ -79,7 +79,7 @@ enum CollageTemplateCommand {
     /// leicht versetzt — genau der Zustand, den ein frischer Import erzeugt.
     static func removeTemplate(from state: DocumentState) {
         removeTemplate(from: state) { content in
-            guard state.images.image(named: content.originalFileReference) != nil,
+            guard state.images.canDisplay(named: content.originalFileReference),
                   let pixelSize = state.images.pixelSize(named: content.originalFileReference)
             else { return nil }
             return Size(pixelSize)

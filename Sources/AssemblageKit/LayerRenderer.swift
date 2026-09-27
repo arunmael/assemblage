@@ -21,6 +21,9 @@ struct LayerRenderer {
     /// Pixel pro Punkt des Bildschirms — sonst sind Text und Formen auf
     /// Retina-Displays sichtbar unscharf.
     var contentsScale: CGFloat = 2
+    /// Wird aufgerufen, sobald ein im Hintergrund dekodiertes Original
+    /// bereitliegt. Die Leinwand frischt dann die Ebenen auf, die es zeigen.
+    var imageDidLoad: (@MainActor (String) -> Void)?
 
     // MARK: - Aufbau
 
@@ -48,13 +51,12 @@ struct LayerRenderer {
         switch layer.content {
         case .text: return renderedLayer is CATextLayer
         case .shape: return renderedLayer is CAShapeLayer
-        case .image(let image):
-            // Der Platzhalter für ein fehlendes Original ist eine schlichte
-            // CALayer; taucht die Datei wieder auf, muss neu gebaut werden.
-            guard !(renderedLayer is CATextLayer), !(renderedLayer is CAShapeLayer) else { return false }
-            guard let bild = renderedLayer as? ImageContentLayer else { return false }
-            let originalExists = images.image(named: image.originalFileReference) != nil
-            return originalExists == (bild.bitmap.contents != nil)
+        case .image:
+            // Fehlendes, ladendes und fertiges Original teilen sich dieselbe
+            // Schichtklasse; den Wechsel zwischen ihnen übernimmt
+            // `applyContent`. Hier das Bild abzufragen, hiesse, ein verdrängtes
+            // Foto bei jedem Auffrischen neu zu dekodieren.
+            return renderedLayer is ImageContentLayer
         }
     }
 
@@ -113,6 +115,21 @@ struct LayerRenderer {
     func applyTexture(_ layer: Layer, to renderedLayer: CALayer) {
         let vorhandene = renderedLayer.sublayers?.first { $0.name == Self.textureLayerName }
 
+        // Kacheln und Silhouette neu zu bauen, kostet ein Dekodieren der
+        // Texturdatei und eine Bitmap in Ebenengrösse. Beim Verschieben oder
+        // bei einem Anpassungsregler ändert sich daran nichts.
+        let eingaben = TextureInputs(
+            texture: layer.texture,
+            content: Self.silhouetteRelevant(layer.content),
+            size: renderedLayer.bounds.size,
+            imageReady: ((renderedLayer.superlayer as? ImageContentLayer)?.displayedReference) != nil
+        )
+        if vorhandene != nil || layer.texture == nil,
+           renderedLayer.hasRemembered(eingaben, forKey: Self.textureInputsKey) {
+            return
+        }
+        renderedLayer.remember(eingaben, forKey: Self.textureInputsKey)
+
         guard let textur = layer.texture?.clamped(), textur.opacity > 0,
               renderedLayer.bounds.width > 0, renderedLayer.bounds.height > 0,
               let gekachelt = TextureRendering.tiledImage(
@@ -162,6 +179,7 @@ struct LayerRenderer {
         // falsch und würde sie ausserdem doppelt anwenden.
         guard layer.distortion?.hasCurvedEdges != true else {
             renderedLayer.mask = nil
+            renderedLayer.forget(forKey: Self.maskInputsKey)
             return
         }
         // Die Maske gehört an den Bildinhalt, nicht an die Hülle: Sonst
@@ -174,6 +192,17 @@ struct LayerRenderer {
         } else {
             ausschnitt = nil
         }
+
+        // Die Maske entsteht aus einer PNG-Datei, die dekodiert, umgerechnet
+        // und über Core Image neu gerendert wird — pro Aufruf. Beim Ziehen
+        // einer maskierten Ebene geschah das bisher bei jeder Mausbewegung.
+        let eingaben = MaskInputs(
+            mask: layer.mask,
+            content: Self.silhouetteRelevant(layer.content),
+            size: renderedLayer.bounds.size
+        )
+        if maskTarget.hasRemembered(eingaben, forKey: Self.maskInputsKey) { return }
+        maskTarget.remember(eingaben, forKey: Self.maskInputsKey)
 
         guard let maskenbild = MaskRendering.alphaMaskImage(
             for: layer,
@@ -290,6 +319,44 @@ struct LayerRenderer {
         renderedLayer.compositingFilter = layer.blendMode.compositingFilterName
     }
 
+    // MARK: - Zwischenergebnisse
+
+    static let maskInputsKey = "assemblage.maskeneingaben"
+    static let textureInputsKey = "assemblage.textureingaben"
+
+    private struct MaskInputs: Equatable {
+        let mask: LayerMask?
+        let content: LayerContent
+        let size: CGSize
+    }
+
+    private struct TextureInputs: Equatable {
+        let texture: LayerTexture?
+        let content: LayerContent
+        let size: CGSize
+        let imageReady: Bool
+    }
+
+    /// Der Inhalt ohne das, was Umriss und Maske nicht berührt. Sonst würde
+    /// jeder Zug am Helligkeitsregler Maske und Textur neu berechnen.
+    private static func silhouetteRelevant(_ content: LayerContent) -> LayerContent {
+        guard case .image(var inhalt) = content else { return content }
+        inhalt.adjustments = .neutral
+        inhalt.borderWidth = 0
+        inhalt.borderColorHex = ""
+        return .image(inhalt)
+    }
+
+    /// Vergisst, woraus Maske und Textur zuletzt entstanden sind — nötig,
+    /// wenn eine Vorschau (Pinselstrich) die Schicht direkt verändert hat.
+    static func forgetRememberedInputs(of renderedLayer: CALayer) {
+        for schicht in [renderedLayer, (renderedLayer as? ImageContentLayer)?.bitmap].compactMap({ $0 }) {
+            schicht.forget(forKey: maskInputsKey)
+            schicht.forget(forKey: textureInputsKey)
+        }
+        (renderedLayer as? ImageContentLayer)?.displayedReference = nil
+    }
+
     // MARK: - Inhaltsgrösse
 
     /// Die Grösse einer Ebene *vor* Skalierung. Bild- und Textebenen leiten
@@ -301,7 +368,10 @@ struct LayerRenderer {
             if let crop = image.cropRect {
                 return Size(width: crop.width, height: crop.height)
             }
-            guard images.image(named: image.originalFileReference) != nil,
+            // Nur die Kopfdaten, nicht das Bild: Die Grösse wird ständig
+            // gebraucht (Trefferprüfung, Griffe), dekodiert werden muss dafür
+            // nichts.
+            guard images.canDisplay(named: image.originalFileReference),
                   let pixelSize = images.pixelSize(named: image.originalFileReference)
             else {
                 // Fehlendes Original: feste Platzhaltergrösse, damit die Ebene
@@ -342,26 +412,32 @@ struct LayerRenderer {
             applyShape(shape, to: schicht)
 
         case .image(let image):
-            guard !(renderedLayer is CATextLayer), !(renderedLayer is CAShapeLayer) else { return }
-            guard let bild = images.image(named: image.originalFileReference),
-                  let pixelSize = images.pixelSize(named: image.originalFileReference)
-            else { return }
             guard let schicht = renderedLayer as? ImageContentLayer else { return }
-            schicht.bitmap.contents = bild
-            applyCrop(image.cropRect, imageSize: pixelSize, to: schicht.bitmap)
+            fillImage(image, into: schicht)
         }
     }
 
     private func makeImageLayer(_ content: ImageLayerContent) -> CALayer {
         let schicht = ImageContentLayer()
-        if let image = images.image(named: content.originalFileReference),
-           let pixelSize = images.pixelSize(named: content.originalFileReference) {
-            schicht.bitmap.contents = image
-            applyCrop(content.cropRect, imageSize: pixelSize, to: schicht.bitmap)
-        } else {
-            ImageContentLayer.markAsPlaceholder(schicht.bitmap)
-        }
+        fillImage(content, into: schicht)
         return schicht
+    }
+
+    /// Setzt Original und Zuschnitt. Ein Bild, das die Schicht schon zeigt,
+    /// wird nicht erneut beim Bildspeicher angefragt.
+    private func fillImage(_ content: ImageLayerContent, into schicht: ImageContentLayer) {
+        let referenz = content.originalFileReference
+        if schicht.displayedReference != referenz {
+            let rueckruf = imageDidLoad
+            switch images.availability(of: referenz, whenLoaded: { name in rueckruf?(name) }) {
+            case .ready(let image): schicht.show(image, reference: referenz)
+            case .loading: schicht.showLoading()
+            case .unavailable: schicht.showMissing()
+            }
+        }
+        if let pixelSize = images.pixelSize(named: referenz) {
+            applyCrop(content.cropRect, imageSize: pixelSize, to: schicht.bitmap)
+        }
     }
 
     /// Legt Inhalt und Rahmen auf die Grösse der Ebene und zeichnet den
@@ -458,5 +534,27 @@ struct LayerRenderer {
 extension RGBA {
     var cgColor: CGColor {
         CGColor(srgbRed: red, green: green, blue: blue, alpha: alpha)
+    }
+}
+
+/// Hält die Eingaben eines teuren Zwischenergebnisses an der Schicht fest,
+/// die es zeigt. So lebt der Vermerk genau so lange wie das Ergebnis selbst,
+/// und ein globaler Zwischenspeicher mit eigener Aufräumlogik entfällt.
+private final class RememberedInputs<Value: Equatable>: NSObject {
+    let value: Value
+    init(_ value: Value) { self.value = value }
+}
+
+private extension CALayer {
+    func hasRemembered<Value: Equatable>(_ value: Value, forKey key: String) -> Bool {
+        (self.value(forKey: key) as? RememberedInputs<Value>)?.value == value
+    }
+
+    func remember<Value: Equatable>(_ value: Value, forKey key: String) {
+        setValue(RememberedInputs(value), forKey: key)
+    }
+
+    func forget(forKey key: String) {
+        setValue(nil, forKey: key)
     }
 }

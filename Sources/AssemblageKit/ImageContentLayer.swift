@@ -20,6 +20,13 @@ final class ImageContentLayer: CALayer {
     /// Liegt über dem Inhalt und bleibt bewusst unmaskiert.
     let border = CAShapeLayer()
 
+    /// Welches Original `bitmap` gerade zeigt; `nil` bei einem Platzhalter.
+    ///
+    /// Damit kann das Auffrischen ein unverändertes Bild überspringen, statt
+    /// bei jedem Reglerzug den Bildspeicher zu befragen — ist das Bild dort
+    /// inzwischen verdrängt, hiesse das jedes Mal neu dekodieren.
+    var displayedReference: String?
+
     override init() {
         super.init()
         // `.resize` und nicht `.resizeAspect`: die Ebene hat bereits exakt das
@@ -40,6 +47,7 @@ final class ImageContentLayer: CALayer {
         super.init(layer: layer)
         if let vorlage = layer as? ImageContentLayer {
             bitmap.contents = vorlage.bitmap.contents
+            displayedReference = vorlage.displayedReference
             border.path = vorlage.border.path
         }
         addSublayer(bitmap)
@@ -82,6 +90,28 @@ final class ImageContentLayer: CALayer {
         clip.contentsScale = contentsScale
         clip.path = pfad
         border.mask = clip
+    }
+
+    /// Zeigt das dekodierte Original und nimmt einen Platzhalter weg.
+    func show(_ image: CGImage, reference: String) {
+        bitmap.contents = image
+        bitmap.backgroundColor = nil
+        bitmap.borderWidth = 0
+        displayedReference = reference
+    }
+
+    /// Ruhige Fläche, solange das Original im Hintergrund dekodiert wird —
+    /// bewusst ohne den roten Rand eines fehlenden Bildes.
+    func showLoading() {
+        bitmap.contents = nil
+        bitmap.backgroundColor = NSColor.systemGray.withAlphaComponent(0.15).cgColor
+        bitmap.borderWidth = 0
+        displayedReference = nil
+    }
+
+    func showMissing() {
+        Self.markAsPlaceholder(bitmap)
+        displayedReference = nil
     }
 
     /// Kennzeichnet eine Bildebene, deren Originaldatei fehlt.

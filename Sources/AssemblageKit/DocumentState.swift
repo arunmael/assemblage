@@ -67,7 +67,7 @@ final class DocumentState: ObservableObject {
     init(document: AssemblageModel.Document, resources: DocumentResources) {
         self.document = document
         self.resources = resources
-        self.images = ImageStore(resources: resources)
+        self.images = ImageStore(resources: resources, loadsInBackground: true)
     }
 
     /// Beobachtet nur den Manager dieses Dokuments. Eine globale Beobachtung
@@ -130,7 +130,7 @@ final class DocumentState: ObservableObject {
     /// Stand.
     func replaceContents(document newDocument: AssemblageModel.Document, resources newResources: DocumentResources) {
         resources = newResources
-        images = ImageStore(resources: newResources)
+        images = ImageStore(resources: newResources, loadsInBackground: true)
         selectedLayerID = nil
         document = newDocument
     }

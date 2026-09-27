@@ -27,18 +27,52 @@ private final class CachedImage: Sendable {
 @MainActor
 final class ImageStore {
 
-    private static let maximumPreviewPixelSize = 4_096
+    private nonisolated static let maximumPreviewPixelSize = 4_096
+    private nonisolated static let thumbnailPixelSize = 96
+
+    /// Was die Leinwand für ein Original gerade zeigen kann.
+    enum Availability {
+        case ready(CGImage)
+        /// Wird im Hintergrund dekodiert; der Rückruf meldet, wenn es fertig ist.
+        case loading
+        /// Fehlt oder ist unlesbar.
+        case unavailable
+    }
 
     let resources: DocumentResources
+    /// Dekodiert Originale abseits des Hauptthreads (siehe `availability`).
+    ///
+    /// Abschaltbar, weil Tests und Befehle, die ein Bild sofort brauchen, sonst
+    /// auf einen Hintergrundlauf warten müssten.
+    let loadsInBackground: Bool
     private let cache = NSCache<NSString, CachedImage>()
+    private let thumbnails = NSCache<NSString, CachedImage>()
     private var pixelSizes: [String: CGSize] = [:]
+
+    /// Laufende Hintergrund-Dekodierungen und wer auf sie wartet. Verhindert,
+    /// dass dasselbe Foto zweimal parallel dekodiert wird, wenn es während
+    /// des Ladens erneut angefragt wird.
+    private var pending: [String: [@MainActor (String) -> Void]] = [:]
+
+    /// Begrenzt, wie viele Fotos gleichzeitig dekodiert werden. Alle Kerne
+    /// voll auszulasten, hielte zwar die Warteschlange kurz, liesse aber die
+    /// Oberfläche und den Compositor verhungern — und jeder laufende
+    /// Vorgang hält kurzzeitig die volle Originaldatei im Speicher.
+    private static let decodeQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "Assemblage.ImageStore.decode"
+        queue.qualityOfService = .userInitiated
+        queue.maxConcurrentOperationCount = max(2, ProcessInfo.processInfo.activeProcessorCount / 2)
+        return queue
+    }()
 
     /// Verhindert, dass eine defekte Datei bei jedem Frame-Rendering-Versuch
     /// erneut geladen und dekodiert wird, was die Performance ruinieren würde.
     private var failed: Set<String> = []
 
-    init(resources: DocumentResources) {
+    init(resources: DocumentResources, loadsInBackground: Bool = false) {
         self.resources = resources
+        self.loadsInBackground = loadsInBackground
 
         // Ein Viertel des physischen Speichers ist ein ausgewogener Kompromiss, um
         // genügend Bilder für flüssiges Arbeiten vorzuhalten, ohne das System zu belasten.
@@ -59,40 +93,144 @@ final class ImageStore {
         cache.totalCostLimit = Int(clamped)
     }
 
+    /// Dekodiert bei Bedarf **synchron**. Für Stellen, die das Bild sofort
+    /// brauchen (Zuschneiden, Maskenmalen); die Leinwand nimmt
+    /// `availability(of:whenLoaded:)`.
     func image(named name: String) -> CGImage? {
-        let key = name as NSString
-        if let cached = cache.object(forKey: key) {
+        if let cached = cache.object(forKey: name as NSString) {
             return cached.image
         }
+        guard !failed.contains(name) else { return nil }
+        let result = Self.decodePreview(resources.data(for: name))
+        store(result, for: name)
+        return result.image
+    }
 
+    /// Nicht blockierend: Liegt das Bild schon dekodiert vor, kommt es sofort;
+    /// sonst wird es im Hintergrund dekodiert und `whenLoaded` danach auf dem
+    /// Hauptthread aufgerufen.
+    ///
+    /// Warum das zählt: Ein Projekt mit vielen Fotos zu öffnen oder viele
+    /// auf einmal hereinzuziehen, hiess bisher, jedes einzelne auf dem
+    /// Hauptthread zu dekodieren — die App stand, obwohl nur ein Kern
+    /// arbeitete und die Auslastung harmlos aussah.
+    func availability(
+        of name: String,
+        whenLoaded: @escaping @MainActor (String) -> Void
+    ) -> Availability {
+        if let cached = cache.object(forKey: name as NSString) {
+            return .ready(cached.image)
+        }
+        guard !failed.contains(name) else { return .unavailable }
+        guard loadsInBackground else {
+            return image(named: name).map(Availability.ready) ?? .unavailable
+        }
+
+        if pending[name] != nil {
+            pending[name]?.append(whenLoaded)
+            return .loading
+        }
+        pending[name] = [whenLoaded]
+
+        let resources = resources
+        Self.decodeQueue.addOperation { [weak self] in
+            let result = Self.decodePreview(resources.data(for: name))
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self?.finishDecoding(result, for: name)
+                }
+            }
+        }
+        return .loading
+    }
+
+    /// Ob ein Original vorhanden und lesbar ist, ohne es zu dekodieren.
+    /// Die Kopfdaten zu lesen reicht dafür und kostet nur Millisekunden.
+    func canDisplay(named name: String) -> Bool {
+        if cache.object(forKey: name as NSString) != nil { return true }
+        guard !failed.contains(name) else { return false }
+        return pixelSize(named: name) != nil
+    }
+
+    /// Eine kleine Fassung für die Ebenenliste, im Hintergrund erzeugt.
+    ///
+    /// Eigener Zwischenspeicher, weil ein 30-Punkte-Vorschaubild sonst das
+    /// volle 4096er-Bild im Speicher festhielte — und dessen Dekodieren die
+    /// Liste bei vielen Fotos zum Stocken brachte.
+    func thumbnail(named name: String) async -> CGImage? {
+        if let cached = thumbnails.object(forKey: name as NSString) {
+            return cached.image
+        }
         guard !failed.contains(name) else { return nil }
 
-        guard let data = resources.data(for: name),
-              let source = CGImageSourceCreateWithData(data as CFData, nil),
-              CGImageSourceGetCount(source) > 0
-        else {
-            failed.insert(name)
-            return nil
+        let resources = resources
+        let image = await Task.detached(priority: .utility) {
+            Self.decodeThumbnail(resources.data(for: name))
+        }.value
+        if let image {
+            thumbnails.setObject(CachedImage(image), forKey: name as NSString)
         }
-        if let size = Self.pixelSize(from: source) {
+        return image
+    }
+
+    private func finishDecoding(_ result: DecodedPreview, for name: String) {
+        store(result, for: name)
+        let callbacks = pending.removeValue(forKey: name) ?? []
+        for callback in callbacks { callback(name) }
+    }
+
+    private func store(_ result: DecodedPreview, for name: String) {
+        if let size = result.pixelSize {
             pixelSizes[name] = size
         }
+        guard let image = result.image else {
+            failed.insert(name)
+            return
+        }
+        let cost = image.bytesPerRow * image.height
+        cache.setObject(CachedImage(image), forKey: name as NSString, cost: cost)
+    }
+
+    private struct DecodedPreview: @unchecked Sendable {
+        let image: CGImage?
+        let pixelSize: CGSize?
+    }
+
+    /// Reine Funktion ohne Zustand, damit sie auf jedem Thread laufen darf.
+    private nonisolated static func decodePreview(_ data: Data?) -> DecodedPreview {
+        guard let data,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0
+        else { return DecodedPreview(image: nil, pixelSize: nil) }
 
         // 4096 Pixel reichen für jeden Bildschirm samt beherzter Vergrösserung;
         // mehr Bildpunkte wären auf dem Bildschirm ohnehin nicht zu sehen.
         let options: [CFString: Any] = [
-            kCGImageSourceThumbnailMaxPixelSize: Self.maximumPreviewPixelSize,
+            kCGImageSourceThumbnailMaxPixelSize: maximumPreviewPixelSize,
             kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            // Sofort dekodieren statt beim ersten Zeichnen: Sonst holte Core
+            // Animation das Dekodieren doch wieder auf dem Hauptthread nach.
+            kCGImageSourceShouldCacheImmediately: true
         ]
-        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-            failed.insert(name)
-            return nil
-        }
+        return DecodedPreview(
+            image: CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+            pixelSize: pixelSize(from: source)
+        )
+    }
 
-        let cost = image.bytesPerRow * image.height
-        cache.setObject(CachedImage(image), forKey: key, cost: cost)
-        return image
+    private nonisolated static func decodeThumbnail(_ data: Data?) -> CGImage? {
+        guard let data,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0
+        else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: thumbnailPixelSize,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
     /// Die Pixelmasse des Originals — unabhängig davon, wie fein das Bild
@@ -110,7 +248,7 @@ final class ImageStore {
         return size
     }
 
-    private static func pixelSize(from source: CGImageSource) -> CGSize? {
+    private nonisolated static func pixelSize(from source: CGImageSource) -> CGSize? {
         guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
                 as? [CFString: Any],
               let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
@@ -129,6 +267,7 @@ final class ImageStore {
 
     func forget(_ name: String) {
         cache.removeObject(forKey: name as NSString)
+        thumbnails.removeObject(forKey: name as NSString)
         pixelSizes.removeValue(forKey: name)
         failed.remove(name)
     }

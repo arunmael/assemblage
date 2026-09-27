@@ -29,6 +29,12 @@ final class CanvasView: NSView {
     /// Baum neu aufbaut (das würde bei jedem Reglerzug alle Bilder neu
     /// hochladen und sichtbar ruckeln).
     private var renderedLayers: [UUID: CALayer] = [:]
+    /// Mit welchem Stand jede Schicht zuletzt aufgefrischt wurde.
+    ///
+    /// Ohne diesen Vermerk frischte jede Änderung **alle** Ebenen auf — mit
+    /// Maske, Textur und Mesh. Bei vielen Fotos kostete so jede Mausbewegung
+    /// ein Vielfaches dessen, was sich tatsächlich änderte.
+    private var appliedLayers: [UUID: Layer] = [:]
 
     private var document: AssemblageModel.Document
 
@@ -235,6 +241,7 @@ final class CanvasView: NSView {
         self.document = document
         self.renderer = LayerRenderer(images: images)
         super.init(frame: CGRect(origin: .zero, size: document.canvas.cgSize))
+        renderer.imageDidLoad = { [weak self] name in self?.imageDidLoad(name) }
 
         wantsLayer = true
         layer?.addSublayer(canvasLayer)
@@ -371,24 +378,54 @@ final class CanvasView: NSView {
         layer.id == comparisonLayerID ? layer.withoutEdits() : layer
     }
 
-    /// Frischt alle Schichten aus dem aktuellen Dokument auf, ohne den
-    /// Schichtbaum neu zu bauen.
+    /// Frischt die geänderten Schichten auf, ohne den Schichtbaum neu zu
+    /// bauen. Unveränderte Ebenen kosten nur einen Vergleich.
     private func refreshRenderedLayers() {
         withoutAnimation {
-            for layer in document.layers {
-                guard let rendered = renderedLayers[layer.id] else { continue }
-                let anzeige = displayed(layer)
-                guard renderer.canReuse(rendered, for: anzeige) else {
-                    let neu = renderer.makeLayer(for: anzeige)
-                    canvasLayer.replaceSublayer(rendered, with: neu)
-                    renderedLayers[layer.id] = neu
-                    continue
-                }
+            for layer in document.layers { refresh(layer) }
+        }
+    }
+
+    /// Nur innerhalb von `withoutAnimation` aufrufen.
+    private func refresh(_ layer: Layer) {
+        guard let rendered = renderedLayers[layer.id] else { return }
+        let anzeige = displayed(layer)
+        if appliedLayers[layer.id] != anzeige {
+            if renderer.canReuse(rendered, for: anzeige) {
                 renderer.apply(anzeige, to: rendered)
                 renderer.applyMask(anzeige, to: rendered)
-                if layer.id == editingTextLayerID { rendered.isHidden = true }
+            } else {
+                let neu = renderer.makeLayer(for: anzeige)
+                canvasLayer.replaceSublayer(rendered, with: neu)
+                renderedLayers[layer.id] = neu
             }
+            appliedLayers[layer.id] = anzeige
         }
+        // Während der direkten Textbearbeitung bleibt die gerenderte Kopie
+        // verborgen, damit Buchstaben nicht doppelt erscheinen.
+        renderedLayers[layer.id]?.isHidden = !anzeige.isVisible || layer.id == editingTextLayerID
+    }
+
+    /// Erzwingt beim nächsten Auffrischen ein vollständiges Neuzeichnen der
+    /// Ebene — nach einer Vorschau, die die Schicht direkt verändert hat.
+    private func invalidateRendering(of id: UUID) {
+        appliedLayers.removeValue(forKey: id)
+        if let rendered = renderedLayers[id] {
+            LayerRenderer.forgetRememberedInputs(of: rendered)
+        }
+    }
+
+    /// Ein im Hintergrund dekodiertes Original ist da: genau die Ebenen
+    /// auffrischen, die es zeigen.
+    private func imageDidLoad(_ name: String) {
+        var betroffen = false
+        for layer in document.layers {
+            guard case .image(let inhalt) = layer.content,
+                  inhalt.originalFileReference == name else { continue }
+            invalidateRendering(of: layer.id)
+            betroffen = true
+        }
+        if betroffen { refreshRenderedLayers() }
     }
 
     /// Legt Grund- und Bedienschicht auf die aktuelle Leinwandgrösse.
@@ -402,21 +439,46 @@ final class CanvasView: NSView {
         }
     }
 
+    /// Gleicht den Schichtbaum mit der Ebenenliste ab: Neue Ebenen bekommen
+    /// eine Schicht, gelöschte verlieren sie, alle anderen bleiben erhalten
+    /// und werden nur umsortiert.
+    ///
+    /// Früher baute jede Strukturänderung — ein Foto hinzufügen, eine Ebene
+    /// löschen oder verschieben — sämtliche Schichten neu. Bei vielen Fotos
+    /// hiess das, alle erneut zu dekodieren, sobald der Bildspeicher sie
+    /// verdrängt hatte.
     private func rebuild() {
-        canvasLayer.sublayers?.forEach { $0.removeFromSuperlayer() }
-        renderedLayers.removeAll()
         sizeCanvasLayers()
 
         withoutAnimation {
+            var behalten: [UUID: CALayer] = [:]
+            for layer in document.layers {
+                if let vorhanden = renderedLayers[layer.id] {
+                    behalten[layer.id] = vorhanden
+                } else {
+                    let anzeige = displayed(layer)
+                    behalten[layer.id] = renderer.makeLayer(for: anzeige)
+                    appliedLayers[layer.id] = anzeige
+                }
+            }
+            renderedLayers = behalten
+            appliedLayers = appliedLayers.filter { behalten[$0.key] != nil }
+
             // Reihenfolge im Modell = Kompositing-Reihenfolge, Index 0 zuunterst
             // — und genau so erwartet Core Animation seine `sublayers`.
-            for layer in document.layers {
-                let rendered = renderer.makeLayer(for: displayed(layer))
-                if layer.id == editingTextLayerID { rendered.isHidden = true }
-                renderedLayers[layer.id] = rendered
-                canvasLayer.addSublayer(rendered)
-            }
+            canvasLayer.sublayers = document.layers.compactMap { behalten[$0.id] }
+
+            for layer in document.layers { refresh(layer) }
         }
+    }
+
+    /// Wirft alle Schichten weg und baut sie neu — nur, wenn sich etwas
+    /// ändert, das jede Schicht betrifft, etwa die Pixeldichte.
+    private func rebuildCompletely() {
+        canvasLayer.sublayers?.forEach { $0.removeFromSuperlayer() }
+        renderedLayers.removeAll()
+        appliedLayers.removeAll()
+        rebuild()
     }
 
     /// Core Animation blendet Änderungen an Schicht-Eigenschaften
@@ -1018,6 +1080,7 @@ final class CanvasView: NSView {
         // `LayerRenderer.applyMask` — den Inhalt, nicht die Hülle.
         let ziel = (gerendert as? ImageContentLayer)?.bitmap ?? gerendert
         let schicht = ziel.mask ?? CALayer()
+        invalidateRendering(of: layerID)
         withoutAnimation {
             schicht.contents = alphaBild
             schicht.contentsGravity = .resize
@@ -1142,6 +1205,7 @@ final class CanvasView: NSView {
               let bild = strich.painter.currentImage()
         else { return }
 
+        invalidateRendering(of: strich.layerID)
         withoutAnimation {
             gerendert.contents = bild
         }
@@ -1506,7 +1570,7 @@ final class CanvasView: NSView {
         let scale = window?.backingScaleFactor ?? 2
         guard scale != renderer.contentsScale else { return }
         renderer.contentsScale = scale
-        rebuild()
+        rebuildCompletely()
     }
 }
 

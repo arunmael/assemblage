@@ -174,23 +174,38 @@ private struct LayerThumbnail: View {
 
     private let side: CGFloat = 30
 
+    /// Kleine Fassung, im Hintergrund erzeugt: Das volle Vorschaubild für
+    /// jede Zeile synchron zu dekodieren, liess die Liste bei vielen Fotos
+    /// stocken.
+    @State private var thumbnail: CGImage?
+
+    private var imageReference: String? {
+        if case .image(let image) = layer.content { return image.originalFileReference }
+        return nil
+    }
+
     var body: some View {
         RoundedRectangle(cornerRadius: 9)
             .fill(.quaternary)
             .frame(width: side, height: side)
             .overlay { content }
             .clipShape(RoundedRectangle(cornerRadius: 9))
+            .task(id: imageReference) {
+                thumbnail = nil
+                guard let imageReference else { return }
+                thumbnail = await state.images.thumbnail(named: imageReference)
+            }
     }
 
     @ViewBuilder
     private var content: some View {
         switch layer.content {
         case .image(let image):
-            if let cgImage = state.images.image(named: image.originalFileReference) {
-                Image(decorative: cgImage, scale: 1)
+            if let thumbnail {
+                Image(decorative: thumbnail, scale: 1)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-            } else {
+            } else if !state.images.canDisplay(named: image.originalFileReference) {
                 // Fehlendes Original sichtbar machen, statt eine leere
                 // Kachel zu zeigen.
                 Image(systemName: "exclamationmark.triangle")
