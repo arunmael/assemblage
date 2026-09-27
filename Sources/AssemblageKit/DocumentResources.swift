@@ -14,9 +14,10 @@ import AssemblageModel
 /// Hauptthread genau so blockieren, wie es vermieden werden soll.
 ///
 /// Gehalten werden bewusst `FileWrapper`s und **nicht** ausgepackte `Data` —
-/// ein `FileWrapper`, der auf eine Datei zeigt, lädt ihren Inhalt erst beim
-/// Zugriff und gibt ihn danach wieder frei. Ein Paket mit zwanzig 50-MB-Fotos
-/// belegt so nicht 1 GB RAM, nur weil es geöffnet ist (Plan 2.1
+/// ein `FileWrapper`, der auf eine Datei zeigt, kann ihren Inhalt beim
+/// Zugriff in den Speicher einblenden, ohne eine Heap-Kopie zu halten. Ein
+/// Paket mit zwanzig 50-MB-Fotos belegt so nicht 1 GB RAM, nur weil es
+/// geöffnet ist (Plan 2.1
 /// „Speicher-Management bei grossen Bildern"). Beim Sichern reicht
 /// `FileWrapper` unveränderte Dateien durch, statt sie neu zu schreiben.
 final class DocumentResources {
@@ -25,6 +26,51 @@ final class DocumentResources {
     /// Nur unter `sperre` anfassen.
     private var wrappers: [String: FileWrapper] = [:]
     private let sperre = NSLock()
+
+    private static var spillRootURL: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("Assemblage-Auslagerung", isDirectory: true)
+    }
+
+    // Nur die URL entsteht sofort; das Verzeichnis erst beim ersten Schreiben.
+    // Unveränderlich, damit auch gleichzeitige Importe dasselbe Ziel verwenden.
+    let spillDirectoryURL = DocumentResources.spillRootURL
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+    deinit {
+        try? FileManager.default.removeItem(at: spillDirectoryURL)
+    }
+
+    /// Räumt nach einem Absturz liegengebliebene Instanz-Verzeichnisse auf.
+    /// Beim Programmstart aufrufen, bevor Dokumente geöffnet werden.
+    static func removeStaleSpillDirectories() {
+        let manager = FileManager.default
+        let grenze = Date().addingTimeInterval(-24 * 60 * 60)
+        guard let verzeichnisse = try? manager.contentsOfDirectory(
+            at: spillRootURL,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey]
+        ) else { return }
+        for url in verzeichnisse {
+            guard let werte = try? url.resourceValues(forKeys: [
+                .isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey
+            ]), werte.isDirectory == true, werte.isSymbolicLink != true,
+                let datum = werte.contentModificationDate, datum < grenze else { continue }
+            try? manager.removeItem(at: url)
+        }
+    }
+
+    private func ausgelagerterWrapper(_ data: Data) -> FileWrapper {
+        // Frühere Dateien bleiben für Leser und Sicherungs-Wrapper erhalten.
+        // NSDocument schreibt synchron; erst deinit räumt die Sitzung auf.
+        do {
+            try FileManager.default.createDirectory(at: spillDirectoryURL, withIntermediateDirectories: true)
+            let url = spillDirectoryURL.appendingPathComponent(UUID().uuidString)
+            try data.write(to: url, options: .atomic)
+            return try FileWrapper(url: url, options: [])
+        } catch {
+            // Auch bei voller Platte darf ein Import keine Daten verlieren.
+            return FileWrapper(regularFileWithContents: data)
+        }
+    }
 
     private func unterSperre<T>(_ body: () -> T) -> T {
         sperre.lock()
@@ -51,6 +97,10 @@ final class DocumentResources {
     /// Lädt den Inhalt einer Paketdatei. `nil`, wenn sie fehlt — der Aufrufer
     /// zeigt dann einen Platzhalter an, statt abzustürzen (Plan 2.1).
     func data(for name: String) -> Data? {
+        // Bei einem Wrapper auf eine Datei (geöffnetes Paket oder ausgelagerter
+        // Import) blendet `regularFileContents` die Datei nur ein: Gemessen
+        // wuchs der residente Speicher nach dem Lesen von 200 MB nicht. Ein
+        // eigenes `Data(contentsOf:options: .alwaysMapped)` brächte nichts.
         // `regularFileContents` liest hier mit unter der Sperre: `FileWrapper`
         // ist nicht als threadsicher zugesichert, und zwei Leser auf derselben
         // Datei wären sonst ebenfalls ein Wettlauf.
@@ -71,7 +121,7 @@ final class DocumentResources {
 
     private func add(_ data: Data, to directory: String, fileExtension: String) -> String {
         let name = "\(directory)/\(UUID().uuidString).\(fileExtension)"
-        let wrapper = FileWrapper(regularFileWithContents: data)
+        let wrapper = ausgelagerterWrapper(data)
         wrapper.preferredFilename = (name as NSString).lastPathComponent
         unterSperre { wrappers[name] = wrapper }
         return name
@@ -79,7 +129,7 @@ final class DocumentResources {
 
     /// Ersetzt den Inhalt einer bestehenden Datei — beim Übermalen einer Maske.
     func replace(_ name: String, with data: Data) {
-        let wrapper = FileWrapper(regularFileWithContents: data)
+        let wrapper = ausgelagerterWrapper(data)
         wrapper.preferredFilename = (name as NSString).lastPathComponent
         unterSperre { wrappers[name] = wrapper }
     }

@@ -51,6 +51,7 @@ final class CanvasView: NSView {
     var selectedLayerID: UUID? {
         didSet {
             guard selectedLayerID != oldValue else { return }
+            if let selectedLayerID { lastTouched[selectedLayerID] = Date() }
             updateSelectionOutline()
         }
     }
@@ -63,6 +64,7 @@ final class CanvasView: NSView {
         didSet {
             guard zoomScale != oldValue else { return }
             updateSelectionOutline()
+            scheduleTierUpdate()
         }
     }
 
@@ -242,6 +244,14 @@ final class CanvasView: NSView {
         self.renderer = LayerRenderer(images: images)
         super.init(frame: CGRect(origin: .zero, size: document.canvas.cgSize))
         renderer.imageDidLoad = { [weak self] name in self?.imageDidLoad(name) }
+        renderer.tierProvider = { [weak self] layer in
+            self?.desiredTier(for: layer) ?? ImageStore.fullTier
+        }
+        memoryPressureObservation = NotificationCenter.default.addObserver(
+            forName: MemoryPressure.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.memoryPressureDidChange() }
+        }
 
         wantsLayer = true
         layer?.addSublayer(canvasLayer)
@@ -332,6 +342,11 @@ final class CanvasView: NSView {
             // nicht als scheinbar weiter bearbeitbarer Text stehen bleiben.
             endTextEditing(committing: false)
         }
+        let jetzt = Date()
+        let bisher = Dictionary(document.layers.map { ($0.id, $0) }, uniquingKeysWith: { erste, _ in erste })
+        for layer in newDocument.layers where bisher[layer.id] != layer {
+            lastTouched[layer.id] = jetzt
+        }
         document = newDocument
 
         if canvasChanged {
@@ -415,6 +430,143 @@ final class CanvasView: NSView {
         }
     }
 
+    // MARK: - Auflösungsstufen
+
+    /// Wann eine Ebene zuletzt verändert oder ausgewählt wurde.
+    private var lastTouched: [UUID: Date] = [:]
+    private var tierUpdate: DispatchWorkItem?
+    private var agingTimer: Timer?
+    private var memoryPressureObservation: NSObjectProtocol?
+
+    /// So lange behält eine Ebene ausserhalb des Sichtbereichs ihre
+    /// Auflösung, nachdem man sie angefasst hat. Wer kurz wegscrollt und
+    /// zurückkommt, soll nicht auf das Nachladen warten.
+    private static let untouchedGracePeriod: TimeInterval = 120
+
+    /// Welche Auflösungsstufe eine Bildebene gerade braucht.
+    ///
+    /// - Sichtbar: so fein, wie sie bei aktuellem Zoom und Pixeldichte auf
+    ///   dem Bildschirm erscheint, mit etwas Luft zum Heranzoomen.
+    /// - Unsichtbar und länger nicht angefasst: nur die „ungefähre"
+    ///   Fassung. Das Original liegt ja im Paket; beim Zurückscrollen wird
+    ///   die feine Stufe im Hintergrund nachgeladen, bis dahin steht die
+    ///   grobe da.
+    /// - Unter Speicherdruck wird beides enger gefasst.
+    private func desiredTier(for layer: Layer) -> Int {
+        guard case .image(let inhalt) = layer.content,
+              let pixelSize = renderer.images.pixelSize(named: inhalt.originalFileReference)
+        else { return ImageStore.fullTier }
+
+        // Noch in keinem Fenster (Dokument wird gerade geöffnet): Zoom und
+        // Ausschnitt stehen noch nicht fest. Zuerst überall die grobe Fassung
+        // — sie ist in Millisekunden da —, die passende folgt, sobald die
+        // Leinwand im Fenster steckt.
+        if window == nil, renderer.images.loadsInBackground {
+            return ImageStore.approximateTier
+        }
+
+        let druck = MemoryPressure.shared.level
+        guard layer.isVisible, isOnScreen(layer) else {
+            let kuerzlich = layer.id == selectedLayerID
+                || lastTouched[layer.id].map { Date().timeIntervalSince($0) < Self.untouchedGracePeriod } == true
+            guard kuerzlich, druck == .normal else { return ImageStore.approximateTier }
+            return (renderedLayers[layer.id] as? ImageContentLayer)?.displayedTier ?? ImageStore.approximateTier
+        }
+
+        let massstab = max(abs(layer.transform.scaleX), abs(layer.transform.scaleY))
+            * zoomScale * renderer.contentsScale
+        var noetig = max(pixelSize.width, pixelSize.height) * massstab
+        switch druck {
+        case .normal: noetig *= 1.25
+        case .warning: break
+        case .critical: noetig = min(noetig, 1_024)
+        }
+        return ImageStore.tier(forPixelEdge: noetig)
+    }
+
+    /// Der sichtbare Ausschnitt in Modellkoordinaten, grosszügig erweitert,
+    /// damit beim Scrollen schon geladen ist, was gleich ins Bild kommt.
+    /// `nil`, solange die Ansicht in keinem Fenster steckt — dann gilt alles
+    /// als sichtbar.
+    private var visibleCanvasRect: CGRect? {
+        let sichtbar = visibleRect
+        guard window != nil, !sichtbar.isEmpty else { return nil }
+        // Die Ansicht ist nicht geflippt, das Modell zählt y von oben.
+        let modell = CGRect(
+            x: sichtbar.minX,
+            y: bounds.height - sichtbar.maxY,
+            width: sichtbar.width,
+            height: sichtbar.height
+        )
+        return modell.insetBy(dx: -sichtbar.width * 0.25, dy: -sichtbar.height * 0.25)
+    }
+
+    private func isOnScreen(_ layer: Layer) -> Bool {
+        guard let sichtbar = visibleCanvasRect else { return true }
+        let rahmen = layer.transform.boundingFrame(
+            contentSize: renderer.contentSize(of: layer.content),
+            distortion: layer.distortion
+        )
+        return sichtbar.intersects(CGRect(x: rahmen.x, y: rahmen.y, width: rahmen.width, height: rahmen.height))
+    }
+
+    /// Vom Bildlauf aufgerufen, wenn sich Ausschnitt oder Zoom ändern.
+    func visibleRegionDidChange() {
+        scheduleTierUpdate()
+    }
+
+    /// Gebündelt statt bei jeder Scrollbewegung: Erst wenn der Ausschnitt
+    /// kurz ruht, lohnt sich ein Stufenwechsel.
+    private func scheduleTierUpdate() {
+        tierUpdate?.cancel()
+        let auftrag = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.updateResolutionTiers() }
+        }
+        tierUpdate = auftrag
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: auftrag)
+    }
+
+    /// Stellt jede Bildebene auf die Stufe, die sie gerade braucht. Kostet
+    /// bei unveränderten Stufen nur einen Vergleich pro Ebene.
+    private func updateResolutionTiers() {
+        withoutAnimation {
+            for layer in document.layers {
+                guard let bild = renderedLayers[layer.id] as? ImageContentLayer,
+                      desiredTier(for: displayed(layer)) != bild.desiredTier
+                else { continue }
+                appliedLayers.removeValue(forKey: layer.id)
+                refresh(layer)
+            }
+        }
+    }
+
+    private func memoryPressureDidChange() {
+        if MemoryPressure.shared.level != .normal {
+            // Sofort statt gebündelt: Das System wartet nicht.
+            renderer.images.releaseCachedImages()
+            tierUpdate?.cancel()
+            updateResolutionTiers()
+        } else {
+            scheduleTierUpdate()
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        agingTimer?.invalidate()
+        agingTimer = nil
+        guard window != nil else { return }
+        // Regelmässig nachsehen, welche Ebenen inzwischen lange genug
+        // unberührt ausserhalb des Sichtbereichs liegen.
+        let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduleTierUpdate() }
+        }
+        timer.tolerance = 10
+        RunLoop.main.add(timer, forMode: .common)
+        agingTimer = timer
+        scheduleTierUpdate()
+    }
+
     /// Ein im Hintergrund dekodiertes Original ist da: genau die Ebenen
     /// auffrischen, die es zeigen.
     private func imageDidLoad(_ name: String) {
@@ -422,7 +574,10 @@ final class CanvasView: NSView {
         for layer in document.layers {
             guard case .image(let inhalt) = layer.content,
                   inhalt.originalFileReference == name else { continue }
-            invalidateRendering(of: layer.id)
+            // Nur neu anwenden, die gezeigte Fassung aber stehen lassen: Kommt
+            // eine inzwischen überholte Stufe herein, bleibt sonst die Ebene
+            // grau, bis die richtige da ist.
+            appliedLayers.removeValue(forKey: layer.id)
             betroffen = true
         }
         if betroffen { refreshRenderedLayers() }

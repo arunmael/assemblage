@@ -110,6 +110,7 @@ final class CanvasViewController: NSViewController {
 
     @objc private func zoomDidChange() {
         canvasView.zoomScale = scrollView.magnification
+        canvasView.visibleRegionDidChange()
         onZoomPercentChange?(zoomPercent)
         // Feuert auch beim blossen Verschieben (es hängt an
         // `boundsDidChangeNotification` des Bildlaufs) — genau das brauchen die

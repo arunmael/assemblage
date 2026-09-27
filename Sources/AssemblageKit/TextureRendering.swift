@@ -47,7 +47,8 @@ enum TextureRendering {
     static func tiledImage(
         for texture: LayerTexture,
         size: CGSize,
-        resources: DocumentResources
+        resources: DocumentResources,
+        maxPixelEdge: Int? = nil
     ) -> CGImage? {
         guard size.width.isFinite, size.height.isFinite,
               size.width > 0, size.height > 0 else { return nil }
@@ -65,16 +66,20 @@ enum TextureRendering {
         let breite = max(1, gerundeteBreite)
         let hoehe = max(1, gerundeteHoehe)
 
+        // Für die Vorschau genügt die Auflösung des Bildes darunter; gekachelt
+        // wird weiterhin in Ebenenkoordinaten, nur in ein kleineres Raster.
+        let massstab = maxPixelEdge.map { min(1, Double(max(1, $0)) / Double(max(breite, hoehe))) } ?? 1
         guard let context = CGContext(
             data: nil,
-            width: breite,
-            height: hoehe,
+            width: max(1, Int((Double(breite) * massstab).rounded())),
+            height: max(1, Int((Double(hoehe) * massstab).rounded())),
             bitsPerComponent: 8,
             bytesPerRow: 0,
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
 
+        context.scaleBy(x: massstab, y: massstab)
         context.interpolationQuality = .high
 
         // Kein Geometrie-Flip des Kontexts. Das ist bewusst anders als an den

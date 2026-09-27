@@ -26,6 +26,11 @@ final class ImageContentLayer: CALayer {
     /// bei jedem Reglerzug den Bildspeicher zu befragen — ist das Bild dort
     /// inzwischen verdrängt, hiesse das jedes Mal neu dekodieren.
     var displayedReference: String?
+    /// In welcher Auflösungsstufe das gezeigte Bild vorliegt.
+    var displayedTier: Int?
+    /// Welche Stufe die Leinwand für diese Ebene gerade für nötig hält
+    /// (siehe `ImageStore.tiers`).
+    var desiredTier: Int = ImageStore.fullTier
 
     override init() {
         super.init()
@@ -48,6 +53,8 @@ final class ImageContentLayer: CALayer {
         if let vorlage = layer as? ImageContentLayer {
             bitmap.contents = vorlage.bitmap.contents
             displayedReference = vorlage.displayedReference
+            displayedTier = vorlage.displayedTier
+            desiredTier = vorlage.desiredTier
             border.path = vorlage.border.path
         }
         addSublayer(bitmap)
@@ -93,8 +100,9 @@ final class ImageContentLayer: CALayer {
     }
 
     /// Zeigt das dekodierte Original und nimmt einen Platzhalter weg.
-    func show(_ image: CGImage, reference: String) {
+    func show(_ image: CGImage, reference: String, tier: Int) {
         bitmap.contents = image
+        displayedTier = tier
         bitmap.backgroundColor = nil
         bitmap.borderWidth = 0
         displayedReference = reference
@@ -107,11 +115,13 @@ final class ImageContentLayer: CALayer {
         bitmap.backgroundColor = NSColor.systemGray.withAlphaComponent(0.15).cgColor
         bitmap.borderWidth = 0
         displayedReference = nil
+        displayedTier = nil
     }
 
     func showMissing() {
         Self.markAsPlaceholder(bitmap)
         displayedReference = nil
+        displayedTier = nil
     }
 
     /// Kennzeichnet eine Bildebene, deren Originaldatei fehlt.

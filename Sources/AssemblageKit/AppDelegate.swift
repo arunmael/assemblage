@@ -15,6 +15,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = makeMainMenu()
         crashReporter.start()
+        // Ausgelagerte Importe früherer, abgestürzter Sitzungen wegräumen —
+        // im Hintergrund, damit der Start nicht auf die Platte wartet.
+        DispatchQueue.global(qos: .utility).async {
+            DocumentResources.removeStaleSpillDirectories()
+        }
+        // Früh anlegen, damit die erste Speicherwarnung nicht verpasst wird.
+        _ = MemoryPressure.shared
     }
 
     /// Existiert schon ein zuletzt benutztes Projekt, startet Assemblage mit

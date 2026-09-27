@@ -214,16 +214,44 @@ enum MaskRendering {
         for layer: Layer,
         cropRect: Rect?,
         resources: DocumentResources,
-        displayedSize: CGSize = .zero
+        displayedSize: CGSize = .zero,
+        maxPixelEdge: Int = .max
     ) -> CGImage? {
         guard let bild = maskImage(
             for: layer, cropRect: cropRect, resources: resources, displayedSize: displayedSize
         ) else { return nil }
 
-        // `CIMaskToAlpha` macht aus Helligkeit Deckung — genau die Umrechnung,
-        // die Core Animation erwartet.
-        let alpha = CIImage(cgImage: bild).applyingFilter("CIMaskToAlpha")
-        return RenderContext.shared.createCGImage(alpha, from: alpha.extent)
+        let faktor = min(1, Double(max(1, maxPixelEdge)) / Double(max(bild.width, bild.height)))
+        let breite = max(1, Int((Double(bild.width) * faktor).rounded()))
+        let hoehe = max(1, Int((Double(bild.height) * faktor).rounded()))
+        let flaeche = CGRect(x: 0, y: 0, width: breite, height: hoehe)
+
+        // Erst auf Zielgrösse in reines Grau bringen: `clip(to:mask:)`
+        // verlangt Graustufen ohne Alphakanal und ignoriert alles andere.
+        guard let grau = CGContext(
+            data: nil, width: breite, height: hoehe, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ) else { return nil }
+        grau.interpolationQuality = .high
+        grau.draw(bild, in: flaeche)
+        guard let grauBild = grau.makeImage() else { return nil }
+
+        // Dann Helligkeit in Deckung übersetzen — genau die Umrechnung, die
+        // Core Animation für eine Maskenschicht erwartet. Ein reiner
+        // Alphakanal mit einem Byte pro Pixel statt RGBA: ein Viertel des
+        // Speichers, und für eine Maske geht dabei nichts verloren.
+        guard let alpha = CGContext(
+            data: nil, width: breite, height: hoehe, bitsPerComponent: 8, bytesPerRow: 0,
+            // Wird bei einem reinen Alphakanal von Core Graphics ignoriert,
+            // die Swift-Schnittstelle verlangt aber einen.
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue
+        ) else { return nil }
+        alpha.clip(to: flaeche, mask: grauBild)
+        alpha.setFillColor(gray: 0, alpha: 1)
+        alpha.fill(flaeche)
+        return alpha.makeImage()
     }
 
     /// Für `CGContext.clip(to:mask:)`: Graustufen **ohne** Alphakanal.

@@ -349,4 +349,44 @@ final class CanvasRenderingTests: XCTestCase {
             "der Platzhalter muss sich von der leeren Leinwand abheben"
         )
     }
+
+    // MARK: - Maske als reiner Alphakanal
+
+    /// Die Maske liegt auf der Leinwand als 1-Byte-Alphakanal vor statt als
+    /// RGBA (ein Viertel des Speichers). Geprüft wird am gerenderten Pixel,
+    /// dass Core Animation sie genauso auswertet wie vorher: weiss sichtbar,
+    /// schwarz ausgeblendet.
+    func testAlphaOnlyMaskHidesTheBlackHalf() throws {
+        func png(_ fill: (CGContext) -> Void) throws -> Data {
+            let context = try XCTUnwrap(CGContext(
+                data: nil, width: 100, height: 100, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            fill(context)
+            let bild = try XCTUnwrap(context.makeImage())
+            return try XCTUnwrap(NSBitmapImageRep(cgImage: bild).representation(using: .png, properties: [:]))
+        }
+        let resources = DocumentResources()
+        let foto = resources.addOriginal(try png { context in
+            context.setFillColor(red: 1, green: 0, blue: 0, alpha: 1)
+            context.fill(CGRect(x: 0, y: 0, width: 100, height: 100))
+        }, fileExtension: "png")
+        let maske = resources.addMask(try png { context in
+            context.setFillColor(red: 0, green: 0, blue: 0, alpha: 1)
+            context.fill(CGRect(x: 0, y: 0, width: 100, height: 100))
+            context.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+            context.fill(CGRect(x: 0, y: 0, width: 50, height: 100))
+        })
+        var ebene = Layer(
+            name: "Foto",
+            transform: Transform2D(x: 50, y: 50),
+            content: .image(ImageLayerContent(originalFileReference: foto))
+        )
+        ebene.mask = LayerMask(maskImageReference: maske, source: .manualBrush)
+        let document = AssemblageModel.Document(canvas: CanvasSize(width: 100, height: 100), layers: [ebene])
+
+        let context = try render(document, resources: resources)
+        assertRoughly(try color(of: context, atCanvasX: 25, y: 50), (255, 0, 0), "weisse Maskenhälfte zeigt das Foto")
+        assertRoughly(try color(of: context, atCanvasX: 75, y: 50), (255, 255, 255), "schwarze Maskenhälfte blendet es aus")
+    }
 }

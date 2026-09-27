@@ -9,7 +9,16 @@ import Foundation
 /// GPU-Pipeline auf. Einen pro Bild oder pro Frame anzulegen, ist der
 /// klassische Weg, eine Core-Image-App zum Ruckeln zu bringen.
 enum RenderContext {
-    static let shared = CIContext(options: [.useSoftwareRenderer: false])
+    ///
+    /// Ohne Zwischenergebnis-Speicher: Core Image hielte sonst die Bitmaps
+    /// jeder Filterkette vor, obwohl hier fast jedes Bild nur einmal
+    /// durchläuft (Maske, Drehung, Export). Auf Apple-Chips teilen sich CPU
+    /// und GPU denselben Speicher — was Core Image hortet, fehlt der App.
+    static let shared = CIContext(options: [
+        .useSoftwareRenderer: false,
+        .cacheIntermediates: false,
+        .name: "Assemblage"
+    ])
 }
 
 /// Hilfsklasse, da NSCache nur Objective-C-kompatible Klassenreferenzen akzeptiert
@@ -27,8 +36,28 @@ private final class CachedImage: Sendable {
 @MainActor
 final class ImageStore {
 
-    private nonisolated static let maximumPreviewPixelSize = 4_096
     private nonisolated static let thumbnailPixelSize = 96
+
+    /// Die Auflösungsstufen, in denen ein Original vorgehalten wird (längste
+    /// Kante in Pixeln).
+    ///
+    /// Eine Ebene bekommt die kleinste Stufe, die bei aktuellem Zoom scharf
+    /// aussieht — statt pauschal 4096 px. Ein Foto, das auf der Leinwand
+    /// 300 Punkte breit ist, belegt so rund 4 MB statt 64 MB. Stufen statt
+    /// exakter Grössen, damit ein leichtes Zoomen nicht jedes Mal neu
+    /// dekodiert und der Zwischenspeicher wiederverwendbare Fassungen hält.
+    nonisolated static let tiers = [256, 1_024, 2_048, 4_096]
+    /// Mehr Bildpunkte wären auf keinem Bildschirm zu sehen.
+    nonisolated static let fullTier = 4_096
+    /// Die „ungefähre" Fassung für Ebenen, die weder sichtbar sind noch
+    /// kürzlich angefasst wurden: rund 0,25 MB statt bis zu 64 MB.
+    nonisolated static let approximateTier = 256
+
+    /// Die kleinste Stufe, die `neededPixels` (längste Kante) abdeckt.
+    nonisolated static func tier(forPixelEdge neededPixels: CGFloat) -> Int {
+        guard neededPixels.isFinite else { return fullTier }
+        return tiers.first { CGFloat($0) >= neededPixels } ?? fullTier
+    }
 
     /// Was die Leinwand für ein Original gerade zeigen kann.
     enum Availability {
@@ -54,6 +83,10 @@ final class ImageStore {
     /// des Ladens erneut angefragt wird.
     private var pending: [String: [@MainActor (String) -> Void]] = [:]
 
+    private static func cacheKey(_ name: String, tier: Int) -> NSString {
+        "\(name)#\(tier)" as NSString
+    }
+
     /// Begrenzt, wie viele Fotos gleichzeitig dekodiert werden. Alle Kerne
     /// voll auszulasten, hielte zwar die Warteschlange kurz, liesse aber die
     /// Oberfläche und den Compositor verhungern — und jeder laufende
@@ -62,9 +95,27 @@ final class ImageStore {
         let queue = OperationQueue()
         queue.name = "Assemblage.ImageStore.decode"
         queue.qualityOfService = .userInitiated
-        queue.maxConcurrentOperationCount = max(2, ProcessInfo.processInfo.activeProcessorCount / 2)
+        queue.maxConcurrentOperationCount = decodeConcurrency()
+        // Bei Hitze oder im Stromsparmodus weniger parallel dekodieren: Auf
+        // einem MacBook Air ohne Lüfter drosselt der Chip sonst ohnehin, und
+        // die Oberfläche bekäme die gedrosselte Leistung zu spüren.
+        let center = NotificationCenter.default
+        for name in [ProcessInfo.thermalStateDidChangeNotification,
+                     Notification.Name.NSProcessInfoPowerStateDidChange] {
+            center.addObserver(forName: name, object: nil, queue: nil) { _ in
+                queue.maxConcurrentOperationCount = decodeConcurrency()
+            }
+        }
         return queue
     }()
+
+    private nonisolated static func decodeConcurrency() -> Int {
+        let info = ProcessInfo.processInfo
+        if info.isLowPowerModeEnabled || info.thermalState == .serious || info.thermalState == .critical {
+            return 1
+        }
+        return max(2, info.activeProcessorCount / 2)
+    }
 
     /// Verhindert, dass eine defekte Datei bei jedem Frame-Rendering-Versuch
     /// erneut geladen und dekodiert wird, was die Performance ruinieren würde.
@@ -93,61 +144,90 @@ final class ImageStore {
         cache.totalCostLimit = Int(clamped)
     }
 
-    /// Dekodiert bei Bedarf **synchron**. Für Stellen, die das Bild sofort
-    /// brauchen (Zuschneiden, Maskenmalen); die Leinwand nimmt
-    /// `availability(of:whenLoaded:)`.
+    /// Dekodiert bei Bedarf **synchron** in voller Vorschauauflösung. Für
+    /// Stellen, die das Bild sofort brauchen (Zuschneiden, Maskenmalen); die
+    /// Leinwand nimmt `availability(of:tier:urgent:whenLoaded:)`.
     func image(named name: String) -> CGImage? {
-        if let cached = cache.object(forKey: name as NSString) {
+        let key = Self.cacheKey(name, tier: Self.fullTier)
+        if let cached = cache.object(forKey: key) {
             return cached.image
         }
         guard !failed.contains(name) else { return nil }
-        let result = Self.decodePreview(resources.data(for: name))
-        store(result, for: name)
+        let result = Self.decodePreview(resources.data(for: name), maxPixelEdge: Self.fullTier)
+        store(result, for: name, tier: Self.fullTier)
         return result.image
     }
 
-    /// Nicht blockierend: Liegt das Bild schon dekodiert vor, kommt es sofort;
-    /// sonst wird es im Hintergrund dekodiert und `whenLoaded` danach auf dem
-    /// Hauptthread aufgerufen.
+    /// Nicht blockierend: Liegt das Bild in der Stufe schon dekodiert vor,
+    /// kommt es sofort; sonst wird es im Hintergrund dekodiert und
+    /// `whenLoaded` danach auf dem Hauptthread aufgerufen.
     ///
     /// Warum das zählt: Ein Projekt mit vielen Fotos zu öffnen oder viele
     /// auf einmal hereinzuziehen, hiess bisher, jedes einzelne auf dem
     /// Hauptthread zu dekodieren — die App stand, obwohl nur ein Kern
     /// arbeitete und die Auslastung harmlos aussah.
+    ///
+    /// `urgent` für sichtbare Ebenen: Sie werden vor denen dekodiert, die
+    /// gerade nur auf eine kleinere Stufe wechseln.
     func availability(
         of name: String,
+        tier requestedTier: Int = fullTier,
+        urgent: Bool = true,
         whenLoaded: @escaping @MainActor (String) -> Void
     ) -> Availability {
-        if let cached = cache.object(forKey: name as NSString) {
+        let tier = effectiveTier(requestedTier, for: name)
+        let key = Self.cacheKey(name, tier: tier)
+        if let cached = cache.object(forKey: key) {
             return .ready(cached.image)
         }
         guard !failed.contains(name) else { return .unavailable }
         guard loadsInBackground else {
-            return image(named: name).map(Availability.ready) ?? .unavailable
+            let result = Self.decodePreview(resources.data(for: name), maxPixelEdge: tier)
+            store(result, for: name, tier: tier)
+            return result.image.map(Availability.ready) ?? .unavailable
         }
 
-        if pending[name] != nil {
-            pending[name]?.append(whenLoaded)
+        let pendingKey = key as String
+        if pending[pendingKey] != nil {
+            pending[pendingKey]?.append(whenLoaded)
             return .loading
         }
-        pending[name] = [whenLoaded]
+        pending[pendingKey] = [whenLoaded]
 
         let resources = resources
-        Self.decodeQueue.addOperation { [weak self] in
-            let result = Self.decodePreview(resources.data(for: name))
+        let operation = BlockOperation { [weak self] in
+            let result = Self.decodePreview(resources.data(for: name), maxPixelEdge: tier)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    self?.finishDecoding(result, for: name)
+                    self?.finishDecoding(result, for: name, tier: tier)
                 }
             }
         }
+        operation.queuePriority = urgent ? .high : .low
+        operation.qualityOfService = urgent ? .userInitiated : .utility
+        Self.decodeQueue.addOperation(operation)
         return .loading
+    }
+
+    /// Welche Stufe tatsächlich dekodiert wird. Ist das Original nicht
+    /// grösser als die Stufe, ergäben alle höheren Stufen dasselbe Bild —
+    /// sie teilen sich deshalb einen Eintrag, statt es mehrfach zu halten.
+    func effectiveTier(_ tier: Int, for name: String) -> Int {
+        let begrenzt = Self.tiers.first { $0 >= tier } ?? Self.fullTier
+        guard let size = pixelSize(named: name) else { return begrenzt }
+        return CGFloat(begrenzt) >= max(size.width, size.height) ? Self.fullTier : begrenzt
+    }
+
+    /// Gibt alles frei, was sich jederzeit neu dekodieren lässt. Bilder, die
+    /// eine Ebene gerade zeigt, bleiben über die Ebene selbst erhalten.
+    func releaseCachedImages() {
+        cache.removeAllObjects()
+        thumbnails.removeAllObjects()
     }
 
     /// Ob ein Original vorhanden und lesbar ist, ohne es zu dekodieren.
     /// Die Kopfdaten zu lesen reicht dafür und kostet nur Millisekunden.
     func canDisplay(named name: String) -> Bool {
-        if cache.object(forKey: name as NSString) != nil { return true }
         guard !failed.contains(name) else { return false }
         return pixelSize(named: name) != nil
     }
@@ -173,13 +253,13 @@ final class ImageStore {
         return image
     }
 
-    private func finishDecoding(_ result: DecodedPreview, for name: String) {
-        store(result, for: name)
-        let callbacks = pending.removeValue(forKey: name) ?? []
+    private func finishDecoding(_ result: DecodedPreview, for name: String, tier: Int) {
+        store(result, for: name, tier: tier)
+        let callbacks = pending.removeValue(forKey: Self.cacheKey(name, tier: tier) as String) ?? []
         for callback in callbacks { callback(name) }
     }
 
-    private func store(_ result: DecodedPreview, for name: String) {
+    private func store(_ result: DecodedPreview, for name: String, tier: Int) {
         if let size = result.pixelSize {
             pixelSizes[name] = size
         }
@@ -188,7 +268,7 @@ final class ImageStore {
             return
         }
         let cost = image.bytesPerRow * image.height
-        cache.setObject(CachedImage(image), forKey: name as NSString, cost: cost)
+        cache.setObject(CachedImage(image), forKey: Self.cacheKey(name, tier: tier), cost: cost)
     }
 
     private struct DecodedPreview: @unchecked Sendable {
@@ -197,16 +277,14 @@ final class ImageStore {
     }
 
     /// Reine Funktion ohne Zustand, damit sie auf jedem Thread laufen darf.
-    private nonisolated static func decodePreview(_ data: Data?) -> DecodedPreview {
+    private nonisolated static func decodePreview(_ data: Data?, maxPixelEdge: Int) -> DecodedPreview {
         guard let data,
               let source = CGImageSourceCreateWithData(data as CFData, nil),
               CGImageSourceGetCount(source) > 0
         else { return DecodedPreview(image: nil, pixelSize: nil) }
 
-        // 4096 Pixel reichen für jeden Bildschirm samt beherzter Vergrösserung;
-        // mehr Bildpunkte wären auf dem Bildschirm ohnehin nicht zu sehen.
         let options: [CFString: Any] = [
-            kCGImageSourceThumbnailMaxPixelSize: maximumPreviewPixelSize,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelEdge,
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             // Sofort dekodieren statt beim ersten Zeichnen: Sonst holte Core
@@ -266,7 +344,9 @@ final class ImageStore {
     }
 
     func forget(_ name: String) {
-        cache.removeObject(forKey: name as NSString)
+        for tier in Self.tiers {
+            cache.removeObject(forKey: Self.cacheKey(name, tier: tier))
+        }
         thumbnails.removeObject(forKey: name as NSString)
         pixelSizes.removeValue(forKey: name)
         failed.remove(name)

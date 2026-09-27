@@ -24,6 +24,9 @@ struct LayerRenderer {
     /// Wird aufgerufen, sobald ein im Hintergrund dekodiertes Original
     /// bereitliegt. Die Leinwand frischt dann die Ebenen auf, die es zeigen.
     var imageDidLoad: (@MainActor (String) -> Void)?
+    /// Welche Auflösungsstufe eine Bildebene braucht (siehe
+    /// `ImageStore.tiers`). Ohne Angabe gilt die volle Vorschauauflösung.
+    var tierProvider: (@MainActor (Layer) -> Int)?
 
     // MARK: - Aufbau
 
@@ -122,7 +125,8 @@ struct LayerRenderer {
             texture: layer.texture,
             content: Self.silhouetteRelevant(layer.content),
             size: renderedLayer.bounds.size,
-            imageReady: ((renderedLayer.superlayer as? ImageContentLayer)?.displayedReference) != nil
+            imageReady: ((renderedLayer.superlayer as? ImageContentLayer)?.displayedReference) != nil,
+            maxPixelEdge: Self.maxPixelEdge(of: renderedLayer)
         )
         if vorhandene != nil || layer.texture == nil,
            renderedLayer.hasRemembered(eingaben, forKey: Self.textureInputsKey) {
@@ -135,7 +139,8 @@ struct LayerRenderer {
               let gekachelt = TextureRendering.tiledImage(
                   for: textur,
                   size: renderedLayer.bounds.size,
-                  resources: images.resources
+                  resources: images.resources,
+                  maxPixelEdge: Self.maxPixelEdge(of: renderedLayer)
               )
         else {
             vorhandene?.removeFromSuperlayer()
@@ -158,14 +163,21 @@ struct LayerRenderer {
         // Die Silhouette entsteht aus einer zweiten Ausfertigung des Inhalts.
         // Bei Bildebenen zeigt sie auf dasselbe zwischengespeicherte `CGImage`,
         // kostet also keinen zweiten Dekodiervorgang.
-        let silhouette = makeContentLayer(for: layer.content)
-        silhouette.frame = CGRect(origin: .zero, size: renderedLayer.bounds.size)
-        if case .image(let image) = layer.content {
-            applyImageLayout(image, to: silhouette)
+        if case .image = layer.content {
+            // Nur der Bildinhalt bildet die Silhouette — ein Rahmen gehört
+            // nicht zur Form des Motivs. Dasselbe `CGImage` wie die Ebene
+            // selbst, also weder ein zweites Dekodieren noch zweiter Speicher.
+            let silhouette = CALayer()
+            silhouette.contents = renderedLayer.contents
+            silhouette.contentsRect = renderedLayer.contentsRect
+            silhouette.contentsGravity = .resize
+            silhouette.frame = CGRect(origin: .zero, size: renderedLayer.bounds.size)
+            schicht.mask = silhouette
+        } else {
+            let silhouette = makeContentLayer(for: layer.content)
+            silhouette.frame = CGRect(origin: .zero, size: renderedLayer.bounds.size)
+            schicht.mask = silhouette
         }
-        // Nur der Bildinhalt bildet die Silhouette — ein Rahmen gehört nicht
-        // zur Form des Motivs.
-        schicht.mask = (silhouette as? ImageContentLayer)?.bitmap ?? silhouette
     }
 
     /// Hängt die Ebenenmaske als `CALayer.mask` an (Plan 5.4).
@@ -196,10 +208,12 @@ struct LayerRenderer {
         // Die Maske entsteht aus einer PNG-Datei, die dekodiert, umgerechnet
         // und über Core Image neu gerendert wird — pro Aufruf. Beim Ziehen
         // einer maskierten Ebene geschah das bisher bei jeder Mausbewegung.
+        let obergrenze = Self.maxPixelEdge(of: maskTarget)
         let eingaben = MaskInputs(
             mask: layer.mask,
             content: Self.silhouetteRelevant(layer.content),
-            size: renderedLayer.bounds.size
+            size: renderedLayer.bounds.size,
+            maxPixelEdge: obergrenze
         )
         if maskTarget.hasRemembered(eingaben, forKey: Self.maskInputsKey) { return }
         maskTarget.remember(eingaben, forKey: Self.maskInputsKey)
@@ -208,7 +222,8 @@ struct LayerRenderer {
             for: layer,
             cropRect: ausschnitt,
             resources: images.resources,
-            displayedSize: renderedLayer.bounds.size
+            displayedSize: renderedLayer.bounds.size,
+            maxPixelEdge: obergrenze
         ) else {
             maskTarget.mask = nil
             return
@@ -240,7 +255,8 @@ struct LayerRenderer {
                contentSize: contentSize.cgSize,
                contentsScale: contentsScale,
                resources: images.resources,
-               resolution: Self.meshPreviewResolution
+               resolution: Self.meshPreviewResolution,
+               maxPixelEdge: CGFloat(ImageStore.fullTier)
            ) {
             renderedLayer.sublayers?.first { $0.name == Self.textureLayerName }?.removeFromSuperlayer()
             renderedLayer.contents = preview.image
@@ -260,6 +276,9 @@ struct LayerRenderer {
             return
         }
 
+        if let bild = renderedLayer as? ImageContentLayer {
+            bild.desiredTier = tierProvider?(layer) ?? ImageStore.fullTier
+        }
         applyContent(layer.content, to: renderedLayer)
 
         // `bounds` bleibt die *unskalierte* Inhaltsgrösse; Skalierung,
@@ -294,6 +313,7 @@ struct LayerRenderer {
         }
 
         applyEffects(layer.effects, to: renderedLayer)
+        renderedLayer.shadowPath = Self.opaqueShadowPath(of: layer, renderedLayer: renderedLayer)
         applyTexture(layer, to: (renderedLayer as? ImageContentLayer)?.bitmap ?? renderedLayer)
         applyCommonProperties(layer, to: renderedLayer)
 
@@ -319,6 +339,34 @@ struct LayerRenderer {
         renderedLayer.compositingFilter = layer.blendMode.compositingFilterName
     }
 
+    /// Der Umriss des Schattens, wenn er ohne Blick auf die Pixel feststeht.
+    ///
+    /// Ohne `shadowPath` leitet Core Animation den Schatten bei jedem Frame
+    /// aus dem Alphakanal ab — ein zusätzlicher Render-Durchgang pro Ebene,
+    /// der bei vielen Fotos mit Schatten den Compositor ausbremst. Ein
+    /// deckendes Foto ohne Maske und Formzuschnitt ist aber schlicht ein
+    /// Rechteck. Alles andere (Freisteller, Formen, Text) bleibt beim
+    /// genauen, aber teureren Weg.
+    private static func opaqueShadowPath(of layer: Layer, renderedLayer: CALayer) -> CGPath? {
+        guard renderedLayer.shadowOpacity > 0,
+              layer.mask?.isEnabled != true,
+              case .image(let inhalt) = layer.content,
+              inhalt.clipShape == nil,
+              let bild = renderedLayer as? ImageContentLayer,
+              bild.displayedReference != nil,
+              let contents = bild.bitmap.contents,
+              CFGetTypeID(contents as CFTypeRef) == CGImage.typeID
+        else { return nil }
+        // Die Laufzeitprüfung oben stellt den Typ sicher.
+        let image = contents as! CGImage // swiftlint:disable:this force_cast
+        switch image.alphaInfo {
+        case .none, .noneSkipFirst, .noneSkipLast:
+            return CGPath(rect: renderedLayer.bounds, transform: nil)
+        default:
+            return nil
+        }
+    }
+
     // MARK: - Zwischenergebnisse
 
     static let maskInputsKey = "assemblage.maskeneingaben"
@@ -328,6 +376,7 @@ struct LayerRenderer {
         let mask: LayerMask?
         let content: LayerContent
         let size: CGSize
+        let maxPixelEdge: Int
     }
 
     private struct TextureInputs: Equatable {
@@ -335,6 +384,15 @@ struct LayerRenderer {
         let content: LayerContent
         let size: CGSize
         let imageReady: Bool
+        let maxPixelEdge: Int
+    }
+
+    /// Wie fein Maske und Textur einer Schicht höchstens gerastert werden:
+    /// so fein wie das Bild darunter, nie feiner. Eine 24-Megapixel-Maske
+    /// über einer 1024er-Vorschau wäre nur verschwendeter Speicher.
+    private static func maxPixelEdge(of schicht: CALayer) -> Int {
+        let bild = (schicht as? ImageContentLayer) ?? (schicht.superlayer as? ImageContentLayer)
+        return bild?.displayedTier ?? bild?.desiredTier ?? ImageStore.fullTier
     }
 
     /// Der Inhalt ohne das, was Umriss und Maske nicht berührt. Sonst würde
@@ -418,21 +476,35 @@ struct LayerRenderer {
     }
 
     private func makeImageLayer(_ content: ImageLayerContent) -> CALayer {
-        let schicht = ImageContentLayer()
-        fillImage(content, into: schicht)
-        return schicht
+        // Gefüllt wird erst in `apply`: Dort steht fest, welche
+        // Auflösungsstufe die Ebene braucht. Vorher zu füllen, hiesse unter
+        // Umständen, dasselbe Foto zweimal in verschiedenen Grössen zu laden.
+        ImageContentLayer()
     }
 
     /// Setzt Original und Zuschnitt. Ein Bild, das die Schicht schon zeigt,
     /// wird nicht erneut beim Bildspeicher angefragt.
     private func fillImage(_ content: ImageLayerContent, into schicht: ImageContentLayer) {
         let referenz = content.originalFileReference
-        if schicht.displayedReference != referenz {
+        let stufe = images.effectiveTier(schicht.desiredTier, for: referenz)
+        let anderesBild = schicht.displayedReference != referenz
+        if anderesBild || schicht.displayedTier != stufe {
             let rueckruf = imageDidLoad
-            switch images.availability(of: referenz, whenLoaded: { name in rueckruf?(name) }) {
-            case .ready(let image): schicht.show(image, reference: referenz)
-            case .loading: schicht.showLoading()
-            case .unavailable: schicht.showMissing()
+            // Was man sieht, geht vor: ein neues Bild oder eine feinere Stufe
+            // wird vor einem blossen Abspecken dekodiert.
+            let dringend = anderesBild || stufe > (schicht.displayedTier ?? 0)
+            switch images.availability(
+                of: referenz, tier: stufe, urgent: dringend,
+                whenLoaded: { name in rueckruf?(name) }
+            ) {
+            case .ready(let image):
+                schicht.show(image, reference: referenz, tier: stufe)
+            case .loading:
+                // Beim Stufenwechsel bleibt die bisherige Fassung stehen,
+                // bis die neue da ist — sonst flackerte die Ebene beim Zoomen.
+                if anderesBild { schicht.showLoading() }
+            case .unavailable:
+                schicht.showMissing()
             }
         }
         if let pixelSize = images.pixelSize(named: referenz) {

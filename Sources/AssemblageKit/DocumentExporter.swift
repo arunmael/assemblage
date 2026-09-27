@@ -771,13 +771,20 @@ enum DocumentExporter {
         contentSize: CGSize,
         contentsScale: CGFloat,
         resources: DocumentResources,
-        resolution: Int
+        resolution: Int,
+        maxPixelEdge: CGFloat? = nil
     ) -> (image: CGImage, frame: CGRect)? {
         guard contentsScale.isFinite, contentsScale > 0 else { return nil }
-        let rasterScale = max(
-            abs(layer.transform.scaleX) * contentsScale,
-            abs(layer.transform.scaleY) * contentsScale,
-            contentsScale
+        // Ohne Obergrenze wird eine gross gezogene Ebene schnell zu einer
+        // Bitmap von 8000 × 6000 Pixeln — fast 200 MB für eine Vorschau.
+        let grenze = maxPixelEdge.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? .greatestFiniteMagnitude
+        let rasterScale = min(
+            max(
+                abs(layer.transform.scaleX) * contentsScale,
+                abs(layer.transform.scaleY) * contentsScale,
+                contentsScale
+            ),
+            grenze / max(contentSize.width, contentSize.height, 1)
         )
         let sourceSize = CGSize(
             width: (contentSize.width * rasterScale).rounded(.up),
@@ -805,16 +812,17 @@ enum DocumentExporter {
               maxX > minX, maxY > minY
         else { return nil }
 
+        let targetScale = min(contentsScale, grenze / max(maxX - minX, maxY - minY, 1))
         let targetSize = CGSize(
-            width: ((maxX - minX) * contentsScale).rounded(.up),
-            height: ((maxY - minY) * contentsScale).rounded(.up)
+            width: ((maxX - minX) * targetScale).rounded(.up),
+            height: ((maxY - minY) * targetScale).rounded(.up)
         )
         guard let targetContext = makeTransparentContext(size: targetSize) else { return nil }
         let destinationGrid = modelGrid.map { row in
             row.map {
                 CGPoint(
-                    x: ($0.x - minX) * contentsScale,
-                    y: targetSize.height - ($0.y - minY) * contentsScale
+                    x: ($0.x - minX) * targetScale,
+                    y: targetSize.height - ($0.y - minY) * targetScale
                 )
             }
         }
@@ -837,8 +845,8 @@ enum DocumentExporter {
             image,
             CGRect(
                 x: minX, y: minY,
-                width: targetSize.width / contentsScale,
-                height: targetSize.height / contentsScale
+                width: targetSize.width / targetScale,
+                height: targetSize.height / targetScale
             )
         )
     }
